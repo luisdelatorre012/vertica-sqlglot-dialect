@@ -236,30 +236,6 @@ def data_type_mapping_examples():
     print("DATA TYPE MAPPING EXAMPLES")
     print("=" * 60)
 
-    # Define comprehensive data type mappings
-    type_mappings = {
-        'vertica_to_postgres': {
-            'BYTEA': 'BYTEA',
-            'TIMESTAMPTZ': 'TIMESTAMPTZ',
-            'UUID': 'UUID',
-            'JSON': 'JSONB',
-            'ARRAY[FLOAT]': 'FLOAT[]',
-            'ARRAY[INTEGER]': 'INTEGER[]',
-            'LONG VARBINARY': 'BYTEA',
-            'LONG VARCHAR': 'TEXT'
-        },
-        'vertica_to_mysql': {
-            'BYTEA': 'LONGBLOB',
-            'TIMESTAMPTZ': 'TIMESTAMP',
-            'UUID': 'CHAR(36)',
-            'JSON': 'JSON',
-            'ARRAY[FLOAT]': 'TEXT',  # MySQL doesn't have native arrays
-            'ARRAY[INTEGER]': 'TEXT',
-            'LONG VARBINARY': 'LONGBLOB',
-            'LONG VARCHAR': 'LONGTEXT'
-        }
-    }
-
     # Example tables with various data types
     test_tables = [
         """
@@ -286,14 +262,14 @@ def data_type_mapping_examples():
     ]
 
     for table_ddl in test_tables:
-        print(f"Original Vertica DDL:")
+        print("Original Vertica DDL:")
         print(table_ddl.strip())
         print()
 
         # Convert to PostgreSQL
         try:
             postgres_ddl = transpile(table_ddl, read=Vertica, write="postgres")[0]
-            print(f"PostgreSQL equivalent:")
+            print("PostgreSQL equivalent:")
             print(postgres_ddl)
         except Exception as e:
             print(f"Error converting to PostgreSQL: {e}")
@@ -301,7 +277,7 @@ def data_type_mapping_examples():
         # Convert to MySQL
         try:
             mysql_ddl = transpile(table_ddl, read=Vertica, write="mysql")[0]
-            print(f"MySQL equivalent:")
+            print("MySQL equivalent:")
             print(mysql_ddl)
         except Exception as e:
             print(f"Error converting to MySQL: {e}")

@@ -10,7 +10,6 @@ import sys
 import os
 import time
 import subprocess
-from typing import List, Tuple
 
 # Add the parent directory to the path so we can import our dialect
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -19,17 +18,24 @@ from sqlglot import parse_one, transpile, exp
 from sqlglot_vertica.vertica import Vertica
 
 
-def run_example_script(script_name: str) -> Tuple[bool, str, float]:
+def run_example_script(script_name: str) -> tuple[bool, str, float]:
     """Run an example script and return success status, output, and execution time"""
     start_time = time.time()
     
     try:
+        # Set PYTHONIOENCODING to ensure UTF-8 is used for I/O in the subprocess.
+        # This prevents UnicodeEncodeError on Windows for characters like '✓' or '→'.
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+
         result = subprocess.run(
             [sys.executable, script_name],
             cwd=os.path.dirname(__file__),
             capture_output=True,
             text=True,
-            timeout=30
+            encoding="utf-8", # Ensures the parent decodes the stream as UTF-8
+            timeout=30,
+            env=env,
         )
         
         execution_time = time.time() - start_time
@@ -47,7 +53,7 @@ def run_example_script(script_name: str) -> Tuple[bool, str, float]:
 
 
 def quick_dialect_validation():
-    """Perform quick validation of core dialect functionality"""
+    """Perform quick validation of core dialect functionality, raising an ExceptionGroup on failure"""
     print("🔍 QUICK DIALECT VALIDATION")
     print("=" * 60)
     
@@ -64,6 +70,9 @@ def quick_dialect_validation():
         # Window functions
         ("Window functions", "SELECT emp_id, ROW_NUMBER() OVER (PARTITION BY dept_id ORDER BY salary DESC) FROM employees"),
         
+        # Deliberately invalid syntax to test error collection
+        ("Invalid Syntax", "SELECT FROM WHERE x = 1"),
+
         # Complex query
         ("Complex query", """
         WITH dept_stats AS (
@@ -81,20 +90,21 @@ def quick_dialect_validation():
         ("DDL", "CREATE TABLE test (id INTEGER PRIMARY KEY, data BYTEA, created_at TIMESTAMPTZ)"),
     ]
     
-    passed = 0
-    failed = 0
+    errors = []
     
     for test_name, sql in test_cases:
         try:
-            ast = parse_one(sql, read=Vertica)
-            generated = ast.sql(dialect=Vertica)
+            parse_one(sql, read=Vertica)
             print(f"✅ {test_name}: PASSED")
-            passed += 1
         except Exception as e:
-            print(f"❌ {test_name}: FAILED - {e}")
-            failed += 1
+            # Add metadata to the exception before collecting it
+            e.add_note(f"Failed validation for test: '{test_name}'")
+            errors.append(e)
+            
+    if errors:
+        raise ExceptionGroup("Dialect validation failed for one or more test cases", errors)
     
-    print(f"\nValidation Results: {passed} passed, {failed} failed")
+    print("\n✅ All validation cases passed!")
     print()
 
 
@@ -142,9 +152,10 @@ def demonstrate_key_features():
         "SELECT REGEXP_REPLACE(phone, '[^0-9]', '') FROM contacts"
     ]
     
+    print("\nVertica Specific Functions:")
     for sql in vertica_functions:
         try:
-            ast = parse_one(sql, read=Vertica)
+            parse_one(sql, read=Vertica)
             print(f"   ✅ {sql}")
         except Exception as e:
             print(f"   ❌ {sql} - Error: {e}")
@@ -186,7 +197,7 @@ def show_performance_summary():
     parse_time = time.time() - start_time
     avg_parse_time = (parse_time / iterations) * 1000  # Convert to milliseconds
     
-    print(f"Parse Performance:")
+    print("Parse Performance:")
     print(f"  Complex query parsing: {avg_parse_time:.2f}ms average ({iterations} iterations)")
     print(f"  Total time: {parse_time:.3f}s")
     
@@ -196,84 +207,67 @@ def show_performance_summary():
     functions = len(list(ast.find_all(exp.Func)))
     windows = len(list(ast.find_all(exp.Window)))
     
-    print(f"\nAST Complexity:")
+    print("\nAST Complexity:")
     print(f"  Tables: {tables}")
     print(f"  Functions: {functions}")
-    print(f"  Window functions: {windows}")
+    print(f"  Windows: {windows}")
     print()
 
 
 def main():
-    """Run all examples and provide comprehensive overview"""
-    print("🚀 VERTICA SQLGLOT DIALECT - COMPREHENSIVE DEMONSTRATION")
-    print("=" * 80)
-    print()
+    """Main function to run all examples and demonstrations"""
+    print("=" * 70)
+    print("VERTICA SQLGLOT DIALECT - COMPREHENSIVE DEMONSTRATION")
+    print("=" * 70)
     
-    # Quick validation first
-    quick_dialect_validation()
-    
-    # Demonstrate key features
-    demonstrate_key_features()
-    
-    # Show performance summary
-    show_performance_summary()
-    
-    # Run all example scripts
-    print("📋 RUNNING ALL EXAMPLE SCRIPTS")
-    print("=" * 60)
-    
-    example_scripts = [
-        'basic_usage.py',
-        'advanced_transformations.py', 
-        'data_migration.py',
-        'performance_analysis.py'
-    ]
-    
-    total_start = time.time()
-    results = []
-    
-    for script in example_scripts:
-        print(f"Running {script}...")
-        success, output, exec_time = run_example_script(script)
-        results.append((script, success, exec_time))
-        
-        if success:
-            print(f"  ✅ Completed successfully in {exec_time:.2f}s")
-        else:
-            print(f"  ❌ Failed after {exec_time:.2f}s")
-            print(f"  Error: {output[:200]}...")
+    # Run quick validation
+    try:
+        quick_dialect_validation()
+    except* Exception as eg:
+        print("\n❌ VALIDATION FAILED. Errors collected in ExceptionGroup:")
+        for error in eg.exceptions:
+            print(f"  - {type(error).__name__}: {error}")
+            # Notes are a Python 3.11+ feature for adding context to exceptions
+            if hasattr(error, '__notes__'):
+                for note in error.__notes__:
+                    print(f"    Note: {note}")
         print()
-    
-    total_time = time.time() - total_start
-    
-    # Summary
-    print("📊 EXECUTION SUMMARY")
+
+    # Demonstrate other key features
+    demonstrate_key_features()
+    show_performance_summary()
+
+    # Run external example scripts
+    example_scripts = [
+        'verify_metadata.py',
+        'basic_usage.py',
+        'advanced_transformations.py',
+        'performance_analysis.py',
+        'data_migration.py'
+    ]
+
+    print("\n🚀 RUNNING EXTERNAL EXAMPLE SCRIPTS")
     print("=" * 60)
-    
-    successful = sum(1 for _, success, _ in results if success)
-    total_scripts = len(results)
-    
-    print(f"Scripts executed: {total_scripts}")
-    print(f"Successful: {successful}")
-    print(f"Failed: {total_scripts - successful}")
-    print(f"Total execution time: {total_time:.2f}s")
-    print()
-    
-    print("Individual script results:")
-    for script, success, exec_time in results:
-        status = "✅ PASSED" if success else "❌ FAILED"
-        print(f"  {script:<25} {status:<10} ({exec_time:.2f}s)")
-    print()
-    
-    # Final status
-    if successful == total_scripts:
-        print("🎉 ALL EXAMPLES COMPLETED SUCCESSFULLY!")
-        print("The Vertica SQLGlot dialect is working perfectly!")
-        return 0
+
+    all_success = True
+    for script in example_scripts:
+        print(f"\n--- Running {script} ---")
+        success, output, exec_time = run_example_script(script)
+        print(output)
+        if success:
+            print(f"✓ {script} completed successfully in {exec_time:.2f}s")
+        else:
+            print(f"✗ {script} failed in {exec_time:.2f}s")
+            all_success = False
+        print("-" * (len(script) + 16))
+
+    print("\n" + "=" * 60)
+    if all_success:
+        print("✅ All example scripts ran successfully!")
     else:
-        print("⚠️  Some examples failed. Check the output above for details.")
-        return 1
+        print("❌ Some example scripts failed.")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    main() 

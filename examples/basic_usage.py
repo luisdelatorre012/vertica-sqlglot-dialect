@@ -142,7 +142,7 @@ def error_handling_examples():
         sql = "SELECT $$this is a dollar quoted string$$"
         parse_one(sql, read=Vertica)
     except ParseError as e:
-        print(f"✓ Correctly caught dollar-quoted string error:")
+        print("✓ Correctly caught dollar-quoted string error:")
         print(f"  {e}")
     print()
     
@@ -156,7 +156,7 @@ def error_handling_examples():
         """
         parse_one(sql, read=Vertica)
     except ParseError as e:
-        print(f"✓ Correctly caught LATERAL join error:")
+        print("✓ Correctly caught LATERAL join error:")
         print(f"  {e}")
     print()
     
@@ -165,7 +165,7 @@ def error_handling_examples():
         sql = "COPY table1 FROM LOCAL '/tmp/data.csv' DELIMITER ','"
         parse_one(sql, read=Vertica)
     except UnsupportedError as e:
-        print(f"✓ Correctly caught COPY FROM LOCAL error:")
+        print("✓ Correctly caught COPY FROM LOCAL error:")
         print(f"  {e}")
     print()
     
@@ -174,7 +174,7 @@ def error_handling_examples():
         sql = "SELECT '{1,2,3}'::int4multirange"
         parse_one(sql, read=Vertica)
     except ParseError as e:
-        print(f"✓ Correctly caught unsupported type error:")
+        print("✓ Correctly caught unsupported type error:")
         print(f"  {e}")
     print()
 

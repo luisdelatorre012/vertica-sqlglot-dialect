@@ -12,14 +12,13 @@ This file demonstrates performance-related functionality:
 
 import sys
 import os
-from typing import Dict, List, Set, Tuple
 import time
 from dataclasses import dataclass
 
 # Add the parent directory to the path so we can import our dialect
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from sqlglot import parse_one, transpile, exp
+from sqlglot import parse_one, exp
 from sqlglot_vertica.vertica import Vertica
 from sqlglot.optimizer import optimize
 
@@ -150,7 +149,7 @@ def query_complexity_analysis():
         print()
         
         metrics = analyze_query_complexity(query)
-        print(f"Complexity Analysis:")
+        print("Complexity Analysis:")
         print(f"  Tables: {metrics.table_count}")
         print(f"  Joins: {metrics.join_count}")
         print(f"  Subqueries: {metrics.subquery_count}")
@@ -169,7 +168,7 @@ def anti_pattern_detection():
     print("ANTI-PATTERN DETECTION")
     print("=" * 60)
     
-    def detect_anti_patterns(sql: str) -> List[str]:
+    def detect_anti_patterns(sql: str) -> list[str]:
         """Detect common SQL anti-patterns"""
         issues = []
         ast = parse_one(sql, read=Vertica)
@@ -270,21 +269,18 @@ def optimization_suggestions():
     print("OPTIMIZATION SUGGESTIONS")
     print("=" * 60)
     
-    def suggest_optimizations(sql: str) -> List[str]:
-        """Suggest optimizations for a query"""
+    def suggest_optimizations(query: str) -> str:
         suggestions = []
-        ast = parse_one(sql, read=Vertica)
-        
+        ast = parse_one(query, read=Vertica)
+
         # Analyze and suggest optimizations
-        tables = list(ast.find_all(exp.Table))
         joins = list(ast.find_all(exp.Join))
         windows = list(ast.find_all(exp.Window))
-        
+
         # 1. Index suggestions
-        for where in ast.find_all(exp.Where):
-            for col in where.find_all(exp.Column):
-                if col.table:
-                    suggestions.append(f"Consider index on {col.table}.{col.name}")
+        for col in ast.find_all(exp.Column):
+            if col.table:
+                suggestions.append(f"Consider index on {col.table}.{col.name}")
         
         # 2. Join optimization
         if len(joins) > 3:
@@ -321,7 +317,7 @@ def optimization_suggestions():
             try:
                 optimized = optimize(ast)
                 return optimized.sql(dialect=Vertica, pretty=True)
-            except:
+            except Exception:
                 # If optimization fails, just return the prettified original
                 return ast.sql(dialect=Vertica, pretty=True)
         except Exception as e:
@@ -382,7 +378,7 @@ def index_recommendation_analysis():
     print("INDEX RECOMMENDATION ANALYSIS")
     print("=" * 60)
     
-    def analyze_index_needs(queries: List[str]) -> Dict[str, Set[str]]:
+    def analyze_index_needs(queries: list[str]) -> dict[str, set[str]]:
         """Analyze multiple queries and recommend indexes"""
         index_recommendations = {}
         
@@ -447,7 +443,7 @@ def index_recommendation_analysis():
     print("📊 Index Recommendations:")
     for table, columns in recommendations.items():
         print(f"\nTable: {table}")
-        print(f"Recommended indexes:")
+        print("Recommended indexes:")
         
         # Single column indexes
         for column in columns:
@@ -456,7 +452,7 @@ def index_recommendation_analysis():
         # Composite index suggestions
         if len(columns) > 1:
             sorted_columns = sorted(columns)
-            print(f"  -- Consider composite index:")
+            print("  -- Consider composite index:")
             print(f"  CREATE INDEX idx_{table}_composite ON {table} ({', '.join(sorted_columns)});")
     
     print()
@@ -468,8 +464,9 @@ def performance_benchmarking():
     print("PERFORMANCE BENCHMARKING")
     print("=" * 60)
     
-    def benchmark_query_variants(query_variants: List[Tuple[str, str]]) -> None:
+    def benchmark_query_variants(query_variants: list[tuple[str, str]]) -> None:
         """Benchmark different approaches to the same query"""
+        iterations = 10
         
         for name, query in query_variants:
             print(f"Approach: {name}")
@@ -483,14 +480,14 @@ def performance_benchmarking():
             subqueries = len(list(ast.find_all(exp.Select))) - 1
             functions = len(list(ast.find_all(exp.Func)))
             
-            print(f"Analysis:")
+            print("Analysis:")
             print(f"  Joins: {joins}")
             print(f"  Subqueries: {subqueries}")
             print(f"  Functions: {functions}")
             
             # Simple parsing benchmark
             start_time = time.time()
-            for _ in range(100):
+            for _ in range(iterations):
                 parse_one(query, read=Vertica)
             parse_time = time.time() - start_time
             

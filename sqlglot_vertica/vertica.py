@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import typing as t
 
 from sqlglot import exp, generator, parser, tokens
 from sqlglot.dialects.dialect import (
@@ -184,13 +183,13 @@ class Vertica(Dialect):
                 self._index = saved_index
                 return super()._parse_copy()
 
-        def _parse_statement(self) -> t.Optional[exp.Expression]:
+        def _parse_statement(self) -> exp.Expression | None:
             # Check for UNLOAD statement which we want to make unsupported
             if self._curr and self._curr.token_type == TokenType.COMMAND and self._curr.text.upper() == "UNLOAD":
                 raise UnsupportedError("UNLOAD statement is not supported by Vertica (for test compliance).")
             return super()._parse_statement()
 
-        def _parse_primary(self) -> t.Optional[exp.Expression]:
+        def _parse_primary(self) -> exp.Expression | None:
             """Override to catch dollar-quoted strings and other unsupported syntax"""
             # Check for dollar-quoted strings ($$...$$)
             if self._curr and self._curr.token_type == TokenType.VAR:
@@ -201,7 +200,7 @@ class Vertica(Dialect):
             
             return super()._parse_primary()
 
-        def _parse_cast(self, strict: bool = True, safe: t.Optional[bool] = None) -> t.Optional[exp.Cast]:
+        def _parse_cast(self, strict: bool = True, safe: bool | None = None) -> exp.Cast | None:
             """Override cast parsing to catch unsupported type casts like int4multirange"""
             cast_expr = super()._parse_cast(strict, safe)
             
@@ -213,7 +212,7 @@ class Vertica(Dialect):
             
             return cast_expr
 
-        def _parse_type(self, allow_identifier: bool = True) -> t.Optional[exp.DataType]:
+        def _parse_type(self, allow_identifier: bool = True) -> exp.DataType | None:
             """Override type parsing to catch unsupported types"""
             type_expression = super()._parse_type(allow_identifier)
 
@@ -231,7 +230,7 @@ class Vertica(Dialect):
             
             return type_expression
 
-        def _parse_lateral(self) -> t.Optional[exp.Lateral]:
+        def _parse_lateral(self) -> exp.Lateral | None:
             """Override to reject LATERAL syntax"""
             if self._match(TokenType.LATERAL, advance=False):
                 self.raise_error("LATERAL joins are not supported by Vertica (for test compliance)")

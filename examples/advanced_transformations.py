@@ -11,7 +11,6 @@ This file demonstrates advanced SQLGlot functionality:
 
 import os
 import sys
-from typing import Dict, List
 
 # Add the parent directory to the path so we can import our dialect
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -164,7 +163,7 @@ def schema_analysis_examples():
     ast = parse_one(sql, read=Vertica)
     
     # Extract schema information
-    def analyze_query_schema(ast) -> Dict:
+    def analyze_query_schema(ast) -> dict:
         """Extract comprehensive schema information from query"""
         schema_info = {
             'tables': set(),
@@ -310,8 +309,8 @@ def data_lineage_tracking():
     ast = parse_one(sql, read=Vertica)
     
     # Track data flow through CTEs
-    def trace_column_lineage(ast) -> Dict[str, List[str]]:
-        """Trace where each column in the final SELECT comes from"""
+    def trace_column_lineage(ast) -> dict[str, list[str]]:
+        """Trace the lineage of output columns"""
         lineage = {}
         
         # This is a simplified lineage tracker
