@@ -1,0 +1,2 @@
+I want to create a Vertica dialect for the python package sqlglot. I want it to be full-featured on a similar to other sqlglot dialects like postgres.
+I want it to have comprehensive tests in pytest that should also be similar in quality to the tests in existing sqlglot dialects.
