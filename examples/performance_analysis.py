@@ -398,9 +398,9 @@ def index_recommendation_analysis():
                             index_recommendations[table_name].add(column_name)
             
             # Find columns used in JOIN conditions
-            for join in ast.find_all(exp.Join):
-                if hasattr(join, 'on') and join.on:
-                    for col in join.on.find_all(exp.Column):
+            for join_expr in ast.find_all(exp.Join):
+                if hasattr(join_expr, 'on') and join_expr.on:
+                    for col in join_expr.on.find_all(exp.Column):
                         if hasattr(col, 'table') and col.table:
                             table_name = str(col.table) if col.table else None
                             column_name = str(col.name) if hasattr(col, 'name') and col.name else None
