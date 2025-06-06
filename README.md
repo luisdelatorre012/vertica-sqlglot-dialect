@@ -69,13 +69,12 @@ pip install vertica-sqlglot-dialect[dev]
 ### Basic Usage
 
 ```python
-from sqlglot import transpile
-from vertica_sqlglot_dialect.vertica import Vertica
+from sqlglot import transpile, parse_one
 
 # Parse and generate Vertica SQL
 sql = "SELECT DATEADD(DAY, 1, CURRENT_DATE)"
-parsed = Vertica.parse(sql)[0]
-generated = Vertica().generate(parsed)
+parsed = parse_one(sql, read="vertica")
+generated = parsed.sql(dialect="vertica")
 print(generated)  # SELECT DATEADD(DAY, 1, CURRENT_DATE)
 
 # Transpile from other dialects to Vertica
@@ -112,8 +111,8 @@ WHERE rank <= 5
 ORDER BY region, total_sales DESC
 """
 
-parsed = Vertica.parse(complex_query)[0]
-print(parsed)
+parsed = parse_one(complex_query, read="vertica")
+print(parsed.sql("vertica", pretty=True))
 ```
 
 ### Vertica-Specific Features
@@ -121,19 +120,19 @@ print(parsed)
 ```python
 # Date functions
 sql = "SELECT DATEDIFF(DAY, '2023-01-01', '2023-12-31')"
-result = Vertica().generate(Vertica.parse(sql)[0])
+result = parse_one(sql, read="vertica").sql("vertica")
 
 # Array operations
 sql = "SELECT ARRAY[1, 2, 3, 4, 5]"
-result = Vertica().generate(Vertica.parse(sql)[0])
+result = parse_one(sql, read="vertica").sql("vertica")
 
 # Case-insensitive matching
 sql = "SELECT * FROM users WHERE name ILIKE '%john%'"
-result = Vertica().generate(Vertica.parse(sql)[0])
+result = parse_one(sql, read="vertica").sql("vertica")
 
 # Timestamp with timezone
 sql = "CREATE TABLE events (id INTEGER, created_at TIMESTAMPTZ)"
-result = Vertica().generate(Vertica.parse(sql)[0])
+result = parse_one(sql, read="vertica").sql("vertica")
 ```
 
 ## Development

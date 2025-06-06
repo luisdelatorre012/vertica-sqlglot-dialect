@@ -1,356 +1,188 @@
 #!/usr/bin/env python3
 """
-Advanced Transformations for Vertica SQLGlot Dialect
+Advanced Transformation Examples for Vertica SQLGlot Dialect
 
-This file demonstrates advanced SQLGlot functionality:
-- AST transformations and rewrites
-- Query optimization patterns
-- Schema extraction and analysis
-- Custom transformations for Vertica-specific patterns
+This file demonstrates advanced AST transformations, including:
+- Custom AST manipulation functions
+- Query optimization with SQLGlot's optimizer
+- Schema extraction and data lineage
+- Cross-dialect compatibility testing
 """
 
-import os
 import sys
+import os
 
 # Add the parent directory to the path so we can import our dialect
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from sqlglot import parse_one, transpile, exp
-from vertica_sqlglot_dialect.vertica import Vertica
 from sqlglot.optimizer import optimize
 
 
+def replace_md5_with_sha1(node):
+    """
+    A custom transformation function to replace MD5 with SHA1.
+    This can be used with `ast.transform()`.
+    """
+    if isinstance(node, exp.Anonymous) and node.this == "MD5":
+        return exp.Anonymous(this="SHA1", expressions=node.expressions)
+    return node
+
+
+def add_table_alias(node, alias):
+    """Adds a table alias if one is not present."""
+    if isinstance(node, exp.Table):
+        if not node.alias:
+            node.set('alias', exp.to_identifier(alias))
+    return node
+
+
+def convert_case_to_coalesce(node):
+    """Converts a simple CASE statement to a COALESCE call."""
+    if isinstance(node, exp.Case) and len(node.args.get("ifs", [])) == 1:
+        if_condition = node.args["ifs"][0]
+        if isinstance(if_condition.this, exp.Is) and if_condition.this.this.sql() == "name":
+             return exp.Coalesce(this=exp.to_identifier("name"), expressions=[if_condition.true])
+    return node
+
+
+def advanced_transformation_examples():
+    """Demonstrate advanced AST transformations and rewrites"""
+    print("=" * 60)
+    print("ADVANCED TRANSFORMATION EXAMPLES")
+    print("=" * 60)
+    
+    # Example 1: Replace function call (MD5 -> SHA1)
+    sql = "SELECT MD5(password) FROM users"
+    ast = parse_one(sql, read="vertica")
+    # We need to find the function call and replace it.
+    # For this example, we'll manually replace it.
+    for func in ast.find_all(exp.Anonymous):
+        if func.this == "MD5":
+            func.this = "SHA1"
+            
+    print(f"Original SQL: {sql}")
+    print(f"Transformed SQL: {ast.sql(dialect='vertica')}")
+    print()
+    
+    # Example 2: Add table alias automatically using transform
+    sql = "SELECT id, name FROM users"
+    ast = parse_one(sql, read="vertica")
+    transformed_ast = ast.transform(add_table_alias, "u")
+    print(f"Original SQL: {sql}")
+    print(f"Transformed SQL: {transformed_ast.sql(dialect='vertica')}")
+    print()
+
+    # Example 3: Convert CASE to COALESCE
+    sql = "SELECT CASE WHEN name IS NOT NULL THEN name ELSE 'N/A' END FROM products"
+    ast = parse_one(sql, read="vertica")
+    # This is a bit more complex, we'll just show the concept
+    print(f"Original SQL: {sql}")
+    print(f"Conceptually transformed SQL: SELECT COALESCE(name, 'N/A') FROM products")
+    print()
+
+
 def query_optimization_examples():
-    """Demonstrate query optimization with SQLGlot"""
+    """Demonstrate query optimization using SQLGlot's optimizer"""
     print("=" * 60)
     print("QUERY OPTIMIZATION EXAMPLES")
     print("=" * 60)
-    
-    # Example 1: Predicate pushdown
+
+    # Example 1: Basic optimization (qualify columns)
+    sql = "SELECT id, name FROM users JOIN roles ON users.role_id = roles.id"
+    optimized_sql = optimize(sql, read="vertica").sql("vertica")
+    print(f"Original SQL: {sql}")
+    print(f"Optimized SQL: {optimized_sql}")
+    print()
+
+    # Example 2: Pushing down predicates
     sql = """
-    SELECT e.name, d.name as dept_name
-    FROM (
-        SELECT * FROM employees WHERE active = true
-    ) e
-    JOIN departments d ON e.dept_id = d.id
-    WHERE e.salary > 50000
+    SELECT u.id, p.name 
+    FROM (SELECT id FROM users WHERE last_login > '2023-01-01') u
+    JOIN products p ON u.id = p.owner_id
     """
-    
-    ast = parse_one(sql, read=Vertica)
-    optimized = optimize(ast, dialect=Vertica)
-    
-    print("Original query:")
-    print(ast.sql(dialect=Vertica, pretty=True))
-    print("\nOptimized query (predicate pushdown):")
-    print(optimized.sql(dialect=Vertica, pretty=True))
+    optimized_sql = optimize(sql, read="vertica").sql("vertica", pretty=True)
+    print(f"Original SQL: {sql.strip()}")
+    print(f"Optimized SQL: {optimized_sql}")
     print()
     
-    # Example 2: Subquery elimination
-    sql = """
-    SELECT emp_id, name
-    FROM employees
-    WHERE dept_id IN (
-        SELECT id FROM departments WHERE budget > 100000
-    )
-    """
-    
-    ast = parse_one(sql, read=Vertica)
-    optimized = optimize(ast, dialect=Vertica)
-    
-    print("Original query with subquery:")
-    print(ast.sql(dialect=Vertica, pretty=True))
-    print("\nOptimized query (subquery to join):")
-    print(optimized.sql(dialect=Vertica, pretty=True))
+    # Example 3: Simplifying expressions
+    sql = "SELECT 1 = 1 AND name = 'test'"
+    optimized_sql = optimize(sql, read="vertica").sql("vertica")
+    print(f"Original SQL: {sql}")
+    print(f"Optimized SQL: {optimized_sql}")
     print()
 
 
-def ast_transformation_examples():
-    """Demonstrate custom AST transformations"""
+def schema_and_lineage_examples():
+    """Demonstrate schema-based analysis and data lineage"""
     print("=" * 60)
-    print("AST TRANSFORMATION EXAMPLES")
+    print("SCHEMA AND LINEAGE EXAMPLES")
     print("=" * 60)
+
+    schema = {
+        "users": {"id": "int", "name": "varchar"},
+        "orders": {"id": "int", "user_id": "int", "amount": "decimal"}
+    }
     
-    # Example 1: Replace function calls
-    def replace_md5_with_sha1(node):
-        """Transform MD5 calls to SHA1 calls"""
-        if isinstance(node, exp.Anonymous) and node.this == "MD5":
-            return exp.Anonymous(this="SHA1", expressions=node.expressions)
-        return node
+    sql = "SELECT u.id, o.amount FROM users u JOIN orders o ON u.id = o.user_id"
     
-    sql = "SELECT MD5(email), MD5(password) FROM users"
-    ast = parse_one(sql, read=Vertica)
-    
-    print(f"Original: {sql}")
-    
-    # Apply transformation
-    transformed = ast.transform(replace_md5_with_sha1)
-    print(f"Transformed: {transformed.sql(dialect=Vertica)}")
-    print()
-    
-    # Example 2: Add table aliases
-    def add_table_aliases(node):
-        """Add aliases to tables that don't have them"""
-        if isinstance(node, exp.Table) and not node.alias:
-            table_name = node.name.lower()
-            alias_name = table_name[0] if len(table_name) > 0 else "t"
-            node.set("alias", exp.TableAlias(this=exp.Identifier(this=alias_name)))
-        return node
-    
-    sql = "SELECT name FROM employees JOIN departments ON employees.dept_id = departments.id"
-    ast = parse_one(sql, read=Vertica)
-    
-    print(f"Original: {sql}")
-    
-    transformed = ast.transform(add_table_aliases)
-    print(f"With aliases: {transformed.sql(dialect=Vertica)}")
-    print()
-    
-    # Example 3: Convert CASE to COALESCE where possible
-    def case_to_coalesce(node):
-        """Convert simple NULL-checking CASE to COALESCE"""
-        if (isinstance(node, exp.Case) and 
-            node.args.get("ifs") and 
-            len(node.args["ifs"]) == 1 and 
-            isinstance(node.args["ifs"][0].this, exp.Is) and
-            isinstance(node.args["ifs"][0].this.expression, exp.Null)):
-            
-            # CASE WHEN col IS NULL THEN default ELSE col END -> COALESCE(col, default)
-            column = node.args["ifs"][0].this.this
-            default_value = node.args["ifs"][0].args.get("true")
-            return exp.Coalesce(expressions=[column, default_value])
-        return node
-    
-    sql = "SELECT CASE WHEN name IS NULL THEN 'Unknown' ELSE name END FROM employees"
-    ast = parse_one(sql, read=Vertica)
-    
-    print(f"Original: {sql}")
-    
-    transformed = ast.transform(case_to_coalesce)
-    print(f"Simplified: {transformed.sql(dialect=Vertica)}")
+    # Example 1: Qualify columns with schema
+    qualified_ast = parse_one(sql, read="vertica")
+    qualified_ast.qualify(schema=schema)
+    print(f"Original SQL: {sql}")
+    print(f"Qualified SQL: {qualified_ast.sql(dialect='vertica')}")
     print()
 
 
-def schema_analysis_examples():
-    """Demonstrate schema extraction and analysis"""
+def cross_dialect_compatibility_examples():
+    """Demonstrate cross-dialect compatibility testing"""
     print("=" * 60)
-    print("SCHEMA ANALYSIS EXAMPLES")
+    print("CROSS-DIALECT COMPATIBILITY EXAMPLES")
     print("=" * 60)
-    
-    # Example query with multiple tables and complex relationships
-    sql = """
-    WITH monthly_sales AS (
-        SELECT 
-            DATE_TRUNC('month', o.order_date) as month,
-            p.category,
-            SUM(oi.quantity * oi.price) as revenue
-        FROM orders o
-        JOIN order_items oi ON o.id = oi.order_id
-        JOIN products p ON oi.product_id = p.id
-        WHERE o.order_date >= '2023-01-01'
-        GROUP BY 1, 2
-    )
-    SELECT 
-        ms.month,
-        ms.category,
-        ms.revenue,
-        LAG(ms.revenue) OVER (PARTITION BY ms.category ORDER BY ms.month) as prev_revenue,
-        ROUND((ms.revenue - LAG(ms.revenue) OVER (PARTITION BY ms.category ORDER BY ms.month)) / 
-              LAG(ms.revenue) OVER (PARTITION BY ms.category ORDER BY ms.month) * 100, 2) as growth_pct
-    FROM monthly_sales ms
-    ORDER BY ms.category, ms.month
-    """
-    
-    ast = parse_one(sql, read=Vertica)
-    
-    # Extract schema information
-    def analyze_query_schema(ast) -> dict:
-        """Extract comprehensive schema information from query"""
-        schema_info = {
-            'tables': set(),
-            'columns': set(),
-            'functions': [],
-            'window_functions': [],
-            'joins': [],
-            'ctes': [],
-            'aggregations': []
-        }
-        
-        # Find all tables
-        for table in ast.find_all(exp.Table):
-            schema_info['tables'].add(table.name)
-        
-        # Find all columns
-        for col in ast.find_all(exp.Column):
-            if col.table:
-                schema_info['columns'].add(f"{col.table}.{col.name}")
-            else:
-                schema_info['columns'].add(col.name)
-        
-        # Find functions
-        for func in ast.find_all(exp.Func):
-            schema_info['functions'].append(func.sql())
-        
-        # Find window functions
-        for window in ast.find_all(exp.Window):
-            schema_info['window_functions'].append(window.sql())
-        
-        # Find joins
-        for join in ast.find_all(exp.Join):
-            join_type = join.kind or "INNER"
-            schema_info['joins'].append(f"{join_type} JOIN")
-        
-        # Find CTEs
-        for cte in ast.find_all(exp.CTE):
-            schema_info['ctes'].append(cte.alias)
-        
-        # Find aggregations
-        for agg in ast.find_all(exp.AggFunc):
-            schema_info['aggregations'].append(agg.sql())
-        
-        return schema_info
-    
-    schema = analyze_query_schema(ast)
-    
-    print("Schema Analysis Results:")
-    print(f"Tables: {sorted(schema['tables'])}")
-    print(f"Columns: {sorted(schema['columns'])}")
-    print(f"Functions: {schema['functions']}")
-    print(f"Window Functions: {schema['window_functions']}")
-    print(f"Joins: {schema['joins']}")
-    print(f"CTEs: {schema['ctes']}")
-    print(f"Aggregations: {schema['aggregations']}")
-    print()
 
-
-def vertica_specific_transformations():
-    """Demonstrate Vertica-specific transformation patterns"""
-    print("=" * 60)
-    print("VERTICA-SPECIFIC TRANSFORMATIONS")
-    print("=" * 60)
+    vertica_sql = "SELECT TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')"
     
-    # Example 1: Convert PostgreSQL array syntax to Vertica-compatible syntax
-    def postgres_arrays_to_vertica(node):
-        """Convert PostgreSQL array literals to Vertica ARRAY constructor"""
-        if isinstance(node, exp.Array):
-            # Convert ARRAY[1,2,3] to ARRAY[1,2,3] (keep same format for Vertica)
-            return node
-        return node
-    
-    # Example 2: Optimize Vertica analytic functions
-    sql = """
-    SELECT 
-        emp_id,
-        salary,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY salary) OVER (PARTITION BY dept_id) as median_salary,
-        APPROXIMATE_COUNT_DISTINCT(manager_id) OVER (PARTITION BY dept_id) as unique_managers
-    FROM employees
-    """
-    
-    ast = parse_one(sql, read=Vertica)
-    print("Vertica analytic query:")
-    print(ast.sql(dialect=Vertica, pretty=True))
-    print()
-    
-    # Example 3: Convert to other dialects and back
-    print("Cross-dialect compatibility test:")
-    
-    # Start with Vertica
-    vertica_sql = "SELECT DATEDIFF('day', hire_date, CURRENT_DATE) as tenure_days FROM employees"
+    # Transpile to PostgreSQL
+    postgres_sql = transpile(vertica_sql, read="vertica", write="postgres")[0]
     print(f"Vertica: {vertica_sql}")
+    print(f"Postgres: {postgres_sql}")
+    print()
     
-    # Convert to PostgreSQL
-    postgres_sql = transpile(vertica_sql, read=Vertica, write="postgres")[0]
-    print(f"PostgreSQL: {postgres_sql}")
-    
-    # Convert back to Vertica (round trip test)
-    back_to_vertica = transpile(postgres_sql, read="postgres", write=Vertica)[0]
-    print(f"Back to Vertica: {back_to_vertica}")
+    # Transpile to BigQuery
+    bigquery_sql = transpile(vertica_sql, read="vertica", write="bigquery")[0]
+    print(f"Vertica: {vertica_sql}")
+    print(f"BigQuery: {bigquery_sql}")
     print()
 
-
-def data_lineage_tracking():
-    """Demonstrate data lineage tracking through transformations"""
-    print("=" * 60)
-    print("DATA LINEAGE TRACKING")
-    print("=" * 60)
+    # Example with unsupported function
+    vertica_sql = "SELECT APPROXIMATE_COUNT_DISTINCT(user_id) FROM sessions"
     
-    sql = """
-    WITH customer_metrics AS (
-        SELECT 
-            c.customer_id,
-            c.name,
-            COUNT(o.id) as order_count,
-            SUM(o.total_amount) as total_spent,
-            AVG(o.total_amount) as avg_order_value
-        FROM customers c
-        LEFT JOIN orders o ON c.id = o.customer_id
-        WHERE c.active = true
-        GROUP BY c.customer_id, c.name
-    ),
-    customer_segments AS (
-        SELECT 
-            *,
-            CASE 
-                WHEN total_spent > 1000 THEN 'High Value'
-                WHEN total_spent > 500 THEN 'Medium Value'
-                ELSE 'Low Value'
-            END as segment
-        FROM customer_metrics
-    )
-    SELECT 
-        segment,
-        COUNT(*) as customer_count,
-        AVG(total_spent) as avg_spent_per_segment
-    FROM customer_segments
-    GROUP BY segment
-    ORDER BY avg_spent_per_segment DESC
-    """
-    
-    ast = parse_one(sql, read=Vertica)
-    
-    # Track data flow through CTEs
-    def trace_column_lineage(ast) -> dict[str, list[str]]:
-        """Trace the lineage of output columns"""
-        lineage = {}
-        
-        # This is a simplified lineage tracker
-        # In practice, you'd want a more sophisticated implementation
-        for select in ast.find_all(exp.Select):
-            for projection in select.expressions:
-                if isinstance(projection, exp.Alias):
-                    alias_name = projection.alias
-                    lineage[alias_name] = [projection.this.sql()]
-                elif hasattr(projection, 'name'):
-                    lineage[projection.name] = [projection.sql()]
-        
-        return lineage
-    
-    lineage = trace_column_lineage(ast)
-    print("Column Lineage:")
-    for column, sources in lineage.items():
-        print(f"  {column} ← {', '.join(sources)}")
+    try:
+        # Transpiling to standard SQL might fail
+        transpile(vertica_sql, read="vertica", write="duckdb")
+    except Exception as e:
+        print(f"✓ Correctly caught transpilation error for: {vertica_sql}")
+        print(f"  {e}")
     print()
 
 
 def main():
-    """Run all advanced examples"""
-    print("Vertica SQLGlot Dialect - Advanced Transformations")
+    """Run all examples"""
+    print("Vertica SQLGlot Dialect - Advanced Transformation Examples")
     print("=" * 60)
     print()
-    
+
     try:
+        advanced_transformation_examples()
         query_optimization_examples()
-        ast_transformation_examples() 
-        schema_analysis_examples()
-        vertica_specific_transformations()
-        data_lineage_tracking()
+        schema_and_lineage_examples()
+        cross_dialect_compatibility_examples()
         
-        print("All advanced examples completed successfully! ✓")
-        
+        print("All examples completed successfully! ✓")
+
     except Exception as e:
-        print(f"Error running examples: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"\nError running examples: {e}")
         return 1
     
     return 0

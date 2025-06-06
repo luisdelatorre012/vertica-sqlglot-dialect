@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vertica-sqlglot-dialect"
-version = "0.1.5"
+version = "0.1.6"
 description = "Vertica SQL dialect implementation for sqlglot"
 readme = "README.md"
 license = "MIT"
