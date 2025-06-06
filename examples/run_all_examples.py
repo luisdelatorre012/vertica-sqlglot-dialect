@@ -15,7 +15,7 @@ import subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from sqlglot import parse_one, transpile, exp
-from sqlglot_vertica.vertica import Vertica
+from vertica_sqlglot_dialect import Vertica
 
 
 def run_example_script(script_name: str) -> tuple[bool, str, float]:

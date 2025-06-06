@@ -16,10 +16,14 @@ from __future__ import annotations
 
 import itertools
 import textwrap
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import pytest
 from sqlglot import ParseError, UnsupportedError, parse_one
-from sqlglot_vertica.vertica import Vertica
+from vertica_sqlglot_dialect.vertica import Vertica
 
 # ╔══════════════════════════════════════════════════════════════════════╗
 # ║  CONSTANT BATTERIES USED FOR PARAMETRISED TESTS                      ║

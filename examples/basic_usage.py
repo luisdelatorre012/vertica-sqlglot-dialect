@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from sqlglot import parse_one, transpile, exp
 from sqlglot.errors import ParseError, UnsupportedError
+from vertica_sqlglot_dialect import Vertica
 
 
 def basic_parsing_examples():
@@ -27,10 +28,10 @@ def basic_parsing_examples():
     
     # Example 1: Basic SELECT with Vertica functions
     sql = "SELECT DATEADD(day, 7, hire_date), MD5(email) FROM employees"
-    ast = parse_one(sql, read="vertica")
+    ast = parse_one(sql, read=Vertica)
     print(f"Original SQL: {sql}")
     print(f"Parsed AST type: {type(ast).__name__}")
-    print(f"Generated SQL: {ast.sql(dialect='vertica')}")
+    print(f"Generated SQL: {ast.sql(dialect=Vertica)}")
     print()
     
     # Example 2: Window functions with Vertica syntax
@@ -41,14 +42,14 @@ def basic_parsing_examples():
         ROW_NUMBER() OVER (PARTITION BY dept ORDER BY salary DESC) as rank
     FROM employees
     """
-    ast = parse_one(sql, read="vertica")
-    print(f"Window function SQL: {ast.sql(dialect='vertica', pretty=True)}")
+    ast = parse_one(sql, read=Vertica)
+    print(f"Window function SQL: {ast.sql(dialect=Vertica, pretty=True)}")
     print()
     
     # Example 3: Vertica-specific data types
     sql = "CREATE TABLE test (id INTEGER, data BYTEA, ts TIMESTAMPTZ)"
-    ast = parse_one(sql, read="vertica")
-    print(f"DDL with Vertica types: {ast.sql(dialect='vertica')}")
+    ast = parse_one(sql, read=Vertica)
+    print(f"DDL with Vertica types: {ast.sql(dialect=Vertica)}")
     print()
 
 
@@ -62,8 +63,8 @@ def dialect_transpilation_examples():
     vertica_sql = "SELECT TO_CHAR(hire_date, 'YYYY-MM-DD'), ILIKE(name, 'John%') FROM employees"
     
     # Transpile to different dialects
-    postgres_sql = transpile(vertica_sql, read="vertica", write="postgres")[0]
-    mysql_sql = transpile(vertica_sql, read="vertica", write="mysql")[0]
+    postgres_sql = transpile(vertica_sql, read=Vertica, write="postgres")[0]
+    mysql_sql = transpile(vertica_sql, read=Vertica, write="mysql")[0]
     
     print(f"Original Vertica SQL:\n  {vertica_sql}")
     print(f"PostgreSQL equivalent:\n  {postgres_sql}")
@@ -73,7 +74,7 @@ def dialect_transpilation_examples():
     # Example 2: Converting date functions
     vertica_sql = "SELECT DATEDIFF(day, start_date, end_date) as duration FROM projects"
     
-    postgres_sql = transpile(vertica_sql, read="vertica", write="postgres")[0]
+    postgres_sql = transpile(vertica_sql, read=Vertica, write="postgres")[0]
     print(f"Vertica DATEDIFF:\n  {vertica_sql}")
     print(f"PostgreSQL equivalent:\n  {postgres_sql}")
     print()
@@ -87,7 +88,7 @@ def dialect_transpilation_examples():
     
     print("Batch transpilation to PostgreSQL:")
     for i, query in enumerate(vertica_queries, 1):
-        postgres_query = transpile(query, read="vertica", write="postgres")[0]
+        postgres_query = transpile(query, read=Vertica, write="postgres")[0]
         print(f"  {i}. {query}")
         print(f"     → {postgres_query}")
     print()
@@ -110,7 +111,7 @@ def ast_inspection_examples():
     ORDER BY emp.name
     """
     
-    ast = parse_one(sql, read="vertica")
+    ast = parse_one(sql, read=Vertica)
     
     # Extract table names
     tables = [table.name for table in ast.find_all(exp.Table)]
@@ -139,7 +140,7 @@ def error_handling_examples():
     # Example 1: Dollar-quoted strings (unsupported)
     try:
         sql = "SELECT $$this is a dollar quoted string$$"
-        parse_one(sql, read="vertica")
+        parse_one(sql, read=Vertica)
     except ParseError as e:
         print("✓ Correctly caught dollar-quoted string error:")
         print(f"  {e}")
@@ -153,7 +154,7 @@ def error_handling_examples():
             SELECT * FROM orders WHERE user_id = u.id LIMIT 1
         ) o ON true
         """
-        parse_one(sql, read="vertica")
+        parse_one(sql, read=Vertica)
     except ParseError as e:
         print("✓ Correctly caught LATERAL join error:")
         print(f"  {e}")
@@ -162,7 +163,7 @@ def error_handling_examples():
     # Example 3: COPY FROM LOCAL (unsupported)
     try:
         sql = "COPY table1 FROM LOCAL '/tmp/data.csv' DELIMITER ','"
-        parse_one(sql, read="vertica")
+        parse_one(sql, read=Vertica)
     except UnsupportedError as e:
         print("✓ Correctly caught COPY FROM LOCAL error:")
         print(f"  {e}")
@@ -171,7 +172,7 @@ def error_handling_examples():
     # Example 4: Unsupported data types
     try:
         sql = "SELECT '{1,2,3}'::int4multirange"
-        parse_one(sql, read="vertica")
+        parse_one(sql, read=Vertica)
     except ParseError as e:
         print("✓ Correctly caught unsupported type error:")
         print(f"  {e}")

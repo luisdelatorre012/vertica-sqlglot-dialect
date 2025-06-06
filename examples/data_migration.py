@@ -17,8 +17,9 @@ import concurrent.futures
 # Add the parent directory to the path so we can import our dialect
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from sqlglot import transpile, parse_one
+from sqlglot import transpile
 from sqlglot.errors import ParseError, UnsupportedError
+from vertica_sqlglot_dialect import Vertica
 
 
 def migrate_ddl(vertica_ddl, target_dialect="postgres"):
@@ -26,7 +27,7 @@ def migrate_ddl(vertica_ddl, target_dialect="postgres"):
     try:
         transpiled_ddls = transpile(
             vertica_ddl,
-            read="vertica",
+            read=Vertica,
             write=target_dialect,
             pretty=True
         )
@@ -41,7 +42,7 @@ def migrate_query(vertica_query, target_dialect="postgres"):
     try:
         transpiled_query = transpile(
             vertica_query,
-            read="vertica",
+            read=Vertica,
             write=target_dialect,
             pretty=True
         )[0]

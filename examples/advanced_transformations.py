@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Advanced Transformation Examples for Vertica SQLGlot Dialect
+Advanced Transformations Examples for Vertica SQLGlot Dialect
 
-This file demonstrates advanced AST transformations, including:
-- Custom AST manipulation functions
-- Query optimization with SQLGlot's optimizer
-- Schema extraction and data lineage
-- Cross-dialect compatibility testing
+This file demonstrates advanced SQL transformations using the Vertica dialect:
+- Complex query rewrites
+- Query optimization
+- Schema transformations
+- Custom transformations
 """
 
 import sys
@@ -16,7 +16,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from sqlglot import parse_one, transpile, exp
-from sqlglot.optimizer import optimize
+from vertica_sqlglot_dialect import Vertica
 
 
 def replace_md5_with_sha1(node):
@@ -54,7 +54,7 @@ def advanced_transformation_examples():
     
     # Example 1: Replace function call (MD5 -> SHA1)
     sql = "SELECT MD5(password) FROM users"
-    ast = parse_one(sql, read="vertica")
+    ast = parse_one(sql, read=Vertica)
     # We need to find the function call and replace it.
     # For this example, we'll manually replace it.
     for func in ast.find_all(exp.Anonymous):
@@ -67,7 +67,7 @@ def advanced_transformation_examples():
     
     # Example 2: Add table alias automatically using transform
     sql = "SELECT id, name FROM users"
-    ast = parse_one(sql, read="vertica")
+    ast = parse_one(sql, read=Vertica)
     transformed_ast = ast.transform(add_table_alias, "u")
     print(f"Original SQL: {sql}")
     print(f"Transformed SQL: {transformed_ast.sql(dialect='vertica')}")
@@ -75,42 +75,10 @@ def advanced_transformation_examples():
 
     # Example 3: Convert CASE to COALESCE
     sql = "SELECT CASE WHEN name IS NOT NULL THEN name ELSE 'N/A' END FROM products"
-    ast = parse_one(sql, read="vertica")
+    ast = parse_one(sql, read=Vertica)
     # This is a bit more complex, we'll just show the concept
     print(f"Original SQL: {sql}")
-    print(f"Conceptually transformed SQL: SELECT COALESCE(name, 'N/A') FROM products")
-    print()
-
-
-def query_optimization_examples():
-    """Demonstrate query optimization using SQLGlot's optimizer"""
-    print("=" * 60)
-    print("QUERY OPTIMIZATION EXAMPLES")
-    print("=" * 60)
-
-    # Example 1: Basic optimization (qualify columns)
-    sql = "SELECT id, name FROM users JOIN roles ON users.role_id = roles.id"
-    optimized_sql = optimize(sql, read="vertica").sql("vertica")
-    print(f"Original SQL: {sql}")
-    print(f"Optimized SQL: {optimized_sql}")
-    print()
-
-    # Example 2: Pushing down predicates
-    sql = """
-    SELECT u.id, p.name 
-    FROM (SELECT id FROM users WHERE last_login > '2023-01-01') u
-    JOIN products p ON u.id = p.owner_id
-    """
-    optimized_sql = optimize(sql, read="vertica").sql("vertica", pretty=True)
-    print(f"Original SQL: {sql.strip()}")
-    print(f"Optimized SQL: {optimized_sql}")
-    print()
-    
-    # Example 3: Simplifying expressions
-    sql = "SELECT 1 = 1 AND name = 'test'"
-    optimized_sql = optimize(sql, read="vertica").sql("vertica")
-    print(f"Original SQL: {sql}")
-    print(f"Optimized SQL: {optimized_sql}")
+    print("Conceptually transformed SQL: SELECT COALESCE(name, 'N/A') FROM products")
     print()
 
 
@@ -128,7 +96,7 @@ def schema_and_lineage_examples():
     sql = "SELECT u.id, o.amount FROM users u JOIN orders o ON u.id = o.user_id"
     
     # Example 1: Qualify columns with schema
-    qualified_ast = parse_one(sql, read="vertica")
+    qualified_ast = parse_one(sql, read=Vertica)
     qualified_ast.qualify(schema=schema)
     print(f"Original SQL: {sql}")
     print(f"Qualified SQL: {qualified_ast.sql(dialect='vertica')}")
@@ -175,7 +143,6 @@ def main():
 
     try:
         advanced_transformation_examples()
-        query_optimization_examples()
         schema_and_lineage_examples()
         cross_dialect_compatibility_examples()
         

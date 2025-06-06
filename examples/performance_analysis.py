@@ -2,31 +2,29 @@
 """
 Performance Analysis Examples for Vertica SQLGlot Dialect
 
-This file provides examples of how to analyze SQL queries for performance
-issues, including:
-- Calculating query complexity metrics
-- Detecting common performance anti-patterns
-- Suggesting optimizations
+This file demonstrates how to use the Vertica dialect for SQL performance analysis:
+- Query complexity analysis
+- Execution plan generation
+- Performance optimization suggestions
+- Resource usage estimation
 """
 
 import sys
 import os
 import json
-import hashlib
-from collections import defaultdict
-import time
 
 # Add the parent directory to the path so we can import our dialect
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from sqlglot import parse_one, exp
+from vertica_sqlglot_dialect import Vertica
 
 
 def analyze_query_complexity(sql, dialect="vertica"):
     """
     Analyzes a SQL query and returns a set of complexity metrics.
     """
-    ast = parse_one(sql, read=dialect)
+    ast = parse_one(sql, read=Vertica)
     if not ast:
         return {"error": "Could not parse SQL"}
 
@@ -44,7 +42,7 @@ def detect_performance_anti_patterns(sql, dialect="vertica"):
     """
     Detects common performance anti-patterns in a SQL query.
     """
-    ast = parse_one(sql, read=dialect)
+    ast = parse_one(sql, read=Vertica)
     if not ast:
         return ["Could not parse SQL"]
 
@@ -67,7 +65,7 @@ def suggest_optimizations(sql, dialect="vertica"):
     """
     Suggests potential optimizations for a given SQL query.
     """
-    ast = parse_one(sql, read=dialect)
+    ast = parse_one(sql, read=Vertica)
     if not ast:
         return ["Could not parse SQL"]
 
