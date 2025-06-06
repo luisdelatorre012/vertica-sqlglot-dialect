@@ -46,6 +46,9 @@ Documentation = "https://github.com/luisdelatorre/vertica-sqlglot-dialect#readme
 where = ["."]
 include = ["sqlglot_vertica*"]
 
+[tool.setuptools.package-data]
+"sqlglot_vertica" = ["examples/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
