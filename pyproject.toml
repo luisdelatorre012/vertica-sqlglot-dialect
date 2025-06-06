@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vertica-sqlglot-dialect"
-version = "0.1.1"
+version = "0.1.2"
 description = "Vertica SQL dialect implementation for sqlglot"
 readme = "README.md"
 license = "MIT"
@@ -42,12 +42,12 @@ Repository = "https://github.com/luisdelatorre/vertica-sqlglot-dialect"
 Issues = "https://github.com/luisdelatorre/vertica-sqlglot-dialect/issues"
 Documentation = "https://github.com/luisdelatorre/vertica-sqlglot-dialect#readme"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["sqlglot_vertica*"]
+[tool.setuptools]
+packages = ["vertica_sqlglot_dialect", "examples"]
 
 [tool.setuptools.package-data]
-"sqlglot_vertica" = ["examples/*"]
+"vertica_sqlglot_dialect" = ["py.typed"]
+"examples" = ["*.py", "*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
