@@ -16,7 +16,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from sqlglot import parse_one, transpile, exp
-from sqlglot_vertica.vertica import Vertica
+from vertica_sqlglot_dialect.vertica import Vertica
+from sqlglot.errors import ParseError, UnsupportedError
+import concurrent.futures
 
 
 def ddl_migration_examples():
