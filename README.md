@@ -56,12 +56,12 @@ This Vertica dialect provides full-featured support for Vertica SQL syntax, incl
 ## Installation
 
 ```bash
-pip install sqlglot-vertica
+pip install vertica-sqlglot-dialect
 ```
 
 For development:
 ```bash
-pip install sqlglot-vertica[dev]
+pip install vertica-sqlglot-dialect[dev]
 ```
 
 ## Usage
@@ -70,7 +70,7 @@ pip install sqlglot-vertica[dev]
 
 ```python
 from sqlglot import transpile
-from sqlglot_vertica.vertica import Vertica
+from vertica_sqlglot_dialect.vertica import Vertica
 
 # Parse and generate Vertica SQL
 sql = "SELECT DATEADD(DAY, 1, CURRENT_DATE)"
@@ -141,8 +141,8 @@ result = Vertica().generate(Vertica.parse(sql)[0])
 ### Setup Development Environment
 
 ```bash
-git clone https://github.com/luisdelatorre/sqlglot-vertica.git
-cd sqlglot-vertica
+git clone https://github.com/luisdelatorre/vertica-sqlglot-dialect.git
+cd vertica-sqlglot-dialect
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -e .[dev]
@@ -155,7 +155,7 @@ pip install -e .[dev]
 pytest
 
 # Run with coverage
-pytest --cov=sqlglot_vertica
+pytest --cov=vertica_sqlglot_dialect
 
 # Run specific test file
 pytest tests/test_vertica.py
@@ -168,13 +168,13 @@ pytest tests/test_vertica.py::TestVertica::test_vertica_date_functions
 
 ```bash
 # Format code
-black sqlglot_vertica tests
+black vertica_sqlglot_dialect tests
 
 # Sort imports
-isort sqlglot_vertica tests
+isort vertica_sqlglot_dialect tests
 
 # Type checking
-mypy sqlglot_vertica
+mypy vertica_sqlglot_dialect
 ```
 
 ## Testing
