@@ -19,7 +19,10 @@ The current development baseline is:
 
 - OpenText Analytics Database / Vertica 26.2 SQL
 - SQLGlot 30.13.x
-- Python 3.9 through 3.13
+- Python 3.9 through 3.15
+
+Python 3.15 support is tested against the latest available prerelease until
+CPython 3.15 reaches general availability.
 
 The SQLGlot dependency is intentionally bounded to one minor line because
 dialect parser/generator subclass APIs can change between minor releases. The

@@ -7,6 +7,8 @@ plugin interface.
 
 - Added entry-point discovery and a bounded SQLGlot 30.13.x compatibility
   contract.
+- Added tested CPython 3.14 and 3.15 prerelease compatibility, including
+  prerelease-aware CI and installed-wheel smoke coverage for both runtimes.
 - Added stable Vertica AST nodes for syntax that cannot be represented by the
   canonical SQLGlot tree without semantic loss.
 - Added native ARRAY, SET, ROW, and qualified INTERVAL parsing and generation.
