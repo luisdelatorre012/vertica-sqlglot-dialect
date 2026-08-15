@@ -1,0 +1,159 @@
+# Specification sources
+
+The implementation baseline is OpenText Analytics Database 26.2. The links
+below are the primary grammar and semantics sources used to design AST nodes
+and regression fixtures. Older-version links are used only where the 26.2 page
+is not yet indexed; those rules are checked against the current navigation and
+called out in code review.
+
+## Language and expressions
+
+- [SQL language elements](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/)
+- [Mathematical operators](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/operators/mathematical-operators/)
+- [Optimizer hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/)
+- [ARRAY](https://docs.vertica.com/26.2.x/en/sql-reference/data-types/complex-types/array/)
+- [SET](https://docs.vertica.com/26.2.x/en/sql-reference/data-types/complex-types/set/)
+- [ROW](https://docs.vertica.com/26.2.x/en/sql-reference/data-types/complex-types/row/)
+- [INTERVAL](https://docs.vertica.com/26.2.x/en/sql-reference/data-types/datetime-data-types/interval/)
+- [Interval qualifier](https://docs.vertica.com/23.4.x/en/sql-reference/language-elements/literals/datetime-literals/interval-literal/interval-qualifier/)
+
+## Query extensions and functions
+
+- [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
+- [TIMESERIES](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/timeseries-clause/)
+- [INTERPOLATE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/predicates/interpolate/)
+- [MATCH](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/match-clause/)
+- [LIMIT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/limit-clause/)
+- [GETDATE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/datetime-functions/getdate/)
+- [CURRENT_TIMESTAMP](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/datetime-functions/current-timestamp/)
+- [DATEDIFF](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/datetime-functions/datediff/)
+- [TIMESTAMPADD](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/datetime-functions/timestampadd/)
+- [TIME_SLICE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/datetime-functions/time-slice/)
+- [Locale-aware string functions](https://docs.vertica.com/26.2.x/en/admin/about-locale/locale-aware-string-functions/)
+- [CHARACTER_LENGTH](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/string-functions/character-length/)
+- [INSTR](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/string-functions/instr/)
+- [OVERLAY](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/string-functions/overlay/)
+- [POSITION](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/string-functions/position/)
+- [SUBSTRING](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/string-functions/substring/)
+- [REGEXP_LIKE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/match-and-search-functions/regular-expression-functions/regexp-like/)
+- [Collection functions](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/collection-functions/)
+- [EXPLODE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/collection-functions/explode/)
+- [FILTER](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/collection-functions/filter/)
+- [TO_CHAR](https://docs.vertica.com/26.2.x/en/sql-reference/functions/formatting-functions/to-char/)
+- [TO_HEX](https://docs.vertica.com/26.2.x/en/sql-reference/functions/formatting-functions/to-hex/)
+- [TO_NUMBER](https://docs.vertica.com/26.2.x/en/sql-reference/functions/formatting-functions/to-number/)
+- [MAPLOOKUP](https://docs.vertica.com/26.2.x/en/sql-reference/functions/flex-functions/flex-map-functions/maplookup/)
+- [APPROXIMATE_PERCENTILE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/aggregate-functions/approximate-percentile-aggregate/)
+- [STV_Describe_Index parameter-only calls](https://docs.vertica.com/26.2.x/en/sql-reference/functions/geospatial-functions/stv-describe-index/)
+- [Window partition clause](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/window-clauses/window-partition-clause/)
+- [FIRST_VALUE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/analytic-functions/first-value-analytic/)
+- [NTH_VALUE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/analytic-functions/nth-value-analytic/)
+
+## Directed queries
+
+- [SAVE QUERY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/save-query/)
+- [GET DIRECTED QUERY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/get-directed-query/)
+- [CREATE DIRECTED QUERY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-directed-query/)
+- [ACTIVATE DIRECTED QUERY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/activate-directed-query/)
+- [DEACTIVATE DIRECTED QUERY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/deactivate-directed-query/)
+- [DROP DIRECTED QUERY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-directed-query/)
+- [Managing directed queries](https://docs.vertica.com/26.2.x/en/admin/managing-queries/directed-queries/managing-directed-queries/)
+- [Setting hints on annotated queries](https://docs.vertica.com/26.2.x/en/admin/managing-queries/directed-queries/setting-hints-annotated-queries/)
+- [Ignoring constants](https://docs.vertica.com/26.2.x/en/admin/managing-queries/directed-queries/ignoring-constants-directed-queries/)
+- [`:c` annotation](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/c/)
+- [`:v` annotation](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/v/)
+- [Directed-query restrictions](https://docs.vertica.com/26.2.x/en/admin/managing-queries/directed-queries/directed-query-restrictions/)
+
+## Statements and physical design
+
+- [COPY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/copy/)
+- [COPY parameters](https://docs.vertica.com/26.2.x/en/sql-reference/statements/copy/parameters/)
+- [ORC parser](https://docs.vertica.com/26.2.x/en/sql-reference/statements/copy/parsers/orc/)
+- [Parquet parser](https://docs.vertica.com/26.2.x/en/sql-reference/statements/copy/parsers/parquet/)
+- [CREATE EXTERNAL TABLE AS COPY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-external-table-as-copy/)
+- [CREATE FLEXIBLE EXTERNAL TABLE AS COPY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-flexible-external-table-as-copy/)
+- [CREATE EXTERNAL TABLE ICEBERG](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-external-table-iceberg/)
+- [Bulk loading into flex tables](https://docs.vertica.com/26.2.x/en/flex-tables/bulk-loading-data-into-flex-tables/)
+- [User-defined load architecture](https://docs.vertica.com/26.2.x/en/extending/developing-udxs/user-defined-load-udl/)
+- [CREATE PROCEDURE (external)](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-procedure-external/)
+- [DROP PROCEDURE (external)](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-procedure-external/)
+- [CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/)
+- [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/)
+- [CREATE PROJECTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-projection/)
+- [Hash segmentation](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-projection/hash-segmentation-clause/)
+- [CREATE SEQUENCE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-sequence/)
+- [ALTER SEQUENCE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-sequence/)
+- [DROP SEQUENCE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-sequence/)
+- [CREATE SCHEMA](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-schema/)
+- [CREATE VIEW](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-view/)
+- [INSERT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/insert/)
+- [UPDATE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/update/)
+- [DELETE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/delete/)
+- [MERGE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/merge/)
+- [TRUNCATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/truncate-table/)
+- [ALTER TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-table/)
+- [Table partition clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/partition-clause/)
+- [Partitioning existing table data](https://docs.vertica.com/26.2.x/en/admin/partitioning-tables/defining-partitions/partitioning-existing-table-data/)
+- [WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/)
+- [UPDATE and DELETE subqueries](https://docs.vertica.com/26.2.x/en/data-analysis/queries/subqueries/subqueries-update-and-delete-statements/)
+- [Subquery restrictions](https://docs.vertica.com/26.2.x/en/data-analysis/queries/subqueries/subquery-restrictions/)
+
+## Libraries and user-defined extensions
+
+- [CREATE LIBRARY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-library/)
+- [DROP LIBRARY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-library/)
+- [CREATE FUNCTION (scalar)](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-function-statements/create-function-scalar/)
+- [CREATE AGGREGATE FUNCTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-function-statements/create-aggregate-function/)
+- [CREATE ANALYTIC FUNCTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-function-statements/create-analytic-function/)
+- [CREATE TRANSFORM FUNCTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-function-statements/create-transform-function/)
+- [CREATE FILTER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-function-statements/create-filter/)
+- [CREATE PARSER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-function-statements/create-parser/)
+- [CREATE SOURCE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-function-statements/create-source/)
+- [Fenced and unfenced modes](https://docs.vertica.com/26.2.x/en/extending/udxs/fenced-and-unfenced-modes/)
+- [DROP FUNCTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-function/)
+- [DROP AGGREGATE FUNCTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-aggregate-function/)
+- [DROP ANALYTIC FUNCTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-analytic-function/)
+- [DROP TRANSFORM FUNCTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-transform-function/)
+- [DROP FILTER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-filter/)
+- [DROP PARSER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-parser/)
+- [DROP SOURCE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-source/)
+
+## Security assignments
+
+- [GRANT statement family](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/)
+- [GRANT authentication](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-authentication/)
+- [GRANT procedure](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-procedure/)
+- [GRANT resource pool](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-resource-pool/)
+- [GRANT role](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-role/)
+- [GRANT storage location](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-storage-location/)
+- [GRANT table](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-table/)
+- [GRANT user-defined extension](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-user-defined-extension/)
+- [GRANT workload](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-workload/)
+- [REVOKE statement family](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/)
+- [REVOKE authentication](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-authentication/)
+- [REVOKE procedure](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-procedure/)
+- [REVOKE resource pool](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-resource-pool/)
+- [REVOKE role](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-role/)
+- [REVOKE storage location](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-storage-location/)
+- [REVOKE table](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-table/)
+- [REVOKE user-defined extension](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-user-defined-extension/)
+- [REVOKE workload](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-workload/)
+
+## Role and resource-pool lifecycle
+
+- [CREATE ROLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-role/)
+- [ALTER ROLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-role/)
+- [DROP ROLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-role/)
+- [CREATE RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-resource-pool/)
+- [ALTER RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-resource-pool/)
+- [DROP RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-resource-pool/)
+
+## Audited next-phase statements
+
+- [CREATE USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-user/)
+- [CREATE AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-authentication/)
+- [CREATE ROUTING RULE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-routing-rule/)
+
+The source list is reviewed when the target server version changes. A version
+bump is not a documentation-only change: affected fixtures and generated SQL
+must be revalidated.
