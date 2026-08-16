@@ -86,6 +86,18 @@ membership with routing-rule destinations. Rename stays canonical as
 rules, while member existence, current group type, CIDR validity, and dependent
 routing rules remain catalog concerns.
 
+Network-address roots complete the connection-policy lifecycle without
+conflating it with the deprecated NETWORK INTERFACE family. A
+`NetworkAddressSpec` retains the node, opaque address/hostname string, optional
+port, and explicitly supplied enabled state; omission remains omission rather
+than synthesizing server defaults. `NetworkAddressAction` represents endpoint
+replacement and state changes, while rename stays canonical as `AlterRename`.
+Identifiers follow Vertica's ASCII-first, Unicode-letter-continuation rules,
+and ports are validated lexically as unsigned integers without guessing a
+server range or converting arbitrarily large digit strings to Python integers.
+Node existence, endpoint ownership, address-family validity, reachability, and
+load-balance-group dependency effects remain catalog or server concerns.
+
 Factory-backed UDxs use a shared `CreateUserDefinedExtension` root and
 `UDxFactorySpec`: the catalog name remains canonical, while language, factory,
 library, and fenced mode remain an ordered atomic unit that cannot leak as a

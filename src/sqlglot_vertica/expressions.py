@@ -773,6 +773,44 @@ class DropLoadBalanceGroup(exp.Drop):
     """Drop one load balance group with optional dependency cascading."""
 
 
+class NetworkAddressSpec(exp.Expression):
+    """The node endpoint, optional port, and optional state of a network address."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "node": True,
+        "port": False,
+        "state": False,
+    }
+
+
+class NetworkAddressAction(exp.Expression):
+    """A typed non-rename action in ``ALTER NETWORK ADDRESS``."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": False,
+        "port": False,
+    }
+
+
+class CreateNetworkAddress(exp.Create):
+    """Create one named connection-load-balancing endpoint on a node."""
+
+    arg_types: t.ClassVar = {
+        **exp.Create.arg_types,
+        "spec": True,
+    }
+
+
+class AlterNetworkAddress(exp.Alter):
+    """Apply exactly one typed change to a network address."""
+
+
+class DropNetworkAddress(exp.Drop):
+    """Drop one network address with optional dependency cascading."""
+
+
 class RoutingRuleSpec(exp.Expression):
     """The source and destinations of one classic or workload routing rule."""
 

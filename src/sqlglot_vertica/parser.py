@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import typing as t
 
-from sqlglot import TokenType, exp
+from sqlglot import ErrorLevel, TokenType, exp
 from sqlglot.dialects.dialect import Dialect, map_date_part
 from sqlglot.helper import seq_get
 from sqlglot.parsers.postgres import PostgresParser
@@ -174,6 +174,7 @@ class VerticaParser(PostgresParser):
         "LIBRARY",
         "LOAD",
         "MODEL",
+        "NETWORK",
         "PROCEDURE",
         "PROJECTION",
         "RESOURCE",
@@ -198,6 +199,19 @@ class VerticaParser(PostgresParser):
         "EXTERNAL TABLE",
         "FLEX EXTERNAL",
         "FLEXIBLE EXTERNAL",
+        "NETWORK ADDRESS",
+        "NETWORK INTERFACE",
+        "RESOURCE POOL",
+        "ROUTING RULE",
+    }
+    NETWORK_ADDRESS_COMPOUND_BOUNDARIES: t.ClassVar = {
+        "DIRECTED QUERY",
+        "EXTERNAL PROCEDURE",
+        "EXTERNAL TABLE",
+        "FLEX EXTERNAL",
+        "FLEXIBLE EXTERNAL",
+        "LOAD BALANCE GROUP",
+        "NETWORK INTERFACE",
         "RESOURCE POOL",
         "ROUTING RULE",
     }
@@ -2762,12 +2776,49 @@ class VerticaParser(PostgresParser):
             }:
                 return
 
+    def _reject_prefixed_network_address(self, statement: str, words: list[str]) -> None:
+        compound_starts = {
+            boundary.split(" ", 1)[0] for boundary in self.NETWORK_ADDRESS_COMPOUND_BOUNDARIES
+        }
+        for index, word in enumerate(words):
+            if words[index : index + 2] == ["NETWORK", "ADDRESS"]:
+                if index:
+                    self._raise_network_address_error(
+                        f"{statement} NETWORK ADDRESS does not support modifiers"
+                    )
+                return
+            if any(
+                words[index : index + len(boundary.split())] == boundary.split()
+                for boundary in self.NETWORK_ADDRESS_COMPOUND_BOUNDARIES
+            ):
+                return
+            if word in self.ROUTING_RULE_OBJECT_BOUNDARIES and word not in compound_starts:
+                return
+
+    def _raise_network_address_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+
+    def _match_network_object(self, kind: str, *, advance: bool = True) -> bool:
+        matched = (
+            self._curr.token_type == TokenType.VAR
+            and self._curr.text.upper() == "NETWORK"
+            and self._next.token_type == TokenType.VAR
+            and self._next.text.upper() == kind
+        )
+        if matched and advance:
+            self._advance()
+            self._advance()
+        return matched
+
     def _parse_create(  # type: ignore[override]
         self,
     ) -> exp.Create | vexp.CreateDirectedQuery | exp.Command:
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_prefixed_routing_rule("CREATE", words)
         self._reject_prefixed_load_balance_group("CREATE", words)
+        self._reject_prefixed_network_address("CREATE", words)
         unsupported_directed_prefixes = (
             ("IF", "NOT", "EXISTS", "DIRECTED", "QUERY"),
             ("TEMPORARY", "DIRECTED", "QUERY"),
@@ -2801,6 +2852,12 @@ class VerticaParser(PostgresParser):
             if not self._match_text_seq("BALANCE", "GROUP"):
                 self.raise_error("CREATE LOAD must be followed by BALANCE GROUP")
             return self._parse_create_load_balance_group(replace=replace)
+        if self._match_network_object("ADDRESS"):
+            return self._parse_create_network_address(replace=replace)
+        if self._curr.text.upper() == "NETWORK" and not self._match_network_object(
+            "INTERFACE", advance=False
+        ):
+            self._raise_network_address_error("CREATE NETWORK must be followed by ADDRESS")
         if self._match_text_seq("ROLE"):
             return self._parse_create_role(replace=replace)
         if self._match_text_seq("RESOURCE", "POOL"):
@@ -3581,6 +3638,53 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_create_network_address(self, replace: bool) -> vexp.CreateNetworkAddress:
+        if replace:
+            self._raise_network_address_error(
+                "CREATE OR REPLACE NETWORK ADDRESS is not supported by Vertica"
+            )
+        if self._match_text_seq("IF", "NOT", "EXISTS", advance=False):
+            self._raise_network_address_error(
+                "CREATE NETWORK ADDRESS does not support IF NOT EXISTS"
+            )
+
+        name = self._parse_connection_policy_identifier("CREATE NETWORK ADDRESS")
+        if not self._match(TokenType.ON):
+            self._raise_network_address_error("CREATE NETWORK ADDRESS requires ON")
+        node = self._parse_connection_policy_identifier("CREATE NETWORK ADDRESS ON")
+        if not self._match(TokenType.WITH):
+            self._raise_network_address_error("CREATE NETWORK ADDRESS requires WITH")
+        address = self._parse_connection_policy_string("CREATE NETWORK ADDRESS WITH")
+
+        port = None
+        if self._match_text_seq("PORT"):
+            port = self._parse_network_address_port("CREATE NETWORK ADDRESS PORT")
+
+        state = None
+        if self._match_texts(("ENABLED", "DISABLED")):
+            state = exp.var(self._prev.text.upper())
+
+        if self._curr:
+            self._raise_network_address_error(
+                f"Unexpected CREATE NETWORK ADDRESS clause at {self._curr.text!r}"
+            )
+
+        spec = self.expression(
+            vexp.NetworkAddressSpec(
+                this=address,
+                node=node,
+                port=port,
+                state=state,
+            )
+        )
+        return self.expression(
+            vexp.CreateNetworkAddress(
+                this=name,
+                kind="NETWORK ADDRESS",
+                spec=spec,
+            )
+        )
+
     def _parse_load_balance_group_member_kind(self, label: str) -> str:
         if self._match_text_seq("ADDRESS"):
             return "ADDRESS"
@@ -3616,11 +3720,34 @@ class VerticaParser(PostgresParser):
         return clause == ("POLICY" if member_kind == "ADDRESS" else "FILTER")
 
     def _parse_load_balance_group_string(self, label: str) -> exp.Literal:
+        return self._parse_connection_policy_string(label)
+
+    def _parse_connection_policy_string(self, label: str) -> exp.Literal:
         value = self._parse_string()
         if not isinstance(value, exp.Literal) or not value.is_string:
             self.raise_error(f"{label} requires a quoted string literal")
-        assert isinstance(value, exp.Literal)
+            if self._curr:
+                self._advance()
+            return self.expression(exp.Literal.string(""))
         return value
+
+    def _parse_network_address_port(self, label: str) -> exp.Literal:
+        token = self._curr
+        if (
+            not token
+            or token.token_type != TokenType.NUMBER
+            or not token.text.isascii()
+            or not token.text.isdigit()
+        ):
+            self._raise_network_address_error(f"{label} requires a nonnegative integer")
+            if self._curr:
+                self._advance()
+            return self.expression(exp.Literal(this="0", is_string=False))
+        port = self._parse_number()
+        if not isinstance(port, exp.Literal):
+            self._raise_network_address_error(f"{label} requires a nonnegative integer")
+            return self.expression(exp.Literal(this="0", is_string=False))
+        return port
 
     def _parse_create_routing_rule(self, replace: bool) -> vexp.CreateRoutingRule:
         if replace:
@@ -3693,15 +3820,33 @@ class VerticaParser(PostgresParser):
             }
         ):
             self.raise_error(f"{statement} requires an identifier")
+            if self._curr:
+                self._advance()
+            return self.expression(exp.Identifier(this="", quoted=True))
         identifier = self._parse_id_var(any_token=False)
         if not isinstance(identifier, exp.Identifier):
             self.raise_error(f"{statement} requires an identifier")
-        assert isinstance(identifier, exp.Identifier)
+            return self.expression(exp.Identifier(this="", quoted=True))
         if not isinstance(identifier.this, str) or not identifier.this:
             self.raise_error(f"{statement} requires a nonempty identifier")
+        elif not identifier.quoted and not self._is_connection_policy_identifier(identifier.this):
+            self.raise_error(f"{statement} requires a valid unquoted identifier")
         if self._match(TokenType.DOT, advance=False):
             self.raise_error(f"{statement} names cannot be schema-qualified")
         return identifier
+
+    @staticmethod
+    def _is_connection_policy_identifier(name: str) -> bool:
+        return (
+            bool(name)
+            and (name[0] == "_" or (name[0].isascii() and name[0].isalpha()))
+            and all(
+                character in {"_", "$"}
+                or (character.isascii() and character.isdigit())
+                or character.isalpha()
+                for character in name[1:]
+            )
+        )
 
     def _parse_routing_rule_priority(self) -> exp.Literal:
         if self._match(TokenType.DASH, advance=False):
@@ -3778,6 +3923,51 @@ class VerticaParser(PostgresParser):
             vexp.LoadBalanceGroupAction(
                 this=exp.var(f"SET {property_name}"),
                 expression=value,
+            )
+        )
+
+    def _parse_alter_network_address(self) -> vexp.AlterNetworkAddress:
+        target = self._parse_connection_policy_identifier("ALTER NETWORK ADDRESS")
+        action: exp.Expr = self.expression(vexp.NetworkAddressAction(this=exp.Var(this="")))
+
+        if self._match_text_seq("RENAME"):
+            if not self._match_text_seq("TO"):
+                self._raise_network_address_error("ALTER NETWORK ADDRESS RENAME requires TO")
+            action = self.expression(
+                exp.AlterRename(
+                    this=self._parse_connection_policy_identifier("ALTER NETWORK ADDRESS RENAME")
+                )
+            )
+        elif self._match_text_seq("SET"):
+            if not self._match_text_seq("TO"):
+                self._raise_network_address_error("ALTER NETWORK ADDRESS SET requires TO")
+            address = self._parse_connection_policy_string("ALTER NETWORK ADDRESS SET TO")
+            port = None
+            if self._match_text_seq("PORT"):
+                port = self._parse_network_address_port("ALTER NETWORK ADDRESS PORT")
+            action = self.expression(
+                vexp.NetworkAddressAction(
+                    this=exp.var("SET"),
+                    expression=address,
+                    port=port,
+                )
+            )
+        elif self._match_texts(("ENABLE", "DISABLE")):
+            action = self.expression(
+                vexp.NetworkAddressAction(this=exp.var(self._prev.text.upper()))
+            )
+        else:
+            self._raise_network_address_error("ALTER NETWORK ADDRESS requires a supported action")
+
+        if self._curr:
+            self._raise_network_address_error(
+                f"Unexpected ALTER NETWORK ADDRESS clause at {self._curr.text!r}"
+            )
+        return self.expression(
+            vexp.AlterNetworkAddress(
+                this=target,
+                kind="NETWORK ADDRESS",
+                actions=[action],
             )
         )
 
@@ -3863,6 +4053,31 @@ class VerticaParser(PostgresParser):
             vexp.DropLoadBalanceGroup(
                 this=target,
                 kind="LOAD BALANCE GROUP",
+                exists=if_exists,
+                cascade=cascade,
+            )
+        )
+
+    def _parse_drop_network_address(self, exists: bool) -> vexp.DropNetworkAddress:
+        if exists:
+            self._raise_network_address_error(
+                "DROP NETWORK ADDRESS IF EXISTS must follow NETWORK ADDRESS"
+            )
+        if_exists = bool(self._parse_exists())
+        target = self._parse_connection_policy_identifier("DROP NETWORK ADDRESS")
+        if self._match(TokenType.COMMA, advance=False):
+            self._raise_network_address_error("DROP NETWORK ADDRESS accepts exactly one target")
+        cascade = self._match_text_seq("CASCADE")
+        if self._match_text_seq("RESTRICT", advance=False):
+            self._raise_network_address_error("DROP NETWORK ADDRESS does not support RESTRICT")
+        if self._curr:
+            self._raise_network_address_error(
+                f"Unexpected DROP NETWORK ADDRESS clause at {self._curr.text!r}"
+            )
+        return self.expression(
+            vexp.DropNetworkAddress(
+                this=target,
+                kind="NETWORK ADDRESS",
                 exists=if_exists,
                 cascade=cascade,
             )
@@ -4306,6 +4521,7 @@ class VerticaParser(PostgresParser):
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_prefixed_routing_rule("ALTER", words)
         self._reject_prefixed_load_balance_group("ALTER", words)
+        self._reject_prefixed_network_address("ALTER", words)
         if self._curr.token_type == TokenType.TABLE and self._has_mixed_reorganize_action():
             self.raise_error(
                 "Mixed ALTER TABLE REORGANIZE action lists are not yet represented semantically"
@@ -4316,6 +4532,12 @@ class VerticaParser(PostgresParser):
             if not self._match_text_seq("BALANCE", "GROUP"):
                 self.raise_error("ALTER LOAD must be followed by BALANCE GROUP")
             return self._parse_alter_load_balance_group()
+        if self._match_network_object("ADDRESS"):
+            return self._parse_alter_network_address()
+        if self._curr.text.upper() == "NETWORK" and not self._match_network_object(
+            "INTERFACE", advance=False
+        ):
+            self._raise_network_address_error("ALTER NETWORK must be followed by ADDRESS")
         if self._match_text_seq("RESOURCE", "POOL"):
             return self._parse_alter_resource_pool()
         if self._match_text_seq("ROUTING", "RULE"):
@@ -5222,6 +5444,7 @@ class VerticaParser(PostgresParser):
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_prefixed_routing_rule("DROP", words)
         self._reject_prefixed_load_balance_group("DROP", words)
+        self._reject_prefixed_network_address("DROP", words)
         lookahead = words[:3]
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
             self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
@@ -5245,6 +5468,12 @@ class VerticaParser(PostgresParser):
             if not self._match_text_seq("BALANCE", "GROUP"):
                 self.raise_error("DROP LOAD must be followed by BALANCE GROUP")
             return self._parse_drop_load_balance_group(exists=exists)
+        if self._match_network_object("ADDRESS"):
+            return self._parse_drop_network_address(exists=exists)
+        if self._curr.text.upper() == "NETWORK" and not self._match_network_object(
+            "INTERFACE", advance=False
+        ):
+            self._raise_network_address_error("DROP NETWORK must be followed by ADDRESS")
         if self._match_text_seq("ROLE"):
             return self._parse_drop_role(exists=exists)
         if self._match_text_seq("RESOURCE", "POOL"):

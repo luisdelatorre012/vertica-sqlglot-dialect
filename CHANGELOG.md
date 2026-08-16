@@ -34,6 +34,10 @@ plugin interface.
 - Added semantic CREATE/ALTER/DROP LOAD BALANCE GROUP for address, fault-group,
   and subcluster membership, typed filters and selection policies, every ALTER
   action, cascading drops, and atomic foreign-generation failure.
+- Added semantic CREATE/ALTER/DROP NETWORK ADDRESS with fixed-order endpoint
+  specifications, every documented ALTER action, cascading drops, opaque
+  IPv4/IPv6/hostname values, Unicode-aware identifiers, and atomic foreign
+  failure while retaining NETWORK INTERFACE as an opaque command family.
 - Added semantic CREATE/DROP LIBRARY and shared factory-backed scalar,
   aggregate, analytic, transform, filter, parser, and source UDx catalog DDL,
   including language/fence validation and explicit typed drop signatures.

@@ -81,6 +81,7 @@ Status meanings:
 | User, profile, and authentication lifecycle | Planned | Security assignment is semantic; lifecycle `CREATE`/`ALTER`/`DROP` dispatch remains a separate phase |
 | Resource-pool lifecycle | Semantic | Ordered typed parameters, `DEFAULT`/`NONE`/`AUTO`/`HOLD` sentinels, named/current subcluster selectors, and CREATE/ALTER/DROP restrictions use dedicated AST roots |
 | Load-balance-group lifecycle | Semantic | Address, fault-group, and subcluster member specifications, mandatory filters, selection policies, every ALTER action, and dependency-cascading DROP use typed ASTs with atomic foreign failure |
+| Network-address lifecycle | Semantic | Fixed-order node/address/port/state creation, rename/endpoint/state ALTER actions, and postfix `IF EXISTS`/`CASCADE` DROP use typed ASTs; NETWORK INTERFACE remains intentionally opaque and distinct |
 | Workload routing | Semantic | Classic address/group and workload/subcluster `CREATE ROUTING RULE`, every documented ALTER action, named/workload DROP targets, exact session workload/resource-pool assignment, both SHOW workload forms, and `ON ROUTING RULE` privilege alias normalization use typed ASTs with atomic foreign failure |
 | Partition maintenance and tuple mover commands | Partial | Standalone `ALTER TABLE … REORGANIZE` and partition-definition changes with optional `GROUP BY`, `SET ACTIVEPARTITIONCOUNT`, and `REORGANIZE` use typed ASTs; mixed comma-separated ALTER action lists fail closed; move/swap/archive operations remain planned, while documented top-level management functions stay canonical SELECT calls |
 | Directed queries | Semantic | `SAVE QUERY`, `GET DIRECTED QUERY`, and OPT/OPTIMIZER/CUSTOM creation (including export metadata) use traversable ASTs; ACTIVATE accepts name/WHERE, DEACTIVATE accepts name/query/WHERE, and DROP accepts name/WHERE; `:c`, `:v(n)`, and `IGNORECONST(n)` annotations preserve exact postfix ownership and fail atomically outside Vertica |
@@ -113,8 +114,10 @@ Some rules require information that a syntax-only dialect does not have:
   resolution, and session authorization require catalog or server state.
   Load-balance-group CIDR validity, member existence/type compatibility,
   duplicate-node membership, and dependency effects are likewise catalog
-  concerns. The dialect validates exact statement shape, documented policy
-  values, and safe identifier representation.
+  concerns. Network-address node existence, endpoint ownership, hostname/IP
+  resolution, listener-port validity, NAT reachability, and dependency effects
+  also require server state. The dialect validates exact statement shape,
+  documented value domains, and safe identifier representation.
 - Resource-pool availability, CPU/memory relationships, built-in-pool
   mutability, subcluster connection state, and secondary-pool dependency cycles
   require server/catalog state. The dialect validates documented value domains,

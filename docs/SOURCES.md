@@ -9,6 +9,7 @@ called out in code review.
 ## Language and expressions
 
 - [SQL language elements](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/)
+- [Identifiers](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/identifiers/)
 - [Mathematical operators](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/operators/mathematical-operators/)
 - [Optimizer hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/)
 - [ARRAY](https://docs.vertica.com/26.2.x/en/sql-reference/data-types/complex-types/array/)
@@ -150,6 +151,11 @@ called out in code review.
 - [CREATE LOAD BALANCE GROUP](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-load-balance-group/)
 - [ALTER LOAD BALANCE GROUP](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-load-balance-group/)
 - [DROP LOAD BALANCE GROUP](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-load-balance-group/)
+- [CREATE NETWORK ADDRESS](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-network-address/)
+- [ALTER NETWORK ADDRESS](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-network-address/)
+- [DROP NETWORK ADDRESS](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-network-address/)
+- [CREATE NETWORK INTERFACE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-network-interface/)
+- [NETWORK_ADDRESSES system table](https://docs.vertica.com/26.2.x/en/sql-reference/system-tables/v-catalog-schema/network-addresses/)
 - [CREATE ROUTING RULE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-routing-rule/)
 - [ALTER ROUTING RULE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-routing-rule/)
 - [DROP ROUTING RULE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-routing-rule/)
@@ -157,6 +163,7 @@ called out in code review.
 - [SET SESSION RESOURCE_POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/set-statements/set-session-resource-pool/)
 - [Workload routing](https://docs.vertica.com/26.2.x/en/admin/managing-client-connections/connection-load-balancing/workload-routing/)
 - [Creating connection load balance groups](https://docs.vertica.com/26.2.x/en/admin/managing-client-connections/connection-load-balancing/connection-load-balancing-policies/creating-connection-load-balance-groups/)
+- [Creating network addresses](https://docs.vertica.com/26.2.x/en/admin/managing-client-connections/connection-load-balancing/connection-load-balancing-policies/creating-network-addresses/)
 - [Creating load-balancing routing rules](https://docs.vertica.com/26.2.x/en/admin/managing-client-connections/connection-load-balancing/connection-load-balancing-policies/creating-load-balancing-routing-rules/)
 
 ## Audited next-phase statements

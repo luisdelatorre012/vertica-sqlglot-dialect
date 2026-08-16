@@ -249,6 +249,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AlterLoadBalanceGroup: lambda self, expression: self.alterloadbalancegroup_sql(
             expression
         ),
+        vexp.AlterNetworkAddress: lambda self, expression: self.alternetworkaddress_sql(expression),
         vexp.AlterResourcePool: lambda self, expression: self.alterresourcepool_sql(expression),
         vexp.AlterRoutingRule: lambda self, expression: self.alterroutingrule_sql(expression),
         vexp.AlterTablePartition: lambda self, expression: self.altertablepartition_sql(expression),
@@ -265,6 +266,9 @@ class VerticaGenerator(PostgresGenerator):
         ),
         vexp.CreateLibrary: lambda self, expression: self.createlibrary_sql(expression),
         vexp.CreateLoadBalanceGroup: lambda self, expression: self.createloadbalancegroup_sql(
+            expression
+        ),
+        vexp.CreateNetworkAddress: lambda self, expression: self.createnetworkaddress_sql(
             expression
         ),
         vexp.CreateProjection: lambda self, expression: self.createprojection_sql(expression),
@@ -305,6 +309,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.DropLoadBalanceGroup: lambda self, expression: self.droploadbalancegroup_sql(
             expression
         ),
+        vexp.DropNetworkAddress: lambda self, expression: self.dropnetworkaddress_sql(expression),
         vexp.DropResourcePool: lambda self, expression: self.dropresourcepool_sql(expression),
         vexp.DropRoutingRule: lambda self, expression: self.droproutingrule_sql(expression),
         vexp.DropRoles: lambda self, expression: self.droproles_sql(expression),
@@ -350,6 +355,10 @@ class VerticaGenerator(PostgresGenerator):
         vexp.LoadBalanceGroupSpec: lambda self, expression: self.loadbalancegroupspec_sql(
             expression
         ),
+        vexp.NetworkAddressAction: lambda self, expression: self.networkaddressaction_sql(
+            expression
+        ),
+        vexp.NetworkAddressSpec: lambda self, expression: self.networkaddressspec_sql(expression),
         vexp.LocalProperty: lambda *_: "LOCAL",
         vexp.MaterializedWithMarker: lambda *_: "",
         vexp.Match: lambda self, expression: self.vertica_match_sql(expression),
@@ -1335,6 +1344,146 @@ class VerticaGenerator(PostgresGenerator):
         self.unsupported(f"Unsupported ALTER LOAD BALANCE GROUP action: {action}")
         return action
 
+    def createnetworkaddress_sql(self, expression: vexp.CreateNetworkAddress) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "NETWORK ADDRESS":
+            self.unsupported("CreateNetworkAddress requires kind NETWORK ADDRESS")
+        if self._has_statement_extras(expression, {"this", "kind", "spec"}):
+            self.unsupported("CREATE NETWORK ADDRESS does not support additional CREATE clauses")
+
+        name = expression.args.get("this")
+        name_valid = self._validate_connection_policy_identifier(
+            name, "CREATE NETWORK ADDRESS name"
+        )
+        spec = expression.args.get("spec")
+        if not isinstance(spec, vexp.NetworkAddressSpec):
+            self.unsupported("CREATE NETWORK ADDRESS requires a structured address specification")
+            spec_sql = ""
+        else:
+            spec_sql = self.sql(spec)
+        name_sql = self.sql(name) if name_valid else ""
+        return f"CREATE NETWORK ADDRESS {name_sql} {spec_sql}".rstrip()
+
+    def alternetworkaddress_sql(self, expression: vexp.AlterNetworkAddress) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "NETWORK ADDRESS":
+            self.unsupported("AlterNetworkAddress requires kind NETWORK ADDRESS")
+        if self._has_statement_extras(expression, {"this", "kind", "actions"}):
+            self.unsupported("ALTER NETWORK ADDRESS does not support additional ALTER clauses")
+
+        target = expression.args.get("this")
+        target_valid = self._validate_connection_policy_identifier(
+            target, "ALTER NETWORK ADDRESS name"
+        )
+        raw_actions = expression.args.get("actions")
+        if not isinstance(raw_actions, list):
+            self.unsupported("ALTER NETWORK ADDRESS actions must be a list")
+            actions: list[exp.Expr] = []
+        else:
+            actions = raw_actions
+        if len(actions) != 1:
+            self.unsupported("ALTER NETWORK ADDRESS requires exactly one action")
+            action: exp.Expr | None = actions[0] if actions else None
+        else:
+            action = actions[0]
+
+        if isinstance(action, exp.AlterRename):
+            rename_valid = True
+            if self._has_statement_extras(action, {"this"}):
+                self.unsupported("ALTER NETWORK ADDRESS RENAME requires one unqualified name")
+                rename_valid = False
+            rename_valid = (
+                self._validate_connection_policy_identifier(
+                    action.args.get("this"), "ALTER NETWORK ADDRESS RENAME"
+                )
+                and rename_valid
+            )
+            action_sql = self.sql(action) if rename_valid else ""
+        elif isinstance(action, vexp.NetworkAddressAction):
+            action_sql = self.sql(action)
+        else:
+            self.unsupported("ALTER NETWORK ADDRESS requires a structured action")
+            action_sql = ""
+
+        target_sql = self.sql(target) if target_valid else ""
+        return f"ALTER NETWORK ADDRESS {target_sql} {action_sql}".rstrip()
+
+    def dropnetworkaddress_sql(self, expression: vexp.DropNetworkAddress) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "NETWORK ADDRESS":
+            self.unsupported("DropNetworkAddress requires kind NETWORK ADDRESS")
+        if self._has_statement_extras(expression, {"this", "kind", "exists", "cascade"}):
+            self.unsupported("DROP NETWORK ADDRESS does not support additional DROP clauses")
+
+        target = expression.args.get("this")
+        target_valid = self._validate_connection_policy_identifier(
+            target, "DROP NETWORK ADDRESS name"
+        )
+        exists_value = expression.args.get("exists")
+        cascade_value = expression.args.get("cascade")
+        if exists_value is not None and not isinstance(exists_value, bool):
+            self.unsupported("DropNetworkAddress exists must be boolean")
+        if cascade_value is not None and not isinstance(cascade_value, bool):
+            self.unsupported("DropNetworkAddress cascade must be boolean")
+        exists = " IF EXISTS" if isinstance(exists_value, bool) and exists_value else ""
+        cascade = " CASCADE" if isinstance(cascade_value, bool) and cascade_value else ""
+        target_sql = self.sql(target) if target_valid else ""
+        return f"DROP NETWORK ADDRESS{exists} {target_sql}{cascade}".rstrip()
+
+    def networkaddressspec_sql(self, expression: vexp.NetworkAddressSpec) -> str:
+        if self._has_statement_extras(expression, {"this", "node", "port", "state"}):
+            self.unsupported("NetworkAddressSpec contains unsupported fields")
+
+        address = expression.args.get("this")
+        node = expression.args.get("node")
+        node_valid = self._validate_connection_policy_identifier(node, "NETWORK ADDRESS node")
+        address_valid = self._validate_network_address_string(
+            address, "NETWORK ADDRESS requires a quoted address string"
+        )
+
+        port = expression.args.get("port")
+        port_sql = ""
+        if port is not None and self._validate_network_address_port(port):
+            port_sql = f" PORT {self.sql(port)}"
+
+        state = expression.args.get("state")
+        state_sql = ""
+        if state is not None:
+            state_name = self._network_address_marker(state)
+            if state_name not in {"ENABLED", "DISABLED"}:
+                self.unsupported("NETWORK ADDRESS state must be ENABLED or DISABLED")
+            else:
+                state_sql = f" {state_name}"
+
+        node_sql = self.sql(node) if node_valid else ""
+        address_sql = self.sql(address) if address_valid else ""
+        return f"ON {node_sql} WITH {address_sql}{port_sql}{state_sql}"
+
+    def networkaddressaction_sql(self, expression: vexp.NetworkAddressAction) -> str:
+        if self._has_statement_extras(expression, {"this", "expression", "port"}):
+            self.unsupported("NetworkAddressAction contains unsupported fields")
+        action = self._network_address_marker(expression.args.get("this"))
+        address = expression.args.get("expression")
+        port = expression.args.get("port")
+
+        if action == "SET":
+            address_valid = self._validate_network_address_string(
+                address, "ALTER NETWORK ADDRESS SET requires a quoted address string"
+            )
+            port_sql = ""
+            if port is not None and self._validate_network_address_port(port):
+                port_sql = f" PORT {self.sql(port)}"
+            address_sql = self.sql(address) if address_valid else ""
+            return f"SET TO {address_sql}{port_sql}"
+
+        if action in {"ENABLE", "DISABLE"}:
+            if address is not None or port is not None:
+                self.unsupported(f"ALTER NETWORK ADDRESS {action} does not accept values")
+            return action
+
+        self.unsupported("NetworkAddressAction must be SET, ENABLE, or DISABLE")
+        return action
+
     def createroutingrule_sql(self, expression: vexp.CreateRoutingRule) -> str:
         if expression.kind != "ROUTING RULE":
             self.unsupported("CreateRoutingRule requires kind ROUTING RULE")
@@ -1584,9 +1733,44 @@ class VerticaGenerator(PostgresGenerator):
     def _is_load_balance_group_string(expression: object) -> bool:
         return (
             isinstance(expression, exp.Literal)
-            and expression.is_string
+            and expression.args.get("is_string") is True
             and isinstance(expression.this, str)
         )
+
+    def _validate_network_address_string(self, expression: object, message: str) -> bool:
+        valid = (
+            isinstance(expression, exp.Literal)
+            and expression.args.get("is_string") is True
+            and isinstance(expression.this, str)
+            and not self._has_statement_extras(expression, {"this", "is_string"})
+        )
+        if not valid:
+            self.unsupported(message)
+        return valid
+
+    def _validate_network_address_port(self, value: object) -> bool:
+        valid = (
+            isinstance(value, exp.Literal)
+            and value.args.get("is_string") is False
+            and isinstance(value.this, str)
+            and bool(value.this)
+            and value.this.isascii()
+            and value.this.isdigit()
+            and not self._has_statement_extras(value, {"this", "is_string"})
+        )
+        if not valid:
+            self.unsupported("NETWORK ADDRESS PORT requires a nonnegative integer")
+        return valid
+
+    def _network_address_marker(self, marker: object) -> str:
+        if not isinstance(marker, exp.Var):
+            self.unsupported("NETWORK ADDRESS marker requires a typed keyword")
+            return ""
+        raw_marker = marker.args.get("this")
+        if not isinstance(raw_marker, str) or self._has_statement_extras(marker, {"this"}):
+            self.unsupported("NETWORK ADDRESS marker requires a typed keyword")
+            return ""
+        return raw_marker.upper()
 
     @staticmethod
     def _routing_rule_mode(expression: vexp.RoutingRuleSpec) -> str:
@@ -1597,23 +1781,38 @@ class VerticaGenerator(PostgresGenerator):
         if not isinstance(value, exp.Literal) or not value.is_int or int(value.this) < 0:
             self.unsupported("ROUTING RULE PRIORITY must be a nonnegative integer")
 
-    def _validate_connection_policy_identifier(self, expression: object, label: str) -> None:
+    def _validate_connection_policy_identifier(self, expression: object, label: str) -> bool:
         if not isinstance(expression, exp.Identifier) or not isinstance(expression.this, str):
             self.unsupported(f"{label} requires an unqualified identifier")
-            return
+            return False
+
+        valid = True
+        quoted = expression.args.get("quoted", False)
+        if not isinstance(quoted, bool):
+            self.unsupported(f"{label} quoted flag must be boolean")
+            valid = False
+        if self._has_statement_extras(expression, {"this", "quoted"}):
+            self.unsupported(f"{label} contains unsupported identifier fields")
+            valid = False
         if not expression.this:
             self.unsupported(f"{label} requires a nonempty identifier")
-        elif not expression.quoted and not self._is_safe_connection_policy_identifier(
-            expression.this
-        ):
+            valid = False
+        elif quoted is False and not self._is_safe_connection_policy_identifier(expression.this):
             self.unsupported(f"{label} requires a safely quoted identifier")
+            valid = False
+        return valid
 
     @staticmethod
     def _is_safe_connection_policy_identifier(name: str) -> bool:
         return (
             bool(name)
-            and (name[0] == "_" or name[0].isalpha())
-            and all(character in {"_", "$"} or character.isalnum() for character in name[1:])
+            and (name[0] == "_" or (name[0].isascii() and name[0].isalpha()))
+            and all(
+                character in {"_", "$"}
+                or (character.isascii() and character.isdigit())
+                or character.isalpha()
+                for character in name[1:]
+            )
         )
 
     @staticmethod

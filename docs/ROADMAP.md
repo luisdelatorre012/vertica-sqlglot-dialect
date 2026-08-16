@@ -60,6 +60,9 @@ Implemented P0:
 - add typed address-, fault-group-, and subcluster-backed LOAD BALANCE GROUP
   lifecycle statements, including every documented ALTER action and cascading
   DROP semantics.
+- add typed NETWORK ADDRESS lifecycle statements with fixed-order endpoint
+  creation, every rename/endpoint/state ALTER action, postfix dependency drops,
+  and an explicit boundary from deprecated NETWORK INTERFACE administration.
 
 P1:
 
