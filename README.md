@@ -93,8 +93,10 @@ effects remain separate server concerns.
 The non-secret USER lifecycle also retains ordered time and capacity policy:
 grace, idle-session and query-runtime intervals; database/node connection
 limits; memory and temporary-space caps; and ALTER-only hash-algorithm
-selection. Credential clauses remain outside the AST and fail with sanitized
-errors.
+selection. ALTER additionally models TOTP-secret reset, value-free configuration
+clears, and a five-parameter depot-only SET allowlist with finite values.
+Credential clauses and unreviewed SET values remain outside the AST and fail
+with sanitized errors.
 
 Executable `PROFILE statement` is also semantic: the wrapper retains a
 traversable SELECT, INSERT, UPDATE, DELETE, COPY, or MERGE child so analysis and

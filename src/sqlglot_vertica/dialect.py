@@ -164,6 +164,7 @@ class Vertica(Postgres):
         vexp.VerticaToChar: {"returns": exp.DType.VARCHAR},
         vexp.VerticaWindow: Postgres.EXPRESSION_METADATA[exp.Window].copy(),
         vexp.UserParameter: {"annotator": _annotate_from_this},
+        vexp.UserConfigurationParameter: {"annotator": _annotate_from_this},
         exp.ArrayFilter: {"annotator": _annotate_from_this},
         exp.Hex: {"annotator": _annotate_to_hex},
         exp.Length: {"returns": exp.DType.BIGINT},

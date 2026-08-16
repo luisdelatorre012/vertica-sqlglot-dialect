@@ -38,6 +38,9 @@ plugin interface.
   and ordered multi-user DROP with postfix `IF EXISTS` and `CASCADE`.
   Credential-bearing forms fail with clause-aware sanitized errors and secret
   values never enter the AST.
+- Added isolated `TOTPSECRET RESET`, typed value-free USER configuration clears,
+  and a five-parameter depot-only SET allowlist; unknown and unsafe values are
+  rejected by the credential sanitizer before entering an AST.
 - Added semantic CREATE/ALTER/DROP PROFILE lifecycle with all 15 ordered
   password-policy metadata settings, lexical numeric domains, `UNLIMITED`,
   ALTER-only `DEFAULT` resets, rename, multi-target drop, and strict foreign

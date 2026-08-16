@@ -86,7 +86,13 @@ checks. `UserSearchPath` retains either the exact DEFAULT sentinel or an ordered
 nonempty schema list whose entries can carry one namespace qualifier;
 `UserDefaultRoles` retains NONE, ALL, an ordered role list, or ALL EXCEPT with
 an ordered role list. DEFAULT ROLE remains an isolated ALTER action, and role
-names remain unqualified.
+names remain unqualified. `UserConfiguration` contains ordered typed parameters
+for an isolated SET or CLEAR action. CLEAR is value-free and keeps safe unquoted
+ASCII configuration names; SET is restricted to the five depot parameters that
+26.2 documents at USER level. Four take only numeric `0` or `1`, while
+`DepotOperationsForQuery` takes `ALL`, `FETCHES`, or `NONE`. The optional
+`PARAMETER` noise word and quoted/unquoted depot-operation values normalize to
+`SET PARAMETER name = value`.
 
 Tokenizable credential-bearing USER clauses are rejected before ordinary
 parser errors can retain or log their values, with a fixed sanitized error at
@@ -94,10 +100,14 @@ every `ErrorLevel`. This is defense in depth, not a secret-handling API:
 SQLGlot tokenization happens before parser hooks, and an upstream tokenizer
 error (for example, an unterminated credential string) can include raw input.
 Callers must never submit real credentials to this dialect. Literal admission
-is clause-aware so documented USER limit strings can enter the AST while
-credential literals in `IDENTIFIED BY`, `SALT`, and `REPLACE` paths still fail
-before ordinary parser diagnostics. AUTHENTICATION and arbitrary USER
-configuration parameters stay outside the current semantic contract and fail
+is clause-aware so documented USER limit strings and the reviewed finite depot
+enum can enter the AST while credential literals in `IDENTIFIED BY`, `SALT`,
+`REPLACE`, and unreviewed SET paths still fail before ordinary parser
+diagnostics. For the reviewed boundary, `UseDepotForReads=0` and
+`DepotOperationsForQuery='Fetches'` are accepted and the latter emits
+`DepotOperationsForQuery = FETCHES`; Boolean `2`, unknown parameter names, and
+unknown/string values are rejected. AUTHENTICATION and arbitrary value-bearing
+USER configuration parameters stay outside the semantic contract and fail
 closed when recognized.
 
 PROFILE lifecycle uses `CreateProfile`, `AlterProfile`, and `DropProfiles`

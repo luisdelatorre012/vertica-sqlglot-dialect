@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P05 — USER search path and default roles**.
-- Next eligible tasks are selected by dependency and numeric order; P06 is the
+- Completed through **P06 — safe USER configuration/reset actions**.
+- Next eligible tasks are selected by dependency and numeric order; P07 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -57,7 +57,7 @@ task may be `IN_PROGRESS`.
 | P03 | DONE | USER profile and resource-pool assignments | P01 | `feat: add user workload assignments` |
 | P04 | DONE | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
 | P05 | DONE | USER search path and default roles | P03 | `feat: model user path and default roles` |
-| P06 | TODO | Safe USER configuration/reset actions | P04, P05 | `feat: model safe user configuration actions` |
+| P06 | DONE | Safe USER configuration/reset actions | P04, P05 | `feat: model safe user configuration actions` |
 | P07 | TODO | AUTHENTICATION create/drop core | P06 | `feat: model authentication creation and drop` |
 | P08 | TODO | AUTHENTICATION structural ALTER actions | P07 | `feat: model authentication alter actions` |
 | P09 | TODO | AUTHENTICATION SET security boundary | P08 | `feat: add safe authentication parameters` |
@@ -418,7 +418,7 @@ errors. Ruff, formatting, strict mypy, full pre-commit, sdist/wheel build, clean
 force-install, `pip check`, and installed-wheel entry-point/round-trip smoke
 passed.
 
-### P06 — safe USER configuration/reset actions — `TODO`
+### P06 — safe USER configuration/reset actions — `DONE`
 
 **Outcome.** Close the deterministic, non-secret remainder of ALTER USER while
 leaving unknown configuration values fail-closed.
@@ -431,7 +431,23 @@ sentinel harness across all literal token forms and error/log channels.
 
 **Primary source.** The 26.2 ALTER USER page linked in P05.
 
-**Completion record.** Pending.
+**Completion record.** Added typed isolated `TOTPSECRET RESET`, ordered
+value-free `CLEAR [PARAMETER]` names, and a static five-parameter depot SET
+allowlist. The four reviewed Boolean controls accept only numeric 0/1;
+`DepotOperationsForQuery` accepts quoted or unquoted ALL/FETCHES/NONE and
+normalizes to an unquoted enum. Unknown names and unsafe/string values fail
+through the fixed pre-AST credential sanitizer across every supported literal
+token form and error/log channel. The 26.2 source re-audit found no material
+grammar contradiction: ALTER USER shows the five USER-level depot parameters,
+while the Eon parameter and depot guides define their finite values and show
+both quoted and unquoted enum usage. Parameter level eligibility, privileges,
+session propagation, TOTP enrollment, Eon mode, and runtime effects remain
+catalog/server concerns. The default CPython 3.12.6 gate passed 3326 tests at
+93.69% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 3326 tests, with 3.15 treating
+deprecations as errors. Ruff, formatting, strict mypy, full pre-commit,
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+entry-point/round-trip smoke passed.
 
 ### P07 — AUTHENTICATION create/drop core — `TODO`
 

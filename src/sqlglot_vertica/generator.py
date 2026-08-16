@@ -465,6 +465,10 @@ class VerticaGenerator(PostgresGenerator):
         vexp.UtcStatementTimestamp: lambda self, expression: "GETUTCDATE()",
         vexp.UsingParameters: lambda self, expression: self.usingparameters_sql(expression),
         vexp.UserAction: lambda self, expression: self.useraction_sql(expression),
+        vexp.UserConfiguration: lambda self, expression: self.userconfiguration_sql(expression),
+        vexp.UserConfigurationParameter: lambda self, expression: (
+            self.userconfigurationparameter_sql(expression)
+        ),
         vexp.UserDefaultRoles: lambda self, expression: self.userdefaultroles_sql(expression),
         vexp.UserParameter: lambda self, expression: self.userparameter_sql(expression),
         vexp.UserSearchPath: lambda self, expression: self.usersearchpath_sql(expression),
@@ -1489,6 +1493,10 @@ class VerticaGenerator(PostgresGenerator):
                 and rename_valid
             )
             action_sql = self.sql(action) if rename_valid else ""
+        elif isinstance(actions[0], vexp.UserConfiguration):
+            if len(actions) != 1:
+                self.unsupported("ALTER USER configuration cannot be combined with other actions")
+            action_sql = self.sql(actions[0]) if len(actions) == 1 else ""
         else:
             parameters_valid = self._validate_user_parameters(actions, "ALTER USER")
             action_sql = (
@@ -1533,10 +1541,105 @@ class VerticaGenerator(PostgresGenerator):
 
     def useraction_sql(self, expression: vexp.UserAction) -> str:
         action = self._user_action_name(expression)
-        if action not in {"ACCOUNT LOCK", "ACCOUNT UNLOCK", "PASSWORD EXPIRE"}:
-            self.unsupported("UserAction must be ACCOUNT LOCK, ACCOUNT UNLOCK, or PASSWORD EXPIRE")
+        if action not in {
+            "ACCOUNT LOCK",
+            "ACCOUNT UNLOCK",
+            "PASSWORD EXPIRE",
+            "TOTPSECRET RESET",
+        }:
+            self.unsupported(
+                "UserAction must be ACCOUNT LOCK, ACCOUNT UNLOCK, PASSWORD EXPIRE, "
+                "or TOTPSECRET RESET"
+            )
             return ""
         return action
+
+    def userconfiguration_sql(self, expression: vexp.UserConfiguration) -> str:
+        if self._has_user_extras(expression, {"expressions", "set"}):
+            self.unsupported("UserConfiguration contains unsupported fields")
+            return ""
+        set_values = expression.args.get("set")
+        if not isinstance(set_values, bool):
+            self.unsupported("UserConfiguration set flag must be boolean")
+            return ""
+        parameters = expression.args.get("expressions")
+        if not isinstance(parameters, list) or not parameters:
+            self.unsupported("UserConfiguration requires a nonempty parameter list")
+            return ""
+        if not all(
+            isinstance(parameter, vexp.UserConfigurationParameter) for parameter in parameters
+        ):
+            self.unsupported("UserConfiguration requires typed parameter children")
+            return ""
+        seen: set[str] = set()
+        valid = True
+        for parameter in parameters:
+            name = self._validate_user_configuration_parameter(parameter, set_values=set_values)
+            key = name.casefold()
+            if key in seen:
+                self.unsupported("UserConfiguration does not allow duplicate names")
+                valid = False
+            seen.add(key)
+            valid = bool(name) and valid
+        if not valid:
+            return ""
+        prefix = "SET PARAMETER" if set_values else "CLEAR PARAMETER"
+        return f"{prefix} {', '.join(self.sql(parameter) for parameter in parameters)}"
+
+    def userconfigurationparameter_sql(self, expression: vexp.UserConfigurationParameter) -> str:
+        value = expression.args.get("expression")
+        name = self._validate_user_configuration_parameter(expression, set_values=value is not None)
+        if not name:
+            return ""
+        return f"{name} = {self.sql(value)}" if value is not None else name
+
+    def _validate_user_configuration_parameter(
+        self, expression: vexp.UserConfigurationParameter, *, set_values: bool
+    ) -> str:
+        if self._has_user_extras(expression, {"this", "expression"}):
+            self.unsupported("UserConfigurationParameter contains unsupported fields")
+            return ""
+        name_node = expression.args.get("this")
+        if (
+            not isinstance(name_node, exp.Identifier)
+            or name_node.args.get("quoted", False) is not False
+            or not isinstance(name_node.this, str)
+            or not name_node.this.isascii()
+            or not self._is_safe_connection_policy_identifier(name_node.this)
+            or self._has_user_extras(name_node, {"this", "quoted"})
+        ):
+            self.unsupported("USER configuration requires an unquoted ASCII parameter name")
+            return ""
+        name = name_node.this
+        value = expression.args.get("expression")
+        if not set_values:
+            if value is not None:
+                self.unsupported("USER CLEAR configuration parameters cannot have values")
+                return ""
+            return name
+        allowed = {
+            "BackgroundDepotWarming",
+            "DepotOperationsForQuery",
+            "EnableDepotWarmingFromPeers",
+            "UseDepotForReads",
+            "UseDepotForWrites",
+        }
+        if name not in allowed:
+            self.unsupported("USER SET configuration parameter is not in the reviewed allowlist")
+            return ""
+        if name == "DepotOperationsForQuery":
+            if self._user_keyword_value(value) not in {"ALL", "FETCHES", "NONE"}:
+                self.unsupported("DepotOperationsForQuery requires ALL, FETCHES, or NONE")
+                return ""
+        elif (
+            not isinstance(value, exp.Literal)
+            or value.is_string
+            or value.this not in {"0", "1"}
+            or self._has_user_extras(value, {"this", "is_string"})
+        ):
+            self.unsupported(f"{name} requires Boolean 0 or 1")
+            return ""
+        return name
 
     def userparameter_sql(self, expression: vexp.UserParameter) -> str:
         valid = True
@@ -1801,6 +1904,11 @@ class VerticaGenerator(PostgresGenerator):
                     key = "ACCOUNT"
                 elif action == "PASSWORD EXPIRE":
                     key = "PASSWORD"
+                elif action == "TOTPSECRET RESET":
+                    key = "TOTPSECRET"
+                    if statement != "ALTER USER":
+                        self.unsupported("TOTPSECRET RESET is supported only by ALTER USER")
+                        valid = False
                 else:
                     self.unsupported(f"{statement} contains an unsupported UserAction")
                     valid = False
@@ -1853,6 +1961,9 @@ class VerticaGenerator(PostgresGenerator):
             seen.add(key)
         if "DEFAULT ROLE" in seen and len(parameters) != 1:
             self.unsupported("ALTER USER DEFAULT ROLE cannot be combined with other parameters")
+            valid = False
+        if "TOTPSECRET" in seen and len(parameters) != 1:
+            self.unsupported("ALTER USER TOTPSECRET RESET cannot be combined with other actions")
             valid = False
         return valid
 

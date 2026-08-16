@@ -714,6 +714,24 @@ class UserDefaultRoles(exp.Expression):
     }
 
 
+class UserConfigurationParameter(exp.Expression):
+    """One USER-level configuration name and optional reviewed SET value."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": False,
+    }
+
+
+class UserConfiguration(exp.Expression):
+    """A value-bearing SET or value-free CLEAR USER configuration action."""
+
+    arg_types: t.ClassVar = {
+        "expressions": True,
+        "set": True,
+    }
+
+
 class CreateUser(exp.Create):
     """Create one Vertica user without retaining credential material."""
 

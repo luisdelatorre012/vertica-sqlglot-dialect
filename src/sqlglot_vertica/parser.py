@@ -281,6 +281,7 @@ class VerticaParser(PostgresParser):
         "ALL": TokenType.ALL,
         "BY": TokenType.VAR,
         "CASCADE": TokenType.VAR,
+        "CLEAR": TokenType.VAR,
         "DATABASE": TokenType.DATABASE,
         "DEFAULT": TokenType.DEFAULT,
         "EXPIRE": TokenType.VAR,
@@ -299,6 +300,7 @@ class VerticaParser(PostgresParser):
         "PROFILE": TokenType.VAR,
         "RENAME": TokenType.RENAME,
         "RESOURCE": TokenType.VAR,
+        "RESET": TokenType.COMMAND,
         "RESTRICT": TokenType.VAR,
         "ROLE": TokenType.VAR,
         "SEARCH_PATH": TokenType.VAR,
@@ -312,6 +314,8 @@ class VerticaParser(PostgresParser):
         "MEMORYCAP": TokenType.VAR,
         "RUNTIMECAP": TokenType.VAR,
         "SECURITY_ALGORITHM": TokenType.VAR,
+        "SET": TokenType.SET,
+        "PARAMETER": TokenType.VAR,
         "TEMPSPACECAP": TokenType.VAR,
     }
     USER_SENSITIVE_LITERAL_TOKENS: t.ClassVar[set[TokenType]] = {
@@ -332,6 +336,20 @@ class VerticaParser(PostgresParser):
         "SECURITY_ALGORITHM",
         "TEMPSPACECAP",
     }
+    USER_CONFIGURATION_PARAMETERS: t.ClassVar[dict[str, str]] = {
+        "BACKGROUNDDEPOTWARMING": "BackgroundDepotWarming",
+        "DEPOTOPERATIONSFORQUERY": "DepotOperationsForQuery",
+        "ENABLEDEPOTWARMINGFROMPEERS": "EnableDepotWarmingFromPeers",
+        "USEDEPOTFORREADS": "UseDepotForReads",
+        "USEDEPOTFORWRITES": "UseDepotForWrites",
+    }
+    USER_BOOLEAN_CONFIGURATION_PARAMETERS: t.ClassVar[set[str]] = {
+        "BackgroundDepotWarming",
+        "EnableDepotWarmingFromPeers",
+        "UseDepotForReads",
+        "UseDepotForWrites",
+    }
+    USER_DEPOT_OPERATIONS: t.ClassVar[set[str]] = {"ALL", "FETCHES", "NONE"}
     USER_INTERVAL_MAX_SECONDS = USER_INTERVAL_MAX_SECONDS
     PROFILE_PARAMETERS: t.ClassVar[tuple[str, ...]] = (
         "PASSWORD_LIFE_TIME",
@@ -3039,6 +3057,7 @@ class VerticaParser(PostgresParser):
         after_user = tokens[index + 1 :]
         if not after_user:
             return
+        self._reject_unsafe_user_configuration(statement, after_user)
         for token_index, token in enumerate(after_user):
             if token.token_type not in self.USER_SENSITIVE_LITERAL_TOKENS:
                 continue
@@ -3052,8 +3071,61 @@ class VerticaParser(PostgresParser):
                 and statement != "DROP"
                 and (token_index == 2 or after_user[token_index - 2].token_type == TokenType.COMMA)
             )
-            if not safe_string:
+            safe_configuration_string = (
+                statement == "ALTER"
+                and token.token_type == TokenType.STRING
+                and token.text.isascii()
+                and token.text.upper() in self.USER_DEPOT_OPERATIONS
+                and token_index >= 2
+                and after_user[token_index - 1].token_type == TokenType.EQ
+                and after_user[token_index - 2].text.upper() == "DEPOTOPERATIONSFORQUERY"
+            )
+            if not safe_string and not safe_configuration_string:
                 raise ParseError("Unsupported secret-bearing USER clause")
+
+    def _reject_unsafe_user_configuration(self, statement: str, after_user: list[Token]) -> None:
+        if statement != "ALTER" or len(after_user) < 2:
+            return
+        set_token = after_user[1]
+        if (
+            set_token.token_type != TokenType.SET
+            or not set_token.text.isascii()
+            or set_token.text.upper() != "SET"
+        ):
+            return
+        position = 2
+        if position < len(after_user) and (
+            after_user[position].token_type == TokenType.VAR
+            and after_user[position].text.isascii()
+            and after_user[position].text.upper() == "PARAMETER"
+        ):
+            position += 1
+        while position < len(after_user):
+            name_token = after_user[position]
+            normalized = name_token.text.upper() if name_token.text.isascii() else ""
+            canonical = self.USER_CONFIGURATION_PARAMETERS.get(normalized)
+            if name_token.token_type != TokenType.VAR or canonical is None:
+                raise ParseError("Unsupported secret-bearing USER clause")
+            if (
+                position + 2 >= len(after_user)
+                or after_user[position + 1].token_type != TokenType.EQ
+            ):
+                return
+            value = after_user[position + 2]
+            if canonical in self.USER_BOOLEAN_CONFIGURATION_PARAMETERS:
+                safe_value = value.token_type == TokenType.NUMBER and value.text in {"0", "1"}
+            else:
+                safe_value = (
+                    value.token_type in {TokenType.ALL, TokenType.STRING, TokenType.VAR}
+                    and value.text.isascii()
+                    and value.text.upper() in self.USER_DEPOT_OPERATIONS
+                )
+            if not safe_value:
+                raise ParseError("Unsupported secret-bearing USER clause")
+            position += 3
+            if position >= len(after_user) or after_user[position].token_type != TokenType.COMMA:
+                return
+            position += 1
 
     def _user_prefix_length(self, statement: str, words: list[str]) -> int:
         index = 0
@@ -4912,6 +4984,16 @@ class VerticaParser(PostgresParser):
                     f"Unsupported ALTER USER RENAME clause at {self._curr.text!r}"
                 )
             actions = [action]
+        elif self._match_user_keywords("TOTPSECRET"):
+            if not self._match_user_keywords("RESET"):
+                self._raise_user_error("ALTER USER TOTPSECRET requires RESET")
+            if self._curr:
+                self._raise_user_error("ALTER USER TOTPSECRET RESET cannot be combined")
+            actions = [self.expression(vexp.UserAction(this=exp.var("TOTPSECRET RESET")))]
+        elif self._match_user_keywords("SET"):
+            actions = [self._parse_user_configuration(set_values=True)]
+        elif self._match_user_keywords("CLEAR"):
+            actions = [self._parse_user_configuration(set_values=False)]
         else:
             actions = self._parse_user_parameters("ALTER USER")
         return self.expression(
@@ -4921,6 +5003,70 @@ class VerticaParser(PostgresParser):
                 actions=actions,
             )
         )
+
+    def _parse_user_configuration(self, *, set_values: bool) -> vexp.UserConfiguration:
+        self._match_user_keywords("PARAMETER")
+        parameters: list[vexp.UserConfigurationParameter] = []
+        seen: set[str] = set()
+        while self._curr:
+            token = self._curr
+            if (
+                token.token_type != TokenType.VAR
+                or not token.text.isascii()
+                or not self._is_connection_policy_identifier(token.text)
+            ):
+                self._raise_user_error("ALTER USER configuration requires an unquoted ASCII name")
+            self._advance()
+            normalized = token.text.upper()
+            canonical = self.USER_CONFIGURATION_PARAMETERS.get(normalized, token.text)
+            if normalized in seen:
+                self._raise_user_error("ALTER USER configuration does not allow duplicate names")
+            seen.add(normalized)
+            value: exp.Expr | None = None
+            if set_values:
+                if normalized not in self.USER_CONFIGURATION_PARAMETERS:
+                    raise ParseError("Unsupported secret-bearing USER clause")
+                if not self._match(TokenType.EQ):
+                    self._raise_user_error("ALTER USER SET configuration requires = value")
+                if canonical in self.USER_BOOLEAN_CONFIGURATION_PARAMETERS:
+                    if self._curr.token_type != TokenType.NUMBER or self._curr.text not in {
+                        "0",
+                        "1",
+                    }:
+                        raise ParseError("Unsupported secret-bearing USER clause")
+                    value = self.expression(exp.Literal.number(self._curr.text))
+                    self._advance()
+                else:
+                    option = self._curr.text.upper() if self._curr.text.isascii() else ""
+                    if (
+                        self._curr.token_type
+                        not in {TokenType.ALL, TokenType.STRING, TokenType.VAR}
+                        or option not in self.USER_DEPOT_OPERATIONS
+                    ):
+                        raise ParseError("Unsupported secret-bearing USER clause")
+                    value = self.expression(exp.var(option))
+                    self._advance()
+            elif self._match(TokenType.EQ, advance=False):
+                self._raise_user_error("ALTER USER CLEAR configuration names do not accept values")
+            parameters.append(
+                self.expression(
+                    vexp.UserConfigurationParameter(
+                        this=exp.Identifier(this=canonical, quoted=False),
+                        expression=value,
+                    )
+                )
+            )
+            if not self._match(TokenType.COMMA):
+                break
+            if not self._curr:
+                self._raise_user_error("ALTER USER configuration requires a name after each comma")
+        if not parameters:
+            self._raise_user_error("ALTER USER configuration requires at least one name")
+        if self._curr:
+            self._raise_user_error(
+                f"Unsupported ALTER USER configuration clause at {self._curr.text!r}"
+            )
+        return self.expression(vexp.UserConfiguration(expressions=parameters, set=set_values))
 
     def _parse_alter_profile(self) -> vexp.AlterProfile:
         profile = self._parse_profile_identifier("ALTER PROFILE", allow_default=True)

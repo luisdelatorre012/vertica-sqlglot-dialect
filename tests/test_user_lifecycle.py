@@ -699,7 +699,6 @@ def test_lone_surrogate_identifier_fails_cleanly() -> None:
         "ALTER USER analyst ACCOUNT LOCK, ACCOUNT UNLOCK",
         "ALTER USER analyst RENAME TO renamed, PROFILE security",
         "ALTER USER analyst SET PARAMETER x = 1",
-        "ALTER USER analyst CLEAR PARAMETER x",
         "DROP USER",
         "DROP USER app.analyst",
         "DROP USER analyst,",
@@ -1335,6 +1334,303 @@ def test_programmatic_default_role_is_alter_only_and_isolated() -> None:
     ],
 )
 def test_user_name_lists_fail_atomically_in_foreign_dialects(
+    dialect: str, expression: exp.Expr
+) -> None:
+    with pytest.raises((UnsupportedError, ValueError)):
+        expression.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
+
+
+@pytest.mark.parametrize(
+    ("sql", "set_values", "names", "values"),
+    [
+        (
+            "ALTER USER analyst SET UseDepotForReads=0, UseDepotForWrites=1",
+            True,
+            ["UseDepotForReads", "UseDepotForWrites"],
+            ["0", "1"],
+        ),
+        (
+            "ALTER USER analyst SET PARAMETER BackgroundDepotWarming=1, "
+            "EnableDepotWarmingFromPeers=0",
+            True,
+            ["BackgroundDepotWarming", "EnableDepotWarmingFromPeers"],
+            ["1", "0"],
+        ),
+        (
+            "ALTER USER analyst SET PARAMETER DepotOperationsForQuery='Fetches'",
+            True,
+            ["DepotOperationsForQuery"],
+            ["FETCHES"],
+        ),
+        (
+            "ALTER USER analyst SET depotoperationsforquery=NONE",
+            True,
+            ["DepotOperationsForQuery"],
+            ["NONE"],
+        ),
+        (
+            "ALTER USER analyst CLEAR x, UseDepotForWrites",
+            False,
+            ["x", "UseDepotForWrites"],
+            [None, None],
+        ),
+        (
+            "ALTER USER analyst CLEAR PARAMETER BackgroundDepotWarming",
+            False,
+            ["BackgroundDepotWarming"],
+            [None],
+        ),
+    ],
+)
+def test_user_configuration_actions_are_typed_and_canonical(
+    sql: str, set_values: bool, names: list[str], values: list[str | None]
+) -> None:
+    expression = assert_roundtrip(sql)
+    assert isinstance(expression, vexp.AlterUser)
+    assert len(expression.actions) == 1
+    configuration = expression.actions[0]
+    assert isinstance(configuration, vexp.UserConfiguration)
+    assert configuration.args["set"] is set_values
+    assert [parameter.this.name for parameter in configuration.expressions] == names
+    assert [
+        parameter.expression.name if parameter.args.get("expression") is not None else None
+        for parameter in configuration.expressions
+    ] == values
+    assert ("SET PARAMETER" if set_values else "CLEAR PARAMETER") in _strict(expression)
+    _assert_parent_links(expression)
+
+
+def test_totp_reset_is_a_typed_isolated_action() -> None:
+    expression = assert_roundtrip("ALTER USER analyst TOTPSECRET RESET")
+    assert isinstance(expression, vexp.AlterUser)
+    assert len(expression.actions) == 1
+    action = expression.actions[0]
+    assert isinstance(action, vexp.UserAction)
+    assert action.this.name == "TOTPSECRET RESET"
+    assert not list(expression.find_all(exp.Literal))
+
+
+def test_user_configuration_serialization_transform_optimizer_types_and_boundaries() -> None:
+    expression = parse_one(
+        "/* lead */ ALTER USER analyst SET PARAMETER UseDepotForReads=1, "
+        "DepotOperationsForQuery='all' /* tail */",
+        read="vertica",
+    )
+    assert exp.Expr.load(expression.dump()) == expression
+    assert expression.copy() == expression
+    transformed = expression.transform(
+        lambda node: (
+            exp.Literal.number("0")
+            if isinstance(node, exp.Literal) and not node.is_string and node.this == "1"
+            else node
+        )
+    )
+    assert "UseDepotForReads = 0" in _strict(transformed)
+    optimized = optimize(expression, dialect="vertica")
+    assert isinstance(optimized, vexp.AlterUser)
+    assert len(list(optimized.find_all(vexp.UserConfigurationParameter))) == 2
+    annotated = annotate_types(expression, dialect="vertica")
+    assert all(
+        parameter.type == exp.DType.UNKNOWN.into_expr()
+        for parameter in annotated.find_all(vexp.UserConfigurationParameter)
+    )
+    assert _strict(expression).count("lead") == 1
+    assert _strict(expression).count("tail") == 1
+    statements = parse(
+        "ALTER USER analyst TOTPSECRET RESET; "
+        "ALTER USER analyst CLEAR PARAMETER x; "
+        "ALTER USER analyst SET UseDepotForWrites=0",
+        read="vertica",
+    )
+    assert all(isinstance(statement, vexp.AlterUser) for statement in statements)
+
+    configuration = expression.actions[0]
+    assert isinstance(configuration, vexp.UserConfiguration)
+    assert configuration.parent is expression
+    assert configuration.arg_key == "actions"
+    assert configuration.index == 0
+    for index, parameter in enumerate(configuration.expressions):
+        assert parameter.parent is configuration
+        assert parameter.arg_key == "expressions"
+        assert parameter.index == index
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER USER analyst TOTPSECRET",
+        "ALTER USER analyst TOTPSECRET CLEAR",
+        'ALTER USER analyst TOTPSECRET "RESET"',
+        "ALTER USER analyst TOTPSECRET RESET, ACCOUNT LOCK",
+        "ALTER USER analyst CLEAR",
+        "ALTER USER analyst CLEAR PARAMETER",
+        "ALTER USER analyst CLEAR x,",
+        "ALTER USER analyst CLEAR x, X",
+        "ALTER USER analyst CLEAR x=1",
+        'ALTER USER analyst CLEAR "UseDepotForWrites"',
+        "ALTER USER analyst SET",
+        "ALTER USER analyst SET PARAMETER",
+        "ALTER USER analyst SET UseDepotForReads",
+        "ALTER USER analyst SET UseDepotForReads 1",
+        "ALTER USER analyst SET UseDepotForReads=1,",
+        "ALTER USER analyst SET UseDepotForReads=1, USEDEPOTFORREADS=0",
+        "ALTER USER analyst SET UseDepotForReads=1 ACCOUNT LOCK",
+        f"ALTER USER analyst SET UseDepotForReads={'9' * 10000}",
+        'ALTER USER analyst "SET" UseDepotForReads=1',
+        'ALTER USER analyst SET "UseDepotForReads"=1',
+        "ALTER USER analyst CLEAR parâmetro",
+        "CREATE USER analyst TOTPSECRET RESET",
+        "CREATE USER analyst CLEAR x",
+    ],
+)
+@pytest.mark.parametrize(
+    "error_level",
+    [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE],
+)
+def test_invalid_user_configuration_and_totp_actions_fail_closed(
+    sql: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "'S3CR3T_DO_NOT_LEAK'",
+        "E'S3CR3T_DO_NOT_LEAK'",
+        "U&'S3CR3T_DO_NOT_LEAK'",
+        "N'S3CR3T_DO_NOT_LEAK'",
+        "$$S3CR3T_DO_NOT_LEAK$$",
+        "B'01010011'",
+        "X'533343523354'",
+        "R'S3CR3T_DO_NOT_LEAK'",
+    ],
+)
+@pytest.mark.parametrize(
+    "error_level",
+    [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE],
+)
+def test_unknown_user_configuration_values_are_sanitized_before_ast(
+    value: str, error_level: ErrorLevel, caplog: pytest.LogCaptureFixture
+) -> None:
+    sql = f"ALTER USER analyst SET PARAMETER ClientSecret={value}"
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG), pytest.raises(ParseError) as caught:
+        parse_one(sql, read="vertica", error_level=error_level)
+    observed = " ".join((str(caught.value), repr(caught.value.errors), caplog.text))
+    assert "S3CR3T_DO_NOT_LEAK" not in observed
+    assert str(caught.value) == "Unsupported secret-bearing USER clause"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER USER analyst SET PARAMETER UnknownParameter=0",
+        "ALTER USER analyst SET UseDepotForReads=2",
+        "ALTER USER analyst SET UseDepotForWrites=-1",
+        "ALTER USER analyst SET BackgroundDepotWarming='1'",
+        "ALTER USER analyst SET DepotOperationsForQuery='secret'",
+        "ALTER USER analyst SET DepotOperationsForQuery=UNKNOWN",
+    ],
+)
+def test_unreviewed_or_out_of_domain_set_values_use_sanitized_failure(sql: str) -> None:
+    with pytest.raises(ParseError) as caught:
+        parse_one(sql, read="vertica")
+    assert str(caught.value) == "Unsupported secret-bearing USER clause"
+
+
+def _configuration_parameter(
+    name: str, value: exp.Expr | None = None
+) -> vexp.UserConfigurationParameter:
+    return vexp.UserConfigurationParameter(this=_identifier(name), expression=value)
+
+
+@pytest.mark.parametrize(
+    "configuration",
+    [
+        vexp.UserConfiguration(set=True),
+        vexp.UserConfiguration(expressions=[], set=True),
+        vexp.UserConfiguration(expressions={}, set=True),
+        vexp.UserConfiguration(expressions=[exp.var("x")], set=False),
+        vexp.UserConfiguration(expressions=[_configuration_parameter("x")], set="yes"),
+        vexp.UserConfiguration(
+            expressions=[_configuration_parameter("x"), _configuration_parameter("X")],
+            set=False,
+        ),
+        vexp.UserConfiguration(
+            expressions=[_configuration_parameter("Unknown", exp.Literal.number("1"))],
+            set=True,
+        ),
+        vexp.UserConfiguration(
+            expressions=[_configuration_parameter("UseDepotForReads")], set=True
+        ),
+        vexp.UserConfiguration(
+            expressions=[_configuration_parameter("UseDepotForReads", exp.Literal.number("2"))],
+            set=True,
+        ),
+        vexp.UserConfiguration(
+            expressions=[_configuration_parameter("DepotOperationsForQuery", exp.var("fetches"))],
+            set=True,
+        ),
+        vexp.UserConfiguration(
+            expressions=[_configuration_parameter("x", exp.Literal.number("1"))], set=False
+        ),
+        vexp.UserConfiguration(
+            expressions=[vexp.UserConfigurationParameter(this=_identifier("x", quoted=True))],
+            set=False,
+        ),
+        _set_arg(
+            vexp.UserConfiguration(expressions=[_configuration_parameter("x")], set=False),
+            "bogus",
+            [],
+        ),
+        vexp.UserConfiguration(
+            expressions=[_set_arg(_configuration_parameter("x"), "bogus", False)], set=False
+        ),
+    ],
+)
+def test_malformed_programmatic_user_configuration_fails_atomically(
+    configuration: vexp.UserConfiguration,
+) -> None:
+    root = vexp.AlterUser(this=_identifier("analyst"), kind="USER", actions=[configuration])
+    with pytest.raises(UnsupportedError):
+        _strict(root)
+
+
+def test_programmatic_user_configuration_is_alter_only_and_isolated() -> None:
+    configuration = vexp.UserConfiguration(
+        expressions=[_configuration_parameter("UseDepotForWrites", exp.Literal.number("0"))],
+        set=True,
+    )
+    with pytest.raises(UnsupportedError):
+        _strict(
+            vexp.AlterUser(
+                this=_identifier("analyst"),
+                kind="USER",
+                actions=[configuration, _action("ACCOUNT LOCK")],
+            )
+        )
+    with pytest.raises(UnsupportedError):
+        _strict(
+            vexp.CreateUser(this=_identifier("analyst"), kind="USER", parameters=[configuration])
+        )
+
+
+@pytest.mark.parametrize("dialect", ["postgres", "duckdb", "mysql", "sqlite"])
+@pytest.mark.parametrize(
+    "expression",
+    [
+        parse_one("ALTER USER analyst TOTPSECRET RESET", read="vertica"),
+        parse_one("ALTER USER analyst CLEAR PARAMETER x", read="vertica"),
+        parse_one("ALTER USER analyst SET UseDepotForWrites=0", read="vertica"),
+        vexp.UserConfiguration(
+            expressions=[_configuration_parameter("UseDepotForWrites", exp.Literal.number("0"))],
+            set=True,
+        ),
+    ],
+)
+def test_user_configuration_and_totp_fail_atomically_in_foreign_dialects(
     dialect: str, expression: exp.Expr
 ) -> None:
     with pytest.raises((UnsupportedError, ValueError)):
