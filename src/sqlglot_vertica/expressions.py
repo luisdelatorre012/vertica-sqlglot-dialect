@@ -685,17 +685,24 @@ class UserAction(exp.Expression):
     arg_types: t.ClassVar = {"this": True}
 
 
+class UserParameter(exp.Expression):
+    """One ordered, non-secret CREATE/ALTER USER account parameter."""
+
+    arg_types: t.ClassVar = {"this": True, "expression": True, "subcluster": False}
+
+
 class CreateUser(exp.Create):
     """Create one Vertica user without retaining credential material."""
 
     arg_types: t.ClassVar = {
         **exp.Create.arg_types,
         "action": False,
+        "parameters": False,
     }
 
 
 class AlterUser(exp.Alter):
-    """Apply exactly one bounded, non-secret change to a Vertica user."""
+    """Apply ordered, bounded, non-secret changes to a Vertica user."""
 
 
 class DropUsers(exp.Drop):

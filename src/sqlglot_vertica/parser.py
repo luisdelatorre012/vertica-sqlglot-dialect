@@ -277,13 +277,18 @@ class VerticaParser(PostgresParser):
         "CASCADE": TokenType.VAR,
         "EXPIRE": TokenType.VAR,
         "EXISTS": TokenType.EXISTS,
+        "FOR": TokenType.FOR,
         "IF": TokenType.VAR,
         "IDENTIFIED": TokenType.VAR,
         "LOCK": TokenType.LOCK,
         "NOT": TokenType.NOT,
         "PASSWORD": TokenType.VAR,
+        "POOL": TokenType.VAR,
+        "PROFILE": TokenType.VAR,
         "RENAME": TokenType.RENAME,
+        "RESOURCE": TokenType.VAR,
         "RESTRICT": TokenType.VAR,
+        "SUBCLUSTER": TokenType.VAR,
         "TO": TokenType.VAR,
         "TOTPSECRET": TokenType.VAR,
         "UNLOCK": TokenType.VAR,
@@ -3906,30 +3911,82 @@ class VerticaParser(PostgresParser):
             self._raise_user_error("CREATE USER does not support IF NOT EXISTS")
 
         user = self._parse_user_identifier("CREATE USER")
-        action = None
+        parameters = self._parse_user_parameters("CREATE USER") if self._curr else []
+        legacy_action = (
+            parameters[0]
+            if len(parameters) == 1 and isinstance(parameters[0], vexp.UserAction)
+            else None
+        )
+        return self.expression(
+            vexp.CreateUser(
+                this=user,
+                kind="USER",
+                action=legacy_action,
+                parameters=None if legacy_action is not None or not parameters else parameters,
+            )
+        )
+
+    def _parse_user_parameters(self, statement: str) -> list[exp.Expr]:
+        parameters: list[exp.Expr] = []
+        seen: set[str] = set()
+        while self._curr:
+            parameter, key = self._parse_user_parameter(statement)
+            if key in seen:
+                self._raise_user_error(f"{statement} does not allow duplicate or conflicting {key}")
+            seen.add(key)
+            parameters.append(parameter)
+            if not self._match(TokenType.COMMA):
+                break
+            if not self._curr:
+                self._raise_user_error(f"{statement} requires a parameter after the comma")
+
+        if self._curr:
+            self._raise_user_error(f"Unsupported {statement} clause at {self._curr.text!r}")
+        return parameters
+
+    def _parse_user_parameter(self, statement: str) -> tuple[exp.Expr, str]:
         if self._match_user_keywords("ACCOUNT"):
             if self._match_user_keywords("LOCK"):
                 state = "LOCK"
             elif self._match_user_keywords("UNLOCK"):
                 state = "UNLOCK"
             else:
-                self._raise_user_error("CREATE USER ACCOUNT requires LOCK or UNLOCK")
+                self._raise_user_error(f"{statement} ACCOUNT requires LOCK or UNLOCK")
                 state = ""
-            action = self.expression(vexp.UserAction(this=exp.var(f"ACCOUNT {state}")))
-        elif self._match_user_keywords("PASSWORD"):
+            return self.expression(vexp.UserAction(this=exp.var(f"ACCOUNT {state}"))), "ACCOUNT"
+        if self._match_user_keywords("PASSWORD"):
             if not self._match_user_keywords("EXPIRE"):
-                self._raise_user_error("CREATE USER PASSWORD requires EXPIRE")
-            action = self.expression(vexp.UserAction(this=exp.var("PASSWORD EXPIRE")))
-
-        if self._curr:
-            self._raise_user_error(f"Unsupported CREATE USER clause at {self._curr.text!r}")
-        return self.expression(
-            vexp.CreateUser(
-                this=user,
-                kind="USER",
-                action=action,
+                self._raise_user_error(f"{statement} PASSWORD requires EXPIRE")
+            return self.expression(vexp.UserAction(this=exp.var("PASSWORD EXPIRE"))), "PASSWORD"
+        if self._match_user_keywords("PROFILE"):
+            value = self._parse_profile_identifier(f"{statement} PROFILE", allow_default=True)
+            return (
+                self.expression(vexp.UserParameter(this=exp.var("PROFILE"), expression=value)),
+                "PROFILE",
             )
-        )
+        if self._match_user_keywords("RESOURCE", "POOL"):
+            pool = self._parse_user_identifier(f"{statement} RESOURCE POOL")
+            subcluster = None
+            key = "RESOURCE POOL"
+            if self._match_user_keywords("FOR"):
+                if not self._match_user_keywords("SUBCLUSTER"):
+                    self._raise_user_error(f"{statement} RESOURCE POOL FOR requires SUBCLUSTER")
+                subcluster = self._parse_user_identifier(
+                    f"{statement} RESOURCE POOL FOR SUBCLUSTER"
+                )
+                key = "RESOURCE POOL FOR SUBCLUSTER"
+            return (
+                self.expression(
+                    vexp.UserParameter(
+                        this=exp.var("RESOURCE POOL"),
+                        expression=pool,
+                        subcluster=subcluster,
+                    )
+                ),
+                key,
+            )
+        self._raise_user_error(f"{statement} requires a supported account parameter")
+        return self.expression(vexp.UserAction(this=exp.var(""))), ""
 
     def _parse_create_profile(self, replace: bool) -> vexp.CreateProfile:
         if replace:
@@ -4577,37 +4634,26 @@ class VerticaParser(PostgresParser):
 
     def _parse_alter_user(self) -> vexp.AlterUser:
         user = self._parse_user_identifier("ALTER USER")
-        action: exp.Expr = self.expression(vexp.UserAction(this=exp.Var(this="")))
-
+        if not self._curr:
+            self._raise_user_error("ALTER USER requires a supported action")
         if self._match_user_keywords("RENAME"):
             if not self._match_user_keywords("TO"):
                 self._raise_user_error("ALTER USER RENAME requires TO")
-            action = self.expression(
+            action: exp.Expr = self.expression(
                 exp.AlterRename(this=self._parse_user_identifier("ALTER USER RENAME TO"))
             )
-        elif self._match_user_keywords("ACCOUNT"):
-            if self._match_user_keywords("LOCK"):
-                state = "LOCK"
-            elif self._match_user_keywords("UNLOCK"):
-                state = "UNLOCK"
-            else:
-                self._raise_user_error("ALTER USER ACCOUNT requires LOCK or UNLOCK")
-                state = ""
-            action = self.expression(vexp.UserAction(this=exp.var(f"ACCOUNT {state}")))
-        elif self._match_user_keywords("PASSWORD"):
-            if not self._match_user_keywords("EXPIRE"):
-                self._raise_user_error("ALTER USER PASSWORD requires EXPIRE")
-            action = self.expression(vexp.UserAction(this=exp.var("PASSWORD EXPIRE")))
+            if self._curr:
+                self._raise_user_error(
+                    f"Unsupported ALTER USER RENAME clause at {self._curr.text!r}"
+                )
+            actions = [action]
         else:
-            self._raise_user_error("ALTER USER requires a supported action")
-
-        if self._curr:
-            self._raise_user_error(f"Unsupported ALTER USER clause at {self._curr.text!r}")
+            actions = self._parse_user_parameters("ALTER USER")
         return self.expression(
             vexp.AlterUser(
                 this=user,
                 kind="USER",
-                actions=[action],
+                actions=actions,
             )
         )
 

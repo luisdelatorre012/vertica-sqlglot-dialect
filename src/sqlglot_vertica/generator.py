@@ -459,6 +459,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.UtcStatementTimestamp: lambda self, expression: "GETUTCDATE()",
         vexp.UsingParameters: lambda self, expression: self.usingparameters_sql(expression),
         vexp.UserAction: lambda self, expression: self.useraction_sql(expression),
+        vexp.UserParameter: lambda self, expression: self.userparameter_sql(expression),
         vexp.VerticaArrayLength: lambda self, expression: self.verticaarraylength_sql(expression),
         vexp.VerticaCopy: lambda self, expression: self.verticacopy_sql(expression),
         vexp.VerticaExplode: lambda self, expression: self.verticaexplode_sql(expression),
@@ -1130,31 +1131,38 @@ class VerticaGenerator(PostgresGenerator):
         kind = expression.args.get("kind")
         if not isinstance(kind, str) or kind != "USER":
             self.unsupported("CreateUser requires kind USER")
-        if self._has_user_extras(expression, {"this", "kind", "action"}):
+        if self._has_user_extras(expression, {"this", "kind", "action", "parameters"}):
             self.unsupported("CREATE USER does not support additional CREATE clauses")
 
         user = expression.args.get("this")
         user_valid = self._validate_user_identifier(user, "CREATE USER name")
         action = expression.args.get("action")
-        action_sql = ""
+        raw_parameters = expression.args.get("parameters")
+        if action is not None and raw_parameters is not None:
+            self.unsupported("CREATE USER cannot combine legacy action and parameters fields")
         if action is not None:
             if not isinstance(action, vexp.UserAction):
-                self.unsupported("CREATE USER account state requires a typed action")
+                self.unsupported("CREATE USER legacy action requires one typed UserAction")
+                parameters: list[exp.Expr] = []
             else:
-                action_name = self._user_action_name(action)
-                if action_name not in {
-                    "ACCOUNT LOCK",
-                    "ACCOUNT UNLOCK",
-                    "PASSWORD EXPIRE",
-                }:
-                    self.unsupported(
-                        "CREATE USER supports ACCOUNT LOCK, ACCOUNT UNLOCK, or PASSWORD EXPIRE"
-                    )
-                else:
-                    action_sql = f" {self.sql(action)}"
+                parameters = [action]
+        elif raw_parameters is None:
+            parameters = []
+        elif not isinstance(raw_parameters, list) or not raw_parameters:
+            self.unsupported("CREATE USER parameters must be a nonempty list")
+            parameters = []
+        else:
+            parameters = raw_parameters
+
+        parameters_valid = self._validate_user_parameters(parameters, "CREATE USER")
+        parameters_sql = (
+            f" {', '.join(self.sql(parameter) for parameter in parameters)}"
+            if parameters_valid
+            else ""
+        )
 
         user_sql = self.sql(user) if user_valid else ""
-        return f"CREATE USER {user_sql}{action_sql}".rstrip()
+        return f"CREATE USER {user_sql}{parameters_sql}".rstrip()
 
     def createprofile_sql(self, expression: vexp.CreateProfile) -> str:
         valid = self._validate_profile_root(
@@ -1457,13 +1465,13 @@ class VerticaGenerator(PostgresGenerator):
             actions: list[exp.Expr] = []
         else:
             actions = raw_actions
-        if len(actions) != 1:
-            self.unsupported("ALTER USER requires exactly one action")
-            action: exp.Expr | None = actions[0] if actions else None
-        else:
+        if not actions:
+            self.unsupported("ALTER USER requires at least one action")
+            action_sql = ""
+        elif isinstance(actions[0], exp.AlterRename):
+            if len(actions) != 1:
+                self.unsupported("ALTER USER RENAME cannot be combined with account parameters")
             action = actions[0]
-
-        if isinstance(action, exp.AlterRename):
             rename_valid = True
             if self._has_user_extras(action, {"this"}):
                 self.unsupported("ALTER USER RENAME requires one unqualified name")
@@ -1473,11 +1481,11 @@ class VerticaGenerator(PostgresGenerator):
                 and rename_valid
             )
             action_sql = self.sql(action) if rename_valid else ""
-        elif isinstance(action, vexp.UserAction):
-            action_sql = self.sql(action)
         else:
-            self.unsupported("ALTER USER requires a structured action")
-            action_sql = ""
+            parameters_valid = self._validate_user_parameters(actions, "ALTER USER")
+            action_sql = (
+                ", ".join(self.sql(parameter) for parameter in actions) if parameters_valid else ""
+            )
 
         user_sql = self.sql(user) if user_valid else ""
         return f"ALTER USER {user_sql} {action_sql}".rstrip()
@@ -1521,6 +1529,94 @@ class VerticaGenerator(PostgresGenerator):
             self.unsupported("UserAction must be ACCOUNT LOCK, ACCOUNT UNLOCK, or PASSWORD EXPIRE")
             return ""
         return action
+
+    def userparameter_sql(self, expression: vexp.UserParameter) -> str:
+        valid = True
+        if self._has_user_extras(expression, {"this", "expression", "subcluster"}):
+            self.unsupported("USER parameter contains unsupported fields")
+            valid = False
+        marker = expression.args.get("this")
+        value = expression.args.get("expression")
+        if not isinstance(marker, exp.Var) or self._has_user_extras(marker, {"this"}):
+            self.unsupported("USER parameter requires a typed keyword marker")
+            valid = False
+        raw_name = marker.args.get("this") if isinstance(marker, exp.Var) else None
+        if not isinstance(raw_name, str) or not raw_name.isascii():
+            self.unsupported("USER parameter marker must be an ASCII string")
+            valid = False
+        name = raw_name.upper() if isinstance(raw_name, str) and raw_name.isascii() else ""
+        if name not in {"PROFILE", "RESOURCE POOL"}:
+            self.unsupported("Unsupported USER parameter")
+            return ""
+        if name == "PROFILE":
+            if expression.args.get("subcluster") is not None:
+                self.unsupported("USER PROFILE does not accept a subcluster")
+                valid = False
+            if not isinstance(value, exp.Identifier):
+                self.unsupported("USER PROFILE requires a typed name or DEFAULT")
+                valid = False
+            elif value.name.upper() == "DEFAULT":
+                if value.name != "DEFAULT" or value.args.get("quoted", False) is not False:
+                    self.unsupported("USER PROFILE DEFAULT must use the unquoted DEFAULT sentinel")
+                    valid = False
+            elif not self._validate_user_identifier(value, "USER PROFILE name"):
+                valid = False
+            return f"PROFILE {self.sql(value)}" if valid else ""
+        if not self._validate_user_identifier(value, "USER RESOURCE POOL name"):
+            valid = False
+        subcluster = expression.args.get("subcluster")
+        if subcluster is not None and not self._validate_user_identifier(
+            subcluster, "USER RESOURCE POOL FOR SUBCLUSTER name"
+        ):
+            valid = False
+        if not valid:
+            return ""
+        suffix = f" FOR SUBCLUSTER {self.sql(subcluster)}" if subcluster is not None else ""
+        return f"RESOURCE POOL {self.sql(value)}{suffix}"
+
+    def _validate_user_parameters(self, parameters: list[exp.Expr], statement: str) -> bool:
+        valid = True
+        seen: set[str] = set()
+        for parameter in parameters:
+            if isinstance(parameter, vexp.UserAction):
+                action = self._user_action_name(parameter)
+                if action in {"ACCOUNT LOCK", "ACCOUNT UNLOCK"}:
+                    key = "ACCOUNT"
+                elif action == "PASSWORD EXPIRE":
+                    key = "PASSWORD"
+                else:
+                    self.unsupported(f"{statement} contains an unsupported UserAction")
+                    valid = False
+                    continue
+            elif isinstance(parameter, vexp.UserParameter):
+                marker = parameter.args.get("this")
+                raw_marker = marker.args.get("this") if isinstance(marker, exp.Var) else None
+                name = (
+                    raw_marker.upper()
+                    if isinstance(raw_marker, str) and raw_marker.isascii()
+                    else ""
+                )
+                if name == "PROFILE":
+                    key = "PROFILE"
+                elif name == "RESOURCE POOL":
+                    key = (
+                        "RESOURCE POOL FOR SUBCLUSTER"
+                        if parameter.args.get("subcluster") is not None
+                        else "RESOURCE POOL"
+                    )
+                else:
+                    self.unsupported(f"{statement} contains an unsupported UserParameter")
+                    valid = False
+                    continue
+            else:
+                self.unsupported(f"{statement} parameters require typed USER children")
+                valid = False
+                continue
+            if key in seen:
+                self.unsupported(f"{statement} does not allow duplicate or conflicting {key}")
+                valid = False
+            seen.add(key)
+        return valid
 
     def _user_action_name(self, expression: vexp.UserAction) -> str:
         if self._has_user_extras(expression, {"this"}):

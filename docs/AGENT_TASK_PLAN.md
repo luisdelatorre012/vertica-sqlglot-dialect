@@ -31,7 +31,7 @@ task may be `IN_PROGRESS`.
 | --- | --- | --- | --- | --- |
 | P01 | DONE | PROFILE lifecycle | `6ca2a0d` | `feat: model profile lifecycle` |
 | P02 | DONE | Executable `PROFILE` statement | P01 | `feat: model profiled statement execution` |
-| P03 | TODO | USER profile and resource-pool assignments | P01 | `feat: add user workload assignments` |
+| P03 | DONE | USER profile and resource-pool assignments | P01 | `feat: add user workload assignments` |
 | P04 | TODO | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
 | P05 | TODO | USER search path and default roles | P03 | `feat: model user path and default roles` |
 | P06 | TODO | Safe USER configuration/reset actions | P04, P05 | `feat: model safe user configuration actions` |
@@ -258,7 +258,7 @@ build, clean force-install, `pip check`, and isolated installed-wheel smoke
 passed. CPython 3.14 and 3.15 were not available locally (`py -0p` exposed only
 3.12), so those runtime suites were not claimed.
 
-### P03 — USER profile and resource-pool assignments — `TODO`
+### P03 — USER profile and resource-pool assignments — `DONE`
 
 **Outcome.** Extend the non-secret USER AST from a singular action into an
 ordered parameter representation without losing compatibility with P01.
@@ -275,7 +275,18 @@ roles, search path, or arbitrary configuration values.
 **Primary sources.** [CREATE USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-user/)
 and [ALTER USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-user/).
 
-**Completion record.** Pending.
+**Completion record.** Added ordered typed USER parameter lists for profile
+`DEFAULT`/named assignments and global or subcluster-specific resource-pool
+assignments on CREATE and ALTER, while preserving existing account-state,
+password-expiry, rename, serialization, and credential-sanitization contracts.
+Duplicate/conflicting scopes, malformed ordering, identifiers, programmatic
+ASTs, and foreign generation fail atomically; profile/pool existence, grants,
+LDAP restrictions, and runtime effects remain catalog/server checks. The 26.2
+source re-audit found no material grammar contradiction. The default CPython
+3.12.6 gate passed 2871 tests at 93.86% coverage; Ruff, formatting, strict mypy,
+full pre-commit, sdist/wheel build, clean force-install, `pip check`, and
+isolated installed-wheel smoke passed. CPython 3.14 and 3.15 were not available
+locally (`py -0p` exposed only 3.12), so those runtime suites were not claimed.
 
 ### P04 — USER time and capacity limits — `TODO`
 

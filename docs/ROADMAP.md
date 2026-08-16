@@ -59,8 +59,9 @@ Implemented P0:
 - add canonical-safe CREATE/ALTER/single-target DROP ROLE and an atomic custom
   root for multi-role drops;
 - add a bounded, non-secret USER lifecycle with typed account/password-expiry
-  actions, rename, ordered multi-target DROP, sanitized credential rejection,
-  and strict 128-byte identifier validation;
+  actions, ordered profile and global/subcluster resource-pool assignments,
+  rename, ordered multi-target DROP, sanitized credential rejection, and strict
+  128-byte identifier validation;
 - add semantic PROFILE lifecycle DDL with ordered typed policy settings,
   lexical value-domain validation, ALTER reset/rename actions, and multi-drop;
 - add ordered typed CREATE/ALTER/DROP RESOURCE POOL parameters, keyword
@@ -77,8 +78,9 @@ Implemented P0:
 
 P1:
 
-- add remaining USER account parameters and AUTHENTICATION lifecycle
-  statements, with a separately reviewed credential-handling policy;
+- add USER time/capacity limits, search paths, default roles, safe configuration
+  actions, and AUTHENTICATION lifecycle statements, with separately reviewed
+  credential-handling policies;
 - expand privilege targets for UDx, data loaders, keys, libraries, and TLS
   configurations.
 

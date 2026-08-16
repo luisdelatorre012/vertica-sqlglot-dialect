@@ -313,6 +313,12 @@ def test_profile_detached_leaves_fail_atomically_in_foreign_dialects() -> None:
                 leaf.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
 
 
-def test_user_profile_assignment_remains_outside_p01() -> None:
-    with pytest.raises(ParseError):
-        parse_one("CREATE USER analyst PROFILE p", read="vertica")
+def test_user_profile_assignment_interoperates_with_profile_lifecycle() -> None:
+    create_profile = assert_roundtrip("CREATE PROFILE p LIMIT PASSWORD_MIN_LENGTH 8")
+    create_user = assert_roundtrip("CREATE USER analyst PROFILE p")
+    assert isinstance(create_profile, vexp.CreateProfile)
+    assert isinstance(create_user, vexp.CreateUser)
+    parameters = create_user.args.get("parameters")
+    assert isinstance(parameters, list) and len(parameters) == 1
+    assert isinstance(parameters[0], vexp.UserParameter)
+    assert parameters[0].expression.name == create_profile.this.name

@@ -69,20 +69,25 @@ USER lifecycle deliberately has a narrower security boundary. `CreateUser`,
 `AlterUser`, and `DropUsers` retain ordinary identifier and rename children,
 but explicit Vertica transforms validate the bounded non-secret grammar and
 prevent foreign generators from silently discarding account state or secondary
-drop targets. `UserAction` contains only an account lock/unlock or password
-expiry keyword marker; no password, TOTP secret, or other credential value has
+drop targets. Ordered CREATE/ALTER parameter lists combine existing
+`UserAction` account lock/unlock and password-expiry markers with typed
+`UserParameter` profile and resource-pool assignments, including an optional
+subcluster identifier. No password, TOTP secret, or other credential value has
 an AST slot. Names share the connection-policy lexical rules, additionally
 enforce Vertica's 128-byte UTF-8 limit, and use the active Vertica tokenizer's
-identifier-token domain rather than a frozen reserved-word list.
+identifier-token domain rather than a frozen reserved-word list. Profile and
+pool existence, pool grants, and assignment effects remain catalog/server
+checks.
 
 Tokenizable credential-bearing USER clauses are rejected before ordinary
 parser errors can retain or log their values, with a fixed sanitized error at
 every `ErrorLevel`. This is defense in depth, not a secret-handling API:
 SQLGlot tokenization happens before parser hooks, and an upstream tokenizer
 error (for example, an unterminated credential string) can include raw input.
-Callers must never submit real credentials to this dialect. AUTHENTICATION and
-remaining USER account parameters stay outside the current semantic contract
-and fail closed when recognized.
+Callers must never submit real credentials to this dialect. AUTHENTICATION,
+USER capacity/time limits, roles, search paths, and arbitrary configuration
+parameters stay outside the current semantic contract and fail closed when
+recognized.
 
 PROFILE lifecycle uses `CreateProfile`, `AlterProfile`, and `DropProfiles`
 roots plus ordered `ProfileLimit` and `ProfileParameter` children. The values

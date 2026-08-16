@@ -14,6 +14,64 @@ from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_roundtrip
 
 
+@pytest.mark.parametrize(
+    ("sql", "names"),
+    [
+        ("CREATE USER analyst PROFILE DEFAULT", ["PROFILE"]),
+        (
+            "CREATE USER analyst PROFILE security, RESOURCE POOL general",
+            ["PROFILE", "RESOURCE POOL"],
+        ),
+        (
+            "CREATE USER analyst RESOURCE POOL general FOR SUBCLUSTER etl",
+            ["RESOURCE POOL"],
+        ),
+        ("ALTER USER analyst PROFILE security", ["PROFILE"]),
+        (
+            "ALTER USER analyst RESOURCE POOL general FOR SUBCLUSTER etl",
+            ["RESOURCE POOL"],
+        ),
+        (
+            'ALTER USER analyst RESOURCE POOL general, PROFILE "strict profile", '
+            'RESOURCE POOL "etl pool" FOR SUBCLUSTER "etl sc", ACCOUNT LOCK, PASSWORD EXPIRE',
+            ["RESOURCE POOL", "PROFILE", "RESOURCE POOL", "ACCOUNT LOCK", "PASSWORD EXPIRE"],
+        ),
+    ],
+)
+def test_user_profile_and_resource_pool_assignments_are_typed_and_ordered(
+    sql: str, names: list[str]
+) -> None:
+    expression = assert_roundtrip(sql)
+    actions = expression.args.get("parameters") or expression.args.get("actions")
+    actions = actions if isinstance(actions, list) else [actions]
+    assert all(isinstance(action, (vexp.UserAction, vexp.UserParameter)) for action in actions)
+    assert [action.this.name for action in actions] == names
+    _assert_parent_links(expression)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE USER analyst PROFILE 'secret'",
+        "CREATE USER analyst PROFILE security PROFILE other",
+        "CREATE USER analyst PROFILE security, PROFILE other",
+        "CREATE USER analyst RESOURCE POOL general RESOURCE POOL other",
+        "CREATE USER analyst RESOURCE POOL general, RESOURCE POOL other",
+        (
+            "CREATE USER analyst RESOURCE POOL etl FOR SUBCLUSTER sc, "
+            "RESOURCE POOL other FOR SUBCLUSTER other_sc"
+        ),
+        "CREATE USER analyst RESOURCE POOL general FOR etl",
+        "ALTER USER analyst RESOURCE POOL general FOR SUBCLUSTER",
+        "ALTER USER analyst PROFILE security,",
+        "ALTER USER analyst RENAME TO renamed, PROFILE security",
+    ],
+)
+def test_user_assignments_reject_malformed_or_duplicate_parameters(sql: str) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica")
+
+
 def _strict(expression: exp.Expr) -> str:
     return expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
 
@@ -24,6 +82,16 @@ def _identifier(name: str, quoted: bool = False) -> exp.Identifier:
 
 def _action(name: str) -> vexp.UserAction:
     return vexp.UserAction(this=exp.var(name))
+
+
+def _parameter(
+    name: str, value: str, *, subcluster: str | None = None, quoted: bool = False
+) -> vexp.UserParameter:
+    return vexp.UserParameter(
+        this=exp.var(name),
+        expression=_identifier(value, quoted=quoted),
+        subcluster=_identifier(subcluster) if subcluster is not None else None,
+    )
 
 
 def _set_arg(expression: exp.Expr, key: str, value: object) -> exp.Expr:
@@ -163,6 +231,39 @@ def test_programmatic_user_lifecycle_generates_exact_sql() -> None:
         _assert_parent_links(expression)
 
 
+def test_programmatic_ordered_user_parameters_generate_exact_sql() -> None:
+    create = vexp.CreateUser(
+        this=_identifier("analyst"),
+        kind="USER",
+        parameters=[
+            _parameter("PROFILE", "DEFAULT"),
+            _parameter("RESOURCE POOL", "general"),
+            _parameter("RESOURCE POOL", "etl", subcluster="sc"),
+            _action("ACCOUNT LOCK"),
+        ],
+    )
+    alter = vexp.AlterUser(
+        this=_identifier("analyst"),
+        kind="USER",
+        actions=[
+            _parameter("PROFILE", "security"),
+            _parameter("RESOURCE POOL", "etl", subcluster="sc"),
+            _action("PASSWORD EXPIRE"),
+        ],
+    )
+    assert _strict(create) == (
+        "CREATE USER analyst PROFILE DEFAULT, RESOURCE POOL general, "
+        "RESOURCE POOL etl FOR SUBCLUSTER sc, ACCOUNT LOCK"
+    )
+    assert _strict(alter) == (
+        "ALTER USER analyst PROFILE security, RESOURCE POOL etl FOR SUBCLUSTER sc, PASSWORD EXPIRE"
+    )
+    for expression in (create, alter):
+        assert parse_one(_strict(expression), read="vertica") == expression
+        assert exp.Expr.load(expression.dump()) == expression
+        _assert_parent_links(expression)
+
+
 def test_declared_false_statement_defaults_are_harmless() -> None:
     create = vexp.CreateUser(this=_identifier("analyst"), kind="USER", replace=False)
     alter = vexp.AlterUser(
@@ -217,18 +318,59 @@ def test_copy_transform_serialization_optimizer_types_and_multi_statement_are_lo
     statements = parse(
         "CREATE USER analyst ACCOUNT LOCK; "
         "ALTER USER analyst PASSWORD EXPIRE; "
+        "CREATE USER loader PROFILE security, RESOURCE POOL general; "
+        "ALTER USER loader RESOURCE POOL etl FOR SUBCLUSTER sc; "
         "DROP USER IF EXISTS analyst CASCADE",
         read="vertica",
     )
     assert [type(statement) for statement in statements] == [
         vexp.CreateUser,
         vexp.AlterUser,
+        vexp.CreateUser,
+        vexp.AlterUser,
         vexp.DropUsers,
     ]
 
 
-def test_comments_survive_structured_roundtrip() -> None:
-    expression = assert_roundtrip("/* lead */ CREATE USER analyst ACCOUNT LOCK /* tail */")
+def test_user_assignment_copy_transform_optimizer_and_types_are_lossless() -> None:
+    expression = parse_one(
+        "ALTER USER analyst PROFILE security, RESOURCE POOL etl FOR SUBCLUSTER sc",
+        read="vertica",
+    )
+    copied = expression.copy()
+    assert copied == expression
+    transformed = copied.transform(
+        lambda node: (
+            _identifier("batch")
+            if isinstance(node, exp.Identifier) and node.name == "etl"
+            else node
+        )
+    )
+    assert _strict(transformed) == (
+        "ALTER USER analyst PROFILE security, RESOURCE POOL batch FOR SUBCLUSTER sc"
+    )
+    optimized = optimize(expression, dialect="vertica")
+    assert _strict(optimized) == (
+        'ALTER USER "analyst" PROFILE "security", RESOURCE POOL "etl" FOR SUBCLUSTER "sc"'
+    )
+    annotated = annotate_types(expression, dialect="vertica")
+    assert all(
+        parameter.type == exp.DType.UNKNOWN.into_expr()
+        for parameter in annotated.find_all(vexp.UserParameter)
+    )
+    _assert_parent_links(optimized)
+    _assert_parent_links(annotated)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "/* lead */ CREATE USER analyst ACCOUNT LOCK /* tail */",
+        ("/* lead */ CREATE USER analyst PROFILE security, RESOURCE POOL general /* tail */"),
+    ],
+)
+def test_comments_survive_structured_roundtrip(sql: str) -> None:
+    expression = assert_roundtrip(sql)
     generated = _strict(expression)
     assert generated.count("lead") == 1
     assert generated.count("tail") == 1
@@ -278,6 +420,27 @@ def test_every_user_name_position_enforces_the_utf8_byte_limit(sql: str) -> None
         parse_one(sql, read="vertica")
 
 
+def test_user_assignment_identifier_contract_applies_to_every_name_position() -> None:
+    exact = "a" * 128
+    for sql in (
+        f"CREATE USER analyst PROFILE {exact}",
+        f"CREATE USER analyst RESOURCE POOL {exact}",
+        f"ALTER USER analyst RESOURCE POOL pool FOR SUBCLUSTER {exact}",
+        'CREATE USER analyst PROFILE "βeta"',
+        'ALTER USER analyst RESOURCE POOL "etl pool" FOR SUBCLUSTER "βeta"',
+    ):
+        assert_roundtrip(sql)
+
+    too_long = "a" * 129
+    for sql in (
+        f"CREATE USER analyst PROFILE {too_long}",
+        f"CREATE USER analyst RESOURCE POOL {too_long}",
+        f"ALTER USER analyst RESOURCE POOL pool FOR SUBCLUSTER {too_long}",
+    ):
+        with pytest.raises(ParseError):
+            parse_one(sql, read="vertica")
+
+
 def test_lone_surrogate_identifier_fails_cleanly() -> None:
     surrogate = chr(0xD800)
     with pytest.raises(ParseError):
@@ -303,8 +466,13 @@ def test_lone_surrogate_identifier_fails_cleanly() -> None:
         "CREATE USER analyst ACCOUNT LOCK PASSWORD EXPIRE",
         "CREATE USER analyst PASSWORD",
         "CREATE USER analyst PASSWORD LOCK",
-        "CREATE USER analyst PROFILE p",
-        "CREATE USER analyst RESOURCE POOL general",
+        "CREATE USER analyst PROFILE",
+        "CREATE USER analyst PROFILE security PROFILE other",
+        "CREATE USER analyst PROFILE security, PROFILE other",
+        "CREATE USER analyst RESOURCE POOL",
+        "CREATE USER analyst RESOURCE POOL general FOR etl",
+        "CREATE USER analyst RESOURCE POOL general, RESOURCE POOL other",
+        "CREATE USER analyst ACCOUNT LOCK, ACCOUNT UNLOCK",
         "CREATE USER analyst DEFAULT ROLE public",
         "CREATE USER analyst SET PARAMETER x = 1",
         "CREATE USER IF NOT EXISTS analyst",
@@ -319,8 +487,14 @@ def test_lone_surrogate_identifier_fails_cleanly() -> None:
         "ALTER USER analyst ACCOUNT LOCK PASSWORD EXPIRE",
         "ALTER USER analyst PASSWORD",
         "ALTER USER analyst PASSWORD LOCK",
-        "ALTER USER analyst PROFILE p",
-        "ALTER USER analyst RESOURCE POOL general",
+        "ALTER USER analyst PROFILE",
+        "ALTER USER analyst PROFILE security PROFILE other",
+        "ALTER USER analyst PROFILE security, PROFILE other",
+        "ALTER USER analyst RESOURCE POOL",
+        "ALTER USER analyst RESOURCE POOL general FOR etl",
+        "ALTER USER analyst RESOURCE POOL general, RESOURCE POOL other",
+        "ALTER USER analyst ACCOUNT LOCK, ACCOUNT UNLOCK",
+        "ALTER USER analyst RENAME TO renamed, PROFILE security",
         "ALTER USER analyst DEFAULT ROLE public",
         "ALTER USER analyst SET PARAMETER x = 1",
         "ALTER USER analyst CLEAR PARAMETER x",
@@ -363,10 +537,18 @@ def test_recognized_invalid_or_out_of_scope_user_syntax_fails_closed(
         "CREATE USER analyst ACCOUNT 'LOCK'",
         "CREATE USER analyst PA\u017f\u017fWORD EXPIRE",
         'CREATE USER analyst PASSWORD "EXPIRE"',
+        'CREATE USER analyst "PROFILE" security',
+        "CREATE USER analyst PRO\u017fILE security",
+        'CREATE USER analyst "RESOURCE" POOL general',
+        'CREATE USER analyst RESOURCE "POOL" general',
+        'CREATE USER analyst RESOURCE POOL general "FOR" SUBCLUSTER sc',
+        'CREATE USER analyst RESOURCE POOL general FOR "SUBCLUSTER" sc',
         'ALTER USER analyst "RENAME" TO analyst_new',
         'ALTER USER analyst RENAME "TO" analyst_new',
         "ALTER USER analyst PA\u017f\u017fWORD EXPIRE",
         'ALTER USER analyst ACCOUNT "UNLOCK"',
+        'ALTER USER analyst "PROFILE" security',
+        'ALTER USER analyst RESOURCE "POOL" general',
         'DROP USER "analyst" "CASCADE"',
         "DROP USER analyst 'CASCADE'",
         'DROP USER "IF" EXISTS analyst',
@@ -414,6 +596,9 @@ def test_unsupported_user_object_modifiers_fail_closed(sql: str) -> None:
         "CREATE PROFILE user LIMIT PASSWORD_MIN_LENGTH 8",
         "ALTER PROFILE user LIMIT PASSWORD_MIN_LENGTH 9",
         "DROP PROFILE user",
+        "CREATE RESOURCE POOL user",
+        "ALTER RESOURCE POOL user MAXMEMORYSIZE '1G'",
+        "DROP RESOURCE POOL user",
         "CREATE TABLE user (id INT)",
         "ALTER TABLE user ADD COLUMN value INT",
         "DROP TABLE user",
@@ -484,7 +669,9 @@ def test_tokenizable_secret_bearing_user_input_is_sanitized_at_every_error_level
     "sql",
     [
         "CREATE USER analyst ACCOUNT LOCK",
+        "CREATE USER analyst PROFILE security, RESOURCE POOL general",
         "ALTER USER analyst PASSWORD EXPIRE",
+        "ALTER USER analyst RESOURCE POOL etl FOR SUBCLUSTER sc",
         "DROP USER IF EXISTS analyst, loader CASCADE",
     ],
 )
@@ -496,10 +683,10 @@ def test_user_statement_roots_fail_atomically_in_foreign_dialects(sql: str, dial
 
 
 def test_user_action_leaf_fails_atomically_in_foreign_dialects() -> None:
-    action = _action("ACCOUNT LOCK")
-    for dialect in ("postgres", "duckdb", "mysql", "sqlite"):
-        with pytest.raises((UnsupportedError, ValueError)):
-            action.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
+    for leaf in (_action("ACCOUNT LOCK"), _parameter("PROFILE", "security")):
+        for dialect in ("postgres", "duckdb", "mysql", "sqlite"):
+            with pytest.raises((UnsupportedError, ValueError)):
+                leaf.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
 
 
 @pytest.mark.parametrize(
@@ -525,6 +712,28 @@ def test_user_action_leaf_fails_atomically_in_foreign_dialects() -> None:
         vexp.CreateUser(this=_identifier("analyst"), kind="USER", action=exp.var("LOCK")),
         vexp.CreateUser(this=_identifier("analyst"), kind="USER", action=[_action("ACCOUNT LOCK")]),
         vexp.CreateUser(this=_identifier("analyst"), kind="USER", action=_action("LOCK")),
+        vexp.CreateUser(this=_identifier("analyst"), kind="USER", parameters=[]),
+        vexp.CreateUser(this=_identifier("analyst"), kind="USER", parameters={}),
+        vexp.CreateUser(
+            this=_identifier("analyst"),
+            kind="USER",
+            action=_action("ACCOUNT LOCK"),
+            parameters=[_parameter("PROFILE", "security")],
+        ),
+        vexp.CreateUser(this=_identifier("analyst"), kind="USER", parameters=[exp.var("PROFILE")]),
+        vexp.CreateUser(
+            this=_identifier("analyst"),
+            kind="USER",
+            parameters=[_parameter("PROFILE", "security"), _parameter("PROFILE", "other")],
+        ),
+        vexp.CreateUser(
+            this=_identifier("analyst"),
+            kind="USER",
+            parameters=[
+                _parameter("RESOURCE POOL", "etl", subcluster="sc"),
+                _parameter("RESOURCE POOL", "other", subcluster="other_sc"),
+            ],
+        ),
         vexp.AlterUser(this=_identifier("analyst"), kind="TABLE", actions=[]),
         vexp.AlterUser(this=_identifier("analyst"), kind=exp.var("USER"), actions=[]),
         vexp.AlterUser(this={}, kind="USER", actions=[_action("ACCOUNT LOCK")]),
@@ -532,11 +741,24 @@ def test_user_action_leaf_fails_atomically_in_foreign_dialects() -> None:
         vexp.AlterUser(
             this=_identifier("analyst"),
             kind="USER",
-            actions=[_action("ACCOUNT LOCK"), _action("PASSWORD EXPIRE")],
+            actions=[_action("ACCOUNT LOCK"), _action("ACCOUNT UNLOCK")],
         ),
         vexp.AlterUser(this=_identifier("analyst"), kind="USER", actions=_action("ACCOUNT LOCK")),
         vexp.AlterUser(this=_identifier("analyst"), kind="USER", actions={}),
         vexp.AlterUser(this=_identifier("analyst"), kind="USER", actions=[exp.var("LOCK")]),
+        vexp.AlterUser(
+            this=_identifier("analyst"),
+            kind="USER",
+            actions=[
+                exp.AlterRename(this=_identifier("renamed")),
+                _parameter("PROFILE", "security"),
+            ],
+        ),
+        vexp.AlterUser(
+            this=_identifier("analyst"),
+            kind="USER",
+            actions=[_parameter("RESOURCE POOL", "one"), _parameter("RESOURCE POOL", "two")],
+        ),
         vexp.AlterUser(
             this=_identifier("analyst"),
             kind="USER",
@@ -574,6 +796,18 @@ def test_user_action_leaf_fails_atomically_in_foreign_dialects() -> None:
         _set_arg(_action("ACCOUNT LOCK"), "bogus", False),
         _set_arg(_action("ACCOUNT LOCK"), "this", exp.Var(this="ACCOUNT LOCK", bogus=True)),
         _set_arg(_action("ACCOUNT LOCK"), "this", exp.Var(this="ACCOUNT LOCK", bogus={})),
+        vexp.UserParameter(this=exp.var("PROFILE")),
+        vexp.UserParameter(this=exp.var("UNKNOWN"), expression=_identifier("value")),
+        vexp.UserParameter(this=exp.var("PRO\u017fILE"), expression=_identifier("value")),
+        vexp.UserParameter(this=_identifier("PROFILE"), expression=_identifier("value")),
+        vexp.UserParameter(this=exp.var("PROFILE"), expression=exp.var("DEFAULT")),
+        _parameter("PROFILE", "DEFAULT", quoted=True),
+        _parameter("PROFILE", "security", subcluster="sc"),
+        vexp.UserParameter(this=exp.var("RESOURCE POOL"), expression=exp.to_table("app.pool")),
+        vexp.UserParameter(
+            this=exp.var("RESOURCE POOL"), expression=_identifier("pool"), subcluster=exp.var("sc")
+        ),
+        _set_arg(_parameter("PROFILE", "security"), "bogus", True),
     ],
 )
 def test_malformed_programmatic_user_asts_fail_atomically(expression: exp.Expr) -> None:
