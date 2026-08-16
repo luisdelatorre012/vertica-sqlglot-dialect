@@ -41,7 +41,9 @@ These interpreters are managed outside the Windows Python launcher registry,
 so `py -0p` is not an authoritative inventory and can show only the older
 system 3.12 installation. Agents must invoke each versioned shim directly.
 Historical completion records below describe what was actually run at the time
-and must not be used to infer current runtime availability.
+and must not be used to infer current runtime availability. Do not rewrite
+those records to match the current host; the table above and fresh `--version`
+checks are authoritative for new tasks.
 
 ## Status dashboard
 
@@ -98,7 +100,11 @@ task may be `IN_PROGRESS`.
    `BLOCKED` with an exact explanation and stop.
 4. Re-open every linked OpenText 26.2 primary source before implementation.
    Record any material documentation contradiction in the task completion note;
-   do not resolve it by guessing server behavior.
+   do not resolve it by guessing server behavior. When primary-source sections
+   conflict, prefer the formal syntax and parameter tables over examples unless
+   a 26.2 server fixture proves otherwise, and record that choice. When a task
+   asks to pin a broad value grammar, document representative accepted,
+   rejected, boundary, and canonical-output examples before implementation.
 5. Implement only the stated scope. Explicit exclusions must either retain their
    already-documented behavior or fail closed when they are recognized members
    of the newly semantic family.
@@ -107,13 +113,16 @@ task may be `IN_PROGRESS`.
 7. Update the coverage matrix, roadmap, sources, architecture, and changelog as
    applicable. Change this task to `DONE`, update the dashboard, and add a short
    completion record with test counts and any deliberate boundary.
-8. Run the versioned pre-commit suite over the entire repository. If a fixer
-   changes files, inspect the diff, restage only task files, rerun affected tests
-   and the hook suite, and do not proceed until it is clean.
-9. Stage only the selected task and its plan/status updates. Commit locally with
-   the exact listed title so the installed code-quality and commit-message hooks
-   execute. Never use `--no-verify`, `SKIP`, or another hook bypass. Stop
-   immediately after the commit.
+8. Stage only the selected task and its plan/status updates, including all newly
+   created files, before the final versioned pre-commit run. This ensures
+   `pre_commit run --all-files` covers files that were previously untracked. If
+   a fixer changes files, inspect the diff, restage only task files, rerun
+   affected tests and the hook suite, and do not proceed until it is clean.
+9. Commit locally with the exact listed title so the installed code-quality and
+   commit-message hooks execute. Never use `--no-verify`, `SKIP`, or another
+   hook bypass. After the commit, run only `git status --short` and
+   `git log -1 --oneline` to verify a clean handoff and the expected commit,
+   then stop.
 10. If completion is genuinely impossible, set `BLOCKED`, document the exact
    repeated blocker and evidence, commit the status/docs if useful, and stop.
    Never skip ahead automatically.
@@ -174,7 +183,10 @@ Every feature task must complete all applicable checks:
    statement collision cases where applicable.
 7. Full default-runtime suite with branch coverage at or above 90%:
 
-   ```console
+   ```powershell
+   $taskId = "pNN" # replace with the selected task ID
+   $env:PRE_COMMIT_HOME = Join-Path $env:TEMP "vertica-pre-commit-$taskId"
+   $env:UV_CACHE_DIR = Join-Path $env:TEMP "vertica-uv-cache-$taskId"
    .venv/Scripts/python -m pre_commit run --all-files --show-diff-on-failure
    .venv/Scripts/python -m pytest --cov
    .venv/Scripts/python -m ruff check .
@@ -195,21 +207,30 @@ Every feature task must complete all applicable checks:
    foreach ($minor in @("3.9", "3.10", "3.11", "3.12", "3.13", "3.14")) {
        $python = Join-Path $env:USERPROFILE ".local\bin\python$minor.exe"
        & $python --version
-       uv run --isolated --python $python --extra dev python -m pytest
+       uv run --isolated --python $python --extra dev `
+           python -m pytest -p no:cacheprovider
    }
    $python315 = Join-Path $env:USERPROFILE ".local\bin\python3.15.exe"
    & $python315 --version
    uv run --isolated --python $python315 --extra dev `
-       python -W error::DeprecationWarning -m pytest
+       python -W error::DeprecationWarning -m pytest -p no:cacheprovider
    ```
 
    If a shim is missing or fails to run, diagnose the local installation and
    restore it with `uv python install <minor> --upgrade`; do not silently skip
-   the runtime or claim that it is unavailable.
+   the runtime or claim that it is unavailable. Isolated dependency resolution
+   can require PyPI access; if sandboxed networking blocks a required `uv` or
+   `pip` command, retry through the normal scoped approval mechanism rather than
+   weakening isolation or skipping the check.
 9. Build sdist/wheel without isolation when the sandbox cannot download build
-   dependencies. Force-install the exact new wheel into a clean `.wheel-venv`,
-   run `pip check`, and use `python -I` to verify entry-point discovery plus one
-   distinctive AST/round-trip smoke from this task.
+   dependencies. Use task-specific build and installation paths rather than
+   deleting or reusing `.wheel-venv`; for example, build to a task-specific
+   output directory and create a uniquely named environment under `$env:TEMP`
+   with `[guid]::NewGuid()`. Force-install the exact new wheel there, run
+   `pip check`, and use `python -I` to verify entry-point discovery plus one
+   distinctive AST/round-trip smoke from this task. Remove only generated build
+   directories created by the current task after verifying their resolved paths
+   are inside the workspace.
 
 ## Detailed tasks
 

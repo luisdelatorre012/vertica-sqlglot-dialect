@@ -2,6 +2,9 @@
 
 When a request refers to "the plan", "the next task", or "the next remaining
 task", read `docs/AGENT_TASK_PLAN.md` completely before editing anything.
+Requests to edit these repository instructions or the task plan itself do not
+select or start the next implementation task unless they explicitly ask to
+complete that task.
 
 - Resume the single `IN_PROGRESS` task. If none exists, take the lowest-numbered
   `TODO` task whose dependencies are `DONE`.
@@ -11,17 +14,30 @@ task", read `docs/AGENT_TASK_PLAN.md` completely before editing anything.
   update procedure, and commit title.
 - Preserve pre-existing worktree changes. They belong to the task identified in
   the plan unless the plan explicitly says otherwise.
+- Before running hooks or isolated tests, set writable task-specific caches
+  under `$env:TEMP`; do not rely on user-profile caches being writable:
+
+  ```powershell
+  $taskId = "pNN" # replace with the selected task ID
+  $env:PRE_COMMIT_HOME = Join-Path $env:TEMP "vertica-pre-commit-$taskId"
+  $env:UV_CACHE_DIR = Join-Path $env:TEMP "vertica-uv-cache-$taskId"
+  ```
+
 - On first use, install the repository hooks with
-  `python -m pre_commit install --install-hooks`. Before marking a task complete,
-  run `python -m pre_commit run --all-files --show-diff-on-failure` in addition
-  to the plan's full release gate.
+  `python -m pre_commit install --install-hooks`. Before the final repository-
+  wide hook run, stage only the selected task files, including every newly
+  created file, because `pre_commit run --all-files` does not include untracked
+  files. Then run
+  `python -m pre_commit run --all-files --show-diff-on-failure` in addition to
+  the plan's full release gate.
 - Commit normally so both the pre-commit and Conventional Commit message hooks
   execute. Never use `--no-verify`, `SKIP`, or another hook bypass. If a fixer
   changes files, inspect the diff, restage only task files, rerun affected tests
   and all hooks, and then retry the commit.
 - Update the selected task to `DONE` (or `BLOCKED`) and update the dashboard in
-  the same commit as the implementation. Stop after that local commit. Never
-  push; this repository intentionally has no remote.
+  the same commit as the implementation. After that local commit, run only
+  `git status --short` and `git log -1 --oneline` to verify the handoff, then
+  stop. Never push; this repository intentionally has no remote.
 
 ## Local CPython release matrix
 
@@ -48,6 +64,9 @@ versioned shims in `C:\Users\luisd\.local\bin`:
   environment regression to diagnose, not as evidence that the runtime was
   never installed.
 - Use isolated per-version environments (for example, `uv run --isolated
-  --python <shim> --extra dev python -m pytest`) so dependencies and bytecode do
-  not leak between minors. If the default `uv` cache cannot initialize, point
-  `UV_CACHE_DIR` at a writable task-specific directory under `$env:TEMP`.
+  --python <shim> --extra dev python -m pytest -p no:cacheprovider`) so
+  dependencies and bytecode do not leak between minors and pytest does not
+  attempt to write a shared repository cache. Dependency resolution by `uv` or
+  `pip` can require network access. If a required command fails because network
+  access is sandboxed, retry it through the normal scoped approval mechanism;
+  do not weaken isolation or silently omit the check.
