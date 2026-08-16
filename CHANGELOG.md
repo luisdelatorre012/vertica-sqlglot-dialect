@@ -49,6 +49,9 @@ plugin interface.
   validation, structured LOCAL/HOST TLS access, MFA/fallthrough flags,
   single-target cascading drops, and sanitized rejection of excluded ALTER SET
   values before they enter an AST.
+- Added one-action semantic ALTER AUTHENTICATION for enable/disable, LOCAL/HOST
+  TLS access, rename, finite methods, lexical nonnegative priority, Boolean MFA
+  state, and fallthrough state while retaining the ALTER SET secret firewall.
 - Added semantic classic and workload routing-rule lifecycle, every documented
   ALTER action, exact session workload/resource-pool assignment, SHOW workload
   controls, and canonical `ON ROUTING RULE` privilege alias handling.

@@ -119,14 +119,18 @@ large source digits, and reject only same-statement minimum/maximum conflicts
 that can be decided without catalog state. Profile assignment, inherited
 effects, ownership, and effects on current passwords remain server concerns.
 
-AUTHENTICATION creation and drop use atomic `CreateAuthentication` and
-`DropAuthentication` roots. `AuthenticationAccess` retains LOCAL versus HOST,
-the opaque HOST address string, and the three distinct TLS states (omitted,
-TLS, and NO TLS). METHOD is restricted to the eight 26.2 spellings and remains
-a standard string literal; MFA and fallthrough are explicit flags. The parser
-rejects method/fallthrough combinations that the primary source declares
-incompatible, while address validity, grants, priority, and runtime matching
-remain server concerns. No ALTER SET value has an AST slot: recognized
+AUTHENTICATION lifecycle uses atomic `CreateAuthentication`,
+`AlterAuthentication`, and `DropAuthentication` roots. `AuthenticationAccess`
+retains LOCAL versus HOST, the opaque HOST address string, and the three
+distinct TLS states (omitted, TLS, and NO TLS). CREATE flags and every ALTER
+structural change remain typed; ALTER accepts exactly one enable/disable,
+access, rename, finite method, lexical nonnegative priority, Boolean MFA, or
+fallthrough action. METHOD is restricted to the eight 26.2 spellings and
+remains a standard string literal. The parser rejects CREATE method/fallthrough
+combinations that the primary source declares incompatible; ALTER compatibility
+depends on the record's catalog method and remains server-side. Address
+validity, grants, priority effects, and runtime matching also remain server
+concerns. No ALTER SET value has an AST slot: recognized
 AUTHENTICATION SET input raises a fixed sanitized error before ordinary parser
 diagnostics can retain a credential, bind password, OAuth secret, key, URL, or
 unknown parameter value.

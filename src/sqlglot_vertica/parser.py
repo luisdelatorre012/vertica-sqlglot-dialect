@@ -5664,6 +5664,12 @@ class VerticaParser(PostgresParser):
             return self._parse_alter_user()
         if self._curr.text.upper() == "USER":
             self._raise_user_error("ALTER USER requires the unquoted USER object kind")
+        if self._match_authentication_object():
+            return self._parse_alter_authentication()
+        if self._curr.text.upper() == "AUTHENTICATION":
+            self._raise_authentication_error(
+                "ALTER AUTHENTICATION requires the unquoted ASCII object kind"
+            )
         if self._match_text_seq("RESOURCE", "POOL"):
             return self._parse_alter_resource_pool()
         if self._match_text_seq("ROUTING", "RULE"):
@@ -5684,6 +5690,102 @@ class VerticaParser(PostgresParser):
                 return self._parse_alter_table_partitioning(table)
         self._retreat(index)
         return super()._parse_alter()
+
+    def _parse_alter_authentication(self) -> vexp.AlterAuthentication:
+        target = self._parse_user_identifier("ALTER AUTHENTICATION")
+        if self._match_texts(("ENABLE", "DISABLE")):
+            action: exp.Expr = self.expression(
+                vexp.AuthenticationAction(this=exp.var(self._prev.text.upper()))
+            )
+        elif self._match_text_seq("LOCAL"):
+            action = self.expression(vexp.AuthenticationAccess(this=exp.var("LOCAL")))
+        elif self._match_text_seq("HOST"):
+            tls: bool | None = None
+            if self._match_text_seq("TLS"):
+                tls = True
+            elif self._match_text_seq("NO"):
+                if not self._match_text_seq("TLS"):
+                    self._raise_authentication_error("ALTER AUTHENTICATION HOST NO requires TLS")
+                tls = False
+            address = self._parse_string()
+            if not isinstance(address, exp.Literal) or not address.is_string:
+                self._raise_authentication_error(
+                    "ALTER AUTHENTICATION HOST requires a standard string literal"
+                )
+            action = self.expression(
+                vexp.AuthenticationAccess(
+                    this=exp.var("HOST"),
+                    expression=address,
+                    tls=tls,
+                )
+            )
+        elif self._match_text_seq("RENAME"):
+            if not self._match_text_seq("TO"):
+                self._raise_authentication_error("ALTER AUTHENTICATION RENAME requires TO")
+            action = self.expression(
+                exp.AlterRename(this=self._parse_user_identifier("ALTER AUTHENTICATION RENAME TO"))
+            )
+        elif self._match_text_seq("METHOD"):
+            method = self._parse_string()
+            if not isinstance(method, exp.Literal) or not method.is_string:
+                self._raise_authentication_error(
+                    "ALTER AUTHENTICATION METHOD requires a standard string literal"
+                )
+            assert isinstance(method, exp.Literal)
+            method_name = method.this.upper() if method.this.isascii() else ""
+            if method_name not in self.AUTHENTICATION_METHODS:
+                self._raise_authentication_error(
+                    "ALTER AUTHENTICATION METHOD requires one of "
+                    + ", ".join(sorted(self.AUTHENTICATION_METHODS))
+                )
+            method.set("this", method_name.lower())
+            action = self.expression(
+                vexp.AuthenticationAction(this=exp.var("METHOD"), expression=method)
+            )
+        elif self._match_text_seq("PRIORITY"):
+            if self._curr.token_type != TokenType.NUMBER or not self._curr.text.isdigit():
+                self._raise_authentication_error(
+                    "ALTER AUTHENTICATION PRIORITY requires an unsigned integer"
+                )
+            priority = self.expression(exp.Literal.number(self._curr.text))
+            self._advance()
+            action = self.expression(
+                vexp.AuthenticationAction(this=exp.var("PRIORITY"), expression=priority)
+            )
+        elif self._match_text_seq("ENFORCEMFA"):
+            if self._match(TokenType.TRUE):
+                state = True
+            elif self._match(TokenType.FALSE):
+                state = False
+            else:
+                self._raise_authentication_error(
+                    "ALTER AUTHENTICATION ENFORCEMFA requires TRUE or FALSE"
+                )
+            action = self.expression(
+                vexp.AuthenticationAction(
+                    this=exp.var("ENFORCEMFA"), expression=exp.Boolean(this=state)
+                )
+            )
+        else:
+            no_fallthrough = self._match_text_seq("NO")
+            if not self._match_text_seq("FALLTHROUGH"):
+                self._raise_authentication_error(
+                    "ALTER AUTHENTICATION requires a supported structural action"
+                )
+            marker = "NO FALLTHROUGH" if no_fallthrough else "FALLTHROUGH"
+            action = self.expression(vexp.AuthenticationAction(this=exp.var(marker)))
+
+        if self._curr:
+            self._raise_authentication_error(
+                f"Unexpected ALTER AUTHENTICATION clause at {self._curr.text!r}"
+            )
+        return self.expression(
+            vexp.AlterAuthentication(
+                this=target,
+                kind="AUTHENTICATION",
+                actions=[action],
+            )
+        )
 
     def _has_mixed_reorganize_action(self) -> bool:
         """Detect REORGANIZE only when it starts a later top-level ALTER action."""

@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P07 — AUTHENTICATION create/drop core**.
-- Next eligible tasks are selected by dependency and numeric order; P08 is the
+- Completed through **P08 — AUTHENTICATION structural ALTER actions**.
+- Next eligible tasks are selected by dependency and numeric order; P09 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -59,7 +59,7 @@ task may be `IN_PROGRESS`.
 | P05 | DONE | USER search path and default roles | P03 | `feat: model user path and default roles` |
 | P06 | DONE | Safe USER configuration/reset actions | P04, P05 | `feat: model safe user configuration actions` |
 | P07 | DONE | AUTHENTICATION create/drop core | P06 | `feat: model authentication creation and drop` |
-| P08 | TODO | AUTHENTICATION structural ALTER actions | P07 | `feat: model authentication alter actions` |
+| P08 | DONE | AUTHENTICATION structural ALTER actions | P07 | `feat: model authentication alter actions` |
 | P09 | TODO | AUTHENTICATION SET security boundary | P08 | `feat: add safe authentication parameters` |
 | P10 | TODO | COMMENT ON family | P02 | `feat: make Vertica comment statements semantic` |
 | P11 | TODO | VIEW lifecycle | P10 | `feat: complete semantic view lifecycle` |
@@ -486,7 +486,7 @@ gate passed 3511 tests at 93.57% branch coverage; isolated CPython 3.9.25,
 strict mypy, full pre-commit, sdist/wheel build, clean force-install, package
 compatibility check, and installed-wheel entry-point/round-trip smoke passed.
 
-### P08 — AUTHENTICATION structural ALTER actions — `TODO`
+### P08 — AUTHENTICATION structural ALTER actions — `DONE`
 
 **Outcome.** Add one-action typed ALTER roots without opening parameter/secret
 syntax.
@@ -500,7 +500,24 @@ lexical huge-number handling, and generator symmetry.
 
 **Primary source.** [ALTER AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-authentication/).
 
-**Completion record.** Pending.
+**Completion record.** Added atomic one-action `AlterAuthentication` roots with
+typed enable/disable, LOCAL/HOST TLS access, rename, all eight finite methods,
+lexically nonnegative priority, Boolean MFA state, and `[NO] FALLTHROUGH`
+actions. Action exclusivity, exact clause order, huge priorities, identifiers,
+serialization/optimizer/type traversal, strict programmatic ASTs, and foreign
+atomicity are covered; ALTER SET remains behind the fixed pre-AST sanitizer.
+The 26.2 source re-audit found one material contradiction: the formal syntax
+omits ENFORCEMFA while the parameter table documents dynamic enable/disable and
+explicit true/false state. This implementation follows the parameter table's
+finite `ENFORCEMFA TRUE|FALSE` form and records the boundary rather than
+admitting other spellings. Current-method compatibility, address validity,
+priority effects, privileges, and runtime behavior remain catalog/server
+concerns. The default CPython 3.12.6 gate passed 3679 tests at 93.51% branch
+coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15,
+3.14.7, and 3.15.0rc1 suites each passed 3679 tests, with 3.15 treating
+deprecations as errors. Ruff, formatting, strict mypy, full pre-commit,
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+entry-point/ALTER round-trip smoke passed.
 
 ### P09 — AUTHENTICATION SET security boundary — `TODO`
 

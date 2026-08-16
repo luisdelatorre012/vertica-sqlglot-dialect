@@ -1079,6 +1079,19 @@ class CreateAuthentication(exp.Create):
     }
 
 
+class AuthenticationAction(exp.Expression):
+    """One non-access, non-rename ``ALTER AUTHENTICATION`` action."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": False,
+    }
+
+
+class AlterAuthentication(exp.Alter):
+    """Apply exactly one structural change to an authentication record."""
+
+
 class DropAuthentication(exp.Drop):
     """Drop one Vertica authentication record."""
 

@@ -81,10 +81,10 @@ Implemented P0:
 
 P1:
 
-- add the non-secret AUTHENTICATION CREATE/DROP core with finite methods,
-  structured LOCAL/HOST access, MFA/fallthrough flags, and sanitized rejection
-  of every ALTER SET value; structural ALTER and its separately audited safe
-  parameter boundary remain queued;
+- add the non-secret AUTHENTICATION CREATE/ALTER/DROP core with finite methods,
+  structured LOCAL/HOST access, one-action enable/disable, rename, lexical
+  priority, MFA/fallthrough state, and sanitized rejection of every ALTER SET
+  value; the separately audited safe parameter boundary remains queued;
 - expand privilege targets for UDx, data loaders, keys, libraries, and TLS
   configurations.
 

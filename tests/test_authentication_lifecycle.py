@@ -89,6 +89,99 @@ def test_programmatic_authentication_generation() -> None:
     assert _strict(drop) == "DROP AUTHENTICATION IF EXISTS ldap_auth CASCADE"
 
 
+@pytest.mark.parametrize(
+    ("sql", "action_type"),
+    [
+        ("ALTER AUTHENTICATION a ENABLE", vexp.AuthenticationAction),
+        ("ALTER AUTHENTICATION a DISABLE", vexp.AuthenticationAction),
+        ("ALTER AUTHENTICATION a LOCAL", vexp.AuthenticationAccess),
+        ("ALTER AUTHENTICATION a HOST '0.0.0.0/0'", vexp.AuthenticationAccess),
+        ("ALTER AUTHENTICATION a HOST TLS '::/0'", vexp.AuthenticationAccess),
+        ("ALTER AUTHENTICATION a HOST NO TLS 'host.example'", vexp.AuthenticationAccess),
+        ("ALTER AUTHENTICATION a RENAME TO renamed", exp.AlterRename),
+        ("ALTER AUTHENTICATION a METHOD 'ldap'", vexp.AuthenticationAction),
+        ("ALTER AUTHENTICATION a PRIORITY 0", vexp.AuthenticationAction),
+        ("ALTER AUTHENTICATION a PRIORITY 123", vexp.AuthenticationAction),
+        ("ALTER AUTHENTICATION a ENFORCEMFA TRUE", vexp.AuthenticationAction),
+        ("ALTER AUTHENTICATION a ENFORCEMFA FALSE", vexp.AuthenticationAction),
+        ("ALTER AUTHENTICATION a FALLTHROUGH", vexp.AuthenticationAction),
+        ("ALTER AUTHENTICATION a NO FALLTHROUGH", vexp.AuthenticationAction),
+    ],
+)
+def test_alter_authentication_actions_are_typed(sql: str, action_type: type[exp.Expr]) -> None:
+    expression = assert_roundtrip(sql)
+    assert isinstance(expression, vexp.AlterAuthentication)
+    assert expression.kind == "AUTHENTICATION"
+    assert len(expression.actions) == 1
+    assert isinstance(expression.actions[0], action_type)
+    for parent in expression.walk():
+        for child in parent.iter_expressions():
+            assert child.parent is parent
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_all_alter_authentication_methods_are_finite(method: str) -> None:
+    expression = assert_roundtrip(f"ALTER AUTHENTICATION a METHOD '{method}'")
+    action = expression.actions[0]
+    assert isinstance(action, vexp.AuthenticationAction)
+    assert action.args["expression"] == exp.Literal.string(method)
+
+
+def test_alter_authentication_huge_priority_is_lexical() -> None:
+    digits = "9" * 10_000
+    expression = assert_roundtrip(f"ALTER AUTHENTICATION a PRIORITY {digits}")
+    action = expression.actions[0]
+    assert isinstance(action, vexp.AuthenticationAction)
+    assert action.args["expression"].this == digits
+
+
+def test_programmatic_alter_authentication_generation() -> None:
+    alter = vexp.AlterAuthentication(
+        this=_identifier("a"),
+        kind="AUTHENTICATION",
+        actions=[
+            vexp.AuthenticationAction(
+                this=exp.var("ENFORCEMFA"), expression=exp.Boolean(this=False)
+            )
+        ],
+    )
+    assert _strict(alter) == "ALTER AUTHENTICATION a ENFORCEMFA FALSE"
+    alter.set("actions", [_access("HOST", "::/0", tls=True)])
+    assert _strict(alter) == "ALTER AUTHENTICATION a HOST TLS '::/0'"
+
+
+def test_alter_authentication_serialization_transform_optimizer_comments_and_batches() -> None:
+    expression = parse_one(
+        "/* lead */ ALTER AUTHENTICATION a HOST TLS '10.0.0.0/8' /* tail */",
+        read="vertica",
+    )
+    assert expression.copy() == expression
+    assert exp.Expr.load(expression.dump()) == expression
+    transformed = expression.transform(
+        lambda node: (
+            exp.Literal.string("host.example")
+            if isinstance(node, exp.Literal) and node.this == "10.0.0.0/8"
+            else node
+        )
+    )
+    assert "'host.example'" in _strict(transformed)
+    optimized = optimize(expression, dialect="vertica")
+    assert isinstance(optimized, vexp.AlterAuthentication)
+    assert parse_one(_strict(optimized), read="vertica") == optimized
+    annotated = annotate_types(expression.copy(), dialect="vertica")
+    assert annotated.find(vexp.AuthenticationAccess).type == exp.DType.UNKNOWN.into_expr()
+    statements = parse(
+        "ALTER AUTHENTICATION a ENABLE; GRANT AUTHENTICATION a TO analyst; "
+        "ALTER AUTHENTICATION a PRIORITY 2",
+        read="vertica",
+    )
+    assert [type(statement) for statement in statements] == [
+        vexp.AlterAuthentication,
+        vexp.AuthenticationGrant,
+        vexp.AlterAuthentication,
+    ]
+
+
 def test_serialization_transform_optimizer_types_comments_and_batches() -> None:
     expression = parse_one(
         "CREATE AUTHENTICATION ldap_auth METHOD 'ldap' HOST TLS '10.0.0.0/8' ENFORCEMFA",
@@ -182,10 +275,75 @@ def test_confusable_authentication_kind_does_not_dispatch() -> None:
     assert not isinstance(expression, vexp.CreateAuthentication)
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER AUTHENTICATION",
+        "ALTER AUTHENTICATION a",
+        "ALTER AUTHENTICATION a ENABLE DISABLE",
+        "ALTER AUTHENTICATION a LOCAL HOST 'address'",
+        "ALTER AUTHENTICATION a LOCAL 'address'",
+        "ALTER AUTHENTICATION a HOST",
+        "ALTER AUTHENTICATION a HOST TLS",
+        "ALTER AUTHENTICATION a HOST NO 'address'",
+        "ALTER AUTHENTICATION a HOST NO TLS",
+        "ALTER AUTHENTICATION a HOST 'address' TLS",
+        "ALTER AUTHENTICATION a RENAME",
+        "ALTER AUTHENTICATION a RENAME b",
+        "ALTER AUTHENTICATION a RENAME TO",
+        "ALTER AUTHENTICATION a METHOD",
+        "ALTER AUTHENTICATION a METHOD ldap",
+        "ALTER AUTHENTICATION a METHOD 'password'",
+        "ALTER AUTHENTICATION a PRIORITY",
+        "ALTER AUTHENTICATION a PRIORITY -1",
+        "ALTER AUTHENTICATION a PRIORITY +1",
+        "ALTER AUTHENTICATION a PRIORITY 1.0",
+        "ALTER AUTHENTICATION a PRIORITY '1'",
+        "ALTER AUTHENTICATION a ENFORCEMFA",
+        "ALTER AUTHENTICATION a ENFORCEMFA 1",
+        "ALTER AUTHENTICATION a ENFORCEMFA 'true'",
+        "ALTER AUTHENTICATION a NO",
+        "ALTER AUTHENTICATION a NO ENFORCEMFA",
+        "ALTER AUTHENTICATION a FALLTHROUGH PRIORITY 1",
+        "ALTER IF EXISTS AUTHENTICATION a ENABLE",
+        "ALTER AUTHENTICATION a SET safe = 1",
+    ],
+)
+@pytest.mark.parametrize(
+    "error_level", [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE]
+)
+def test_invalid_alter_authentication_syntax_fails_closed(
+    sql: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'ALTER "AUTHENTICATION" a ENABLE',
+        'ALTER AUTHENTICATION a "ENABLE"',
+        "ALTER AUTHENTICATION a HOST \"TLS\" 'address'",
+        "ALTER AUTHENTICATION a HOST \"NO\" TLS 'address'",
+        'ALTER AUTHENTICATION a "RENAME" TO b',
+        'ALTER AUTHENTICATION a RENAME "TO" b',
+        "ALTER AUTHENTICATION a \"METHOD\" 'ldap'",
+        'ALTER AUTHENTICATION a "PRIORITY" 1',
+        'ALTER AUTHENTICATION a "ENFORCEMFA" TRUE',
+        'ALTER AUTHENTICATION a "FALLTHROUGH"',
+    ],
+)
+def test_alter_authentication_keyword_provenance_is_exact(sql: str) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica")
+
+
 def test_authentication_identifier_contract_and_dispatch_collisions() -> None:
     exact = f"a{'é' * 63}b"
     assert len(exact.encode()) == 128
     assert_roundtrip(f"CREATE AUTHENTICATION {exact} METHOD 'hash' LOCAL")
+    assert_roundtrip(f"ALTER AUTHENTICATION {exact} ENABLE")
     with pytest.raises(ParseError):
         parse_one(f"CREATE AUTHENTICATION {exact}é METHOD 'hash' LOCAL", read="vertica")
     with pytest.raises(ParseError):
@@ -202,7 +360,10 @@ def test_authentication_identifier_contract_and_dispatch_collisions() -> None:
         "CREATE TABLE authentication (id INT)",
     ):
         expression = parse_one(sql, read="vertica")
-        assert not isinstance(expression, (vexp.CreateAuthentication, vexp.DropAuthentication))
+        assert not isinstance(
+            expression,
+            (vexp.CreateAuthentication, vexp.AlterAuthentication, vexp.DropAuthentication),
+        )
 
 
 @pytest.mark.parametrize(
@@ -238,6 +399,8 @@ def test_excluded_authentication_set_values_are_sanitized(
     [
         "CREATE AUTHENTICATION a METHOD 'hash' LOCAL",
         "CREATE AUTHENTICATION a METHOD 'ldap' HOST TLS 'address' ENFORCEMFA FALLTHROUGH",
+        "ALTER AUTHENTICATION a HOST NO TLS 'address'",
+        "ALTER AUTHENTICATION a ENFORCEMFA FALSE",
         "DROP AUTHENTICATION IF EXISTS a CASCADE",
     ],
 )
@@ -302,6 +465,40 @@ def test_authentication_roots_fail_atomically_in_foreign_dialects(sql: str, dial
         vexp.DropAuthentication(kind="AUTHENTICATION"),
         vexp.DropAuthentication(this=_identifier("a"), kind="TABLE"),
         vexp.DropAuthentication(this=_identifier("a"), kind="AUTHENTICATION", exists="yes"),
+        vexp.AlterAuthentication(
+            this=_identifier("a"),
+            kind="TABLE",
+            actions=[vexp.AuthenticationAction(this=exp.var("ENABLE"))],
+        ),
+        vexp.AlterAuthentication(this=_identifier("a"), kind="AUTHENTICATION", actions=[]),
+        vexp.AlterAuthentication(
+            this=_identifier("a"),
+            kind="AUTHENTICATION",
+            actions=[
+                vexp.AuthenticationAction(this=exp.var("ENABLE")),
+                vexp.AuthenticationAction(this=exp.var("DISABLE")),
+            ],
+        ),
+        vexp.AlterAuthentication(
+            this=_identifier("a"), kind="AUTHENTICATION", actions=[exp.var("ENABLE")]
+        ),
+        vexp.AlterAuthentication(
+            this=_identifier("a"),
+            kind="AUTHENTICATION",
+            actions=[
+                vexp.AuthenticationAction(
+                    this=exp.var("PRIORITY"), expression=exp.Literal.number("-1")
+                )
+            ],
+        ),
+        vexp.AlterAuthentication(
+            this=_identifier("a"),
+            kind="AUTHENTICATION",
+            actions=[
+                vexp.AuthenticationAction(this=exp.var("ENFORCEMFA"), expression=exp.var("TRUE"))
+            ],
+        ),
+        vexp.AuthenticationAction(this=exp.var("BOGUS")),
         _set_arg(_access("LOCAL"), "bogus", True),
     ],
 )
@@ -316,5 +513,9 @@ def test_authentication_access_leaf_fails_in_foreign_dialects() -> None:
     for dialect in ("postgres", "duckdb", "mysql", "sqlite"):
         with pytest.raises((UnsupportedError, ValueError)):
             _access("HOST", "address", tls=True).sql(
+                dialect=dialect, unsupported_level=ErrorLevel.RAISE
+            )
+        with pytest.raises((UnsupportedError, ValueError)):
+            vexp.AuthenticationAction(this=exp.var("ENABLE")).sql(
                 dialect=dialect, unsupported_level=ErrorLevel.RAISE
             )

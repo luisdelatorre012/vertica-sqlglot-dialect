@@ -184,6 +184,7 @@ called out in code review.
 ## Audited next-phase statements
 
 - [CREATE AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-authentication/)
+- [ALTER AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-authentication/)
 - [DROP AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-authentication/)
 - [Creating authentication records](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/creating-authentication-records/)
 

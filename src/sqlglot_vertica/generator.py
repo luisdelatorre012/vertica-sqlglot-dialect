@@ -305,6 +305,10 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AuthenticationAccess: lambda self, expression: self.authenticationaccess_sql(
             expression
         ),
+        vexp.AuthenticationAction: lambda self, expression: self.authenticationaction_sql(
+            expression
+        ),
+        vexp.AlterAuthentication: lambda self, expression: self.alterauthentication_sql(expression),
         vexp.AlterLoadBalanceGroup: lambda self, expression: self.alterloadbalancegroup_sql(
             expression
         ),
@@ -1295,6 +1299,93 @@ class VerticaGenerator(PostgresGenerator):
             return ""
         tls_sql = " TLS" if tls is True else " NO TLS" if tls is False else ""
         return f"HOST{tls_sql} {self.sql(address)}"
+
+    def alterauthentication_sql(self, expression: vexp.AlterAuthentication) -> str:
+        valid = True
+        if expression.args.get("kind") != "AUTHENTICATION":
+            self.unsupported("AlterAuthentication requires kind AUTHENTICATION")
+            valid = False
+        if self._has_user_extras(expression, {"this", "kind", "actions"}):
+            self.unsupported("ALTER AUTHENTICATION does not support additional ALTER clauses")
+            valid = False
+        valid = (
+            self._validate_user_identifier(expression.args.get("this"), "ALTER AUTHENTICATION name")
+            and valid
+        )
+        actions = expression.args.get("actions")
+        if not isinstance(actions, list) or len(actions) != 1:
+            self.unsupported("ALTER AUTHENTICATION requires exactly one action")
+            valid = False
+            action = None
+        else:
+            action = actions[0]
+        if isinstance(action, exp.AlterRename):
+            if self._has_user_extras(action, {"this"}) or not self._validate_user_identifier(
+                action.args.get("this"), "ALTER AUTHENTICATION RENAME TO name"
+            ):
+                valid = False
+        elif not isinstance(action, (vexp.AuthenticationAccess, vexp.AuthenticationAction)):
+            self.unsupported("ALTER AUTHENTICATION requires a typed structural action")
+            valid = False
+        if not valid or action is None:
+            return ""
+        return f"ALTER AUTHENTICATION {self.sql(expression, 'this')} {self.sql(action)}"
+
+    def authenticationaction_sql(self, expression: vexp.AuthenticationAction) -> str:
+        if self._has_user_extras(expression, {"this", "expression"}):
+            self.unsupported("AuthenticationAction contains unsupported fields")
+            return ""
+        marker = expression.args.get("this")
+        if (
+            not isinstance(marker, exp.Var)
+            or not isinstance(marker.this, str)
+            or not marker.this.isascii()
+            or self._has_user_extras(marker, {"this"})
+        ):
+            self.unsupported("AuthenticationAction requires a typed ASCII marker")
+            return ""
+        action = marker.this.upper()
+        value = expression.args.get("expression")
+        if action in {"ENABLE", "DISABLE", "FALLTHROUGH", "NO FALLTHROUGH"}:
+            if value is not None:
+                self.unsupported(f"ALTER AUTHENTICATION {action} does not accept a value")
+                return ""
+            return action
+        if action == "METHOD":
+            if (
+                not isinstance(value, exp.Literal)
+                or not value.is_string
+                or not isinstance(value.this, str)
+                or not value.this.isascii()
+                or value.this.upper() not in self.AUTHENTICATION_METHODS
+                or self._has_user_extras(value, {"this", "is_string"})
+            ):
+                self.unsupported("ALTER AUTHENTICATION METHOD requires a reviewed method string")
+                return ""
+            return f"METHOD '{value.this.lower()}'"
+        if action == "PRIORITY":
+            if (
+                not isinstance(value, exp.Literal)
+                or value.is_string
+                or not isinstance(value.this, str)
+                or not value.this.isascii()
+                or not value.this.isdigit()
+                or self._has_user_extras(value, {"this", "is_string"})
+            ):
+                self.unsupported("ALTER AUTHENTICATION PRIORITY requires an unsigned integer")
+                return ""
+            return f"PRIORITY {value.this}"
+        if action == "ENFORCEMFA":
+            if (
+                not isinstance(value, exp.Boolean)
+                or not isinstance(value.this, bool)
+                or self._has_user_extras(value, {"this"})
+            ):
+                self.unsupported("ALTER AUTHENTICATION ENFORCEMFA requires TRUE or FALSE")
+                return ""
+            return f"ENFORCEMFA {'TRUE' if value.this else 'FALSE'}"
+        self.unsupported("Unsupported ALTER AUTHENTICATION action")
+        return ""
 
     def dropauthentication_sql(self, expression: vexp.DropAuthentication) -> str:
         valid = True
