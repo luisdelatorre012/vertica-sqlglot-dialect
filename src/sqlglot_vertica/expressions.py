@@ -524,6 +524,26 @@ class DropLibrary(exp.Drop):
     }
 
 
+class CommentConstraintTarget(exp.Expression):
+    """A named table constraint and the table that owns it."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": True,
+    }
+
+
+class CommentOn(exp.Comment):
+    """Add, replace, or remove a comment on a Vertica catalog object."""
+
+    arg_types: t.ClassVar = {
+        **exp.Comment.arg_types,
+        "this": True,
+        "kind": True,
+        "expression": True,
+    }
+
+
 class ProjectionColumn(exp.Expression):
     """A column declaration in a Vertica projection definition."""
 

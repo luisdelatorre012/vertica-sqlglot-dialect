@@ -93,6 +93,8 @@ P1:
 
 Implemented catalog P0:
 
+- semantic COMMENT ON statements for every documented catalog-object and
+  routine target, including typed ownership paths and `NULL` removal;
 - semantic `CREATE`/`DROP LIBRARY` with dependency, language, and cascade
   clauses;
 - a shared semantic factory specification for scalar, aggregate, analytic,

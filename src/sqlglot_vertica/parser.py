@@ -719,6 +719,110 @@ class VerticaParser(PostgresParser):
                 )
         return expression
 
+    def _parse_comment(self, allow_exists: bool = True) -> vexp.CommentOn:
+        del allow_exists
+        original_error_level = self.error_level
+        self.error_level = ErrorLevel.IMMEDIATE
+        try:
+            return self._parse_vertica_comment()
+        finally:
+            self.error_level = original_error_level
+
+    def _parse_vertica_comment(self) -> vexp.CommentOn:
+        if not self._match(TokenType.ON):
+            self._raise_comment_error("Vertica COMMENT requires ON")
+
+        kind = self._parse_comment_kind()
+        if not kind:
+            self._raise_comment_error("Unsupported Vertica COMMENT ON target kind")
+
+        if kind in {
+            "AGGREGATE FUNCTION",
+            "ANALYTIC FUNCTION",
+            "FUNCTION",
+            "TRANSFORM FUNCTION",
+        }:
+            target: exp.Expr = self._parse_security_routine_signature()
+        elif kind == "COLUMN":
+            parsed_column = self._parse_column()
+            if not isinstance(parsed_column, exp.Column) or not isinstance(
+                parsed_column.args.get("table"), exp.Identifier
+            ):
+                self._raise_comment_error(
+                    "COMMENT ON COLUMN requires an owning table or projection"
+                )
+            target = parsed_column
+        elif kind == "CONSTRAINT":
+            constraint = self._parse_security_identifier("constraint name")
+            if not self._match(TokenType.ON):
+                self._raise_comment_error("COMMENT ON CONSTRAINT requires ON table")
+            table = self._parse_catalog_object_name("COMMENT ON CONSTRAINT table")
+            target = self.expression(
+                vexp.CommentConstraintTarget(this=constraint, expression=table)
+            )
+        else:
+            target = self._parse_catalog_object_name(f"COMMENT ON {kind}")
+            if kind == "NODE" and (target.args.get("db") or target.args.get("catalog")):
+                self._raise_comment_error("COMMENT ON NODE names cannot be qualified")
+            if kind == "SCHEMA" and target.args.get("catalog"):
+                self._raise_comment_error("COMMENT ON SCHEMA accepts at most a database qualifier")
+
+        if not self._match(TokenType.IS):
+            self._raise_comment_error(f"COMMENT ON {kind} requires IS")
+        if self._match(TokenType.NULL):
+            value: exp.Expr = self.expression(exp.Null())
+        elif self._curr.token_type == TokenType.STRING:
+            parsed_value = self._parse_string()
+            if not isinstance(parsed_value, exp.Literal) or not parsed_value.is_string:
+                self._raise_comment_error("COMMENT ON requires a standard string literal or NULL")
+            value = parsed_value
+        else:
+            self._raise_comment_error("COMMENT ON requires a standard string literal or NULL")
+
+        if self._curr:
+            self._raise_comment_error(f"Unexpected COMMENT ON clause at {self._curr.text!r}")
+        return self.expression(vexp.CommentOn(this=target, kind=kind, expression=value))
+
+    def _parse_comment_kind(self) -> str | None:
+        kinds = (
+            "AGGREGATE FUNCTION",
+            "ANALYTIC FUNCTION",
+            "TRANSFORM FUNCTION",
+            "COLUMN",
+            "CONSTRAINT",
+            "FUNCTION",
+            "LIBRARY",
+            "NODE",
+            "PROJECTION",
+            "SCHEMA",
+            "SEQUENCE",
+            "TABLE",
+            "VIEW",
+        )
+        for kind in kinds:
+            index = self._index
+            matched = True
+            for word in kind.split():
+                token = self._curr
+                if (
+                    token.token_type in {TokenType.IDENTIFIER, TokenType.STRING}
+                    or not token.text.isascii()
+                    or token.text.upper() != word
+                ):
+                    matched = False
+                    break
+                self._advance()
+            if matched:
+                return kind
+            self._retreat(index)
+        return None
+
+    def _raise_comment_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
     def _parse_profile_statement(self, comments: list[str]) -> vexp.ProfileStatement:
         if not self._curr:
             self._raise_profile_error("PROFILE requires one SQL statement")

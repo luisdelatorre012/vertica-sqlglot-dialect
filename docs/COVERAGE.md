@@ -70,6 +70,7 @@ Status meanings:
 | Named sequences | Semantic | Ordered CREATE/ALTER behavior options, explicit `NO` forms, restart/rename/schema/owner actions, and multi-object DROP; catalog-dependent numeric consistency remains server validation |
 | `CREATE SCHEMA` | Partial | Authorization, default privilege inheritance, namespace-qualified names, and quota are semantic; compound schema transactions containing embedded DDL/GRANT sub-statements remain planned |
 | `CREATE VIEW` | Semantic | Replacement, explicit column names, schema-qualified names, inherited privileges, and query bodies |
+| `COMMENT ON` statements | Semantic | Aggregate, analytic, scalar, and transform routine signatures plus column, constraint, library, node, projection, schema, sequence, table, and view targets are typed; standard-string comments and `NULL` removal are preserved |
 | Flex tables and map-specific DDL | Planned | Map functions currently parse generically |
 
 ## Security, administration, and physical maintenance
@@ -107,6 +108,9 @@ Some rules require information that a syntax-only dialect does not have:
   structural restrictions but cannot validate those catalog relationships.
 - Physical-design expression validity can depend on volatility and catalog
   metadata.
+- COMMENT ON target existence/ownership and the server's documented
+  8192-character truncation/message behavior require the catalog or execution;
+  the dialect validates target shape and string-or-NULL syntax only.
 - DML target existence and object kind, privileges, constraints, coercions,
   defaults, projection state, source-row uniqueness, join multiplicity, locks,
   quotas, and transaction effects require catalog data or execution. The

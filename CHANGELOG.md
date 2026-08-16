@@ -69,6 +69,10 @@ plugin interface.
 - Added semantic CREATE/DROP LIBRARY and shared factory-backed scalar,
   aggregate, analytic, transform, filter, parser, and source UDx catalog DDL,
   including language/fence validation and explicit typed drop signatures.
+- Added semantic COMMENT ON statements for aggregate, analytic, scalar, and
+  transform functions, columns, constraints, libraries, nodes, projections,
+  schemas, sequences, tables, and views, including typed routine/ownership
+  targets and `NULL` comment removal.
 - Added structured COPY targets, sources, formats, parser pipelines, error
   handling, and validation.
 - Added semantic regular external tables backed by targetless COPY definitions,

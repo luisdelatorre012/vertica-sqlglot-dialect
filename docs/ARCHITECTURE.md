@@ -209,6 +209,15 @@ family-specific empty/named/typed signature rules. This keeps security grants
 and external-procedure signatures unchanged. Library lifecycle uses separate
 CREATE/DROP roots for the same foreign-generation guarantee.
 
+The documented COMMENT ON family uses one atomic `CommentOn` root. Qualified
+catalog objects and columns remain canonical table/column children, routine
+targets reuse `RoutineSignature`, and `CommentConstraintTarget` keeps the
+constraint name and owning table separate. The comment value is exactly one
+standard string literal or `NULL`; the latter preserves comment removal rather
+than conflating it with an absent AST child. Catalog ownership/existence and
+the server's documented 8192-character truncation remain server concerns.
+Foreign dialects reject both the root and the detached constraint target.
+
 Directed-query statements use atomic custom roots because SQLGlot has no
 canonical SAVE/GET/CREATE/activation lifecycle. Their input SELECTs and WHERE
 filters remain ordinary traversable query children. `DirectedConstantHint`

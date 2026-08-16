@@ -351,6 +351,10 @@ class VerticaGenerator(PostgresGenerator):
             self.createuserdefinedextension_sql(expression)
         ),
         vexp.CreateUser: lambda self, expression: self.createuser_sql(expression),
+        vexp.CommentConstraintTarget: lambda self, expression: self.commentconstrainttarget_sql(
+            expression
+        ),
+        vexp.CommentOn: lambda self, expression: self.commenton_sql(expression),
         vexp.CopyColumn: lambda self, expression: self.copycolumn_sql(expression),
         vexp.CopyFile: lambda self, expression: self.copyfile_sql(expression),
         vexp.CopyFiles: lambda self, expression: self.copyfiles_sql(expression),
@@ -3530,6 +3534,109 @@ class VerticaGenerator(PostgresGenerator):
 
     def routinesignature_sql(self, expression: vexp.RoutineSignature) -> str:
         return f"{self.sql(expression, 'this')}({self.expressions(expression, flat=True)})"
+
+    def commentconstrainttarget_sql(self, expression: vexp.CommentConstraintTarget) -> str:
+        constraint = expression.args.get("this")
+        table = expression.args.get("expression")
+        if not isinstance(constraint, exp.Identifier):
+            self.unsupported("COMMENT ON CONSTRAINT requires an unqualified constraint name")
+        table_sql = self._catalog_name_sql(table, "COMMENT ON CONSTRAINT table")
+        return f"{self.sql(constraint)} ON {table_sql}"
+
+    def commenton_sql(self, expression: vexp.CommentOn) -> str:
+        kinds = {
+            "AGGREGATE FUNCTION",
+            "ANALYTIC FUNCTION",
+            "COLUMN",
+            "CONSTRAINT",
+            "FUNCTION",
+            "LIBRARY",
+            "NODE",
+            "PROJECTION",
+            "SCHEMA",
+            "SEQUENCE",
+            "TABLE",
+            "TRANSFORM FUNCTION",
+            "VIEW",
+        }
+        kind = expression.args.get("kind")
+        if kind not in kinds:
+            self.unsupported(f"Unsupported Vertica COMMENT ON target kind: {kind}")
+        if expression.args.get("exists") or expression.args.get("materialized"):
+            self.unsupported("Vertica COMMENT ON does not support modifiers")
+
+        target = expression.args.get("this")
+        routine_kinds = {
+            "AGGREGATE FUNCTION",
+            "ANALYTIC FUNCTION",
+            "FUNCTION",
+            "TRANSFORM FUNCTION",
+        }
+        if kind in routine_kinds:
+            target_sql = self._comment_routine_signature_sql(target, kind)
+        elif kind == "COLUMN":
+            target_sql = self._comment_column_sql(target)
+        elif kind == "CONSTRAINT":
+            if not isinstance(target, vexp.CommentConstraintTarget):
+                self.unsupported("COMMENT ON CONSTRAINT requires a structured table target")
+            target_sql = self.sql(target)
+        else:
+            target_sql = self._catalog_name_sql(target, f"COMMENT ON {kind}")
+            if isinstance(target, exp.Table):
+                if kind == "NODE" and (target.args.get("db") or target.args.get("catalog")):
+                    self.unsupported("COMMENT ON NODE names cannot be qualified")
+                if kind == "SCHEMA" and target.args.get("catalog"):
+                    self.unsupported("COMMENT ON SCHEMA accepts at most a database qualifier")
+
+        value = expression.args.get("expression")
+        if not isinstance(value, exp.Null) and not (
+            isinstance(value, exp.Literal) and value.is_string
+        ):
+            self.unsupported("COMMENT ON requires a string literal or NULL")
+        return f"COMMENT ON {kind} {target_sql} IS {self.sql(value)}"
+
+    def _comment_routine_signature_sql(self, value: object, kind: str) -> str:
+        if not isinstance(value, vexp.RoutineSignature):
+            self.unsupported(f"COMMENT ON {kind} requires a typed routine signature")
+            return self.sql(value) if isinstance(value, exp.Expr) else ""
+        name = self._catalog_name_sql(value.args.get("this"), f"COMMENT ON {kind}")
+        arguments = value.args.get("expressions")
+        if not isinstance(arguments, list) or any(
+            not isinstance(argument, (exp.DataType, exp.ColumnDef)) for argument in arguments
+        ):
+            self.unsupported(f"COMMENT ON {kind} requires typed routine arguments")
+            arguments = []
+        for argument in arguments:
+            if isinstance(argument, exp.ColumnDef) and (
+                not isinstance(argument.args.get("this"), exp.Identifier)
+                or not isinstance(argument.args.get("kind"), exp.DataType)
+                or any(
+                    argument.args.get(key)
+                    for key in argument.arg_types
+                    if key not in {"this", "kind"}
+                )
+            ):
+                self.unsupported(f"COMMENT ON {kind} has a malformed named argument")
+        return f"{name}({self.expressions(value, flat=True)})"
+
+    def _comment_column_sql(self, value: object) -> str:
+        if not isinstance(value, exp.Column) or not isinstance(
+            value.args.get("this"), exp.Identifier
+        ):
+            self.unsupported("COMMENT ON COLUMN requires a qualified column")
+            return self.sql(value) if isinstance(value, exp.Expr) else ""
+        if not isinstance(value.args.get("table"), exp.Identifier) or any(
+            part is not None and not isinstance(part, exp.Identifier)
+            for part in (value.args.get("db"), value.args.get("catalog"))
+        ):
+            self.unsupported("COMMENT ON COLUMN requires an owning table or projection")
+        if any(
+            value.args.get(key)
+            for key in value.arg_types
+            if key not in {"this", "table", "db", "catalog"}
+        ):
+            self.unsupported("COMMENT ON COLUMN does not support expression modifiers")
+        return self.sql(value)
 
     def createuserdefinedextension_sql(self, expression: vexp.CreateUserDefinedExtension) -> str:
         kind = expression.kind or ""

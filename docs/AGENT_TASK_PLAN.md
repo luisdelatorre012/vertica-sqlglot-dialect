@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P09 — AUTHENTICATION SET security boundary**.
-- Next eligible tasks are selected by dependency and numeric order; P10 is the
+- Completed through **P10 — COMMENT ON family**.
+- Next eligible tasks are selected by dependency and numeric order; P11 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -61,7 +61,7 @@ task may be `IN_PROGRESS`.
 | P07 | DONE   | AUTHENTICATION create/drop core               | P06                 | `feat: model authentication creation and drop`          |
 | P08 | DONE   | AUTHENTICATION structural ALTER actions       | P07                 | `feat: model authentication alter actions`              |
 | P09 | DONE   | AUTHENTICATION SET security boundary          | P08                 | `feat: add safe authentication parameters`              |
-| P10 | TODO   | COMMENT ON family                             | P02                 | `feat: make Vertica comment statements semantic`        |
+| P10 | DONE   | COMMENT ON family                             | P02                 | `feat: make Vertica comment statements semantic`        |
 | P11 | TODO   | VIEW lifecycle                                | P10                 | `feat: complete semantic view lifecycle`                |
 | P12 | TODO   | SCHEMA lifecycle                              | P11                 | `feat: complete semantic schema lifecycle`              |
 | P13 | TODO   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
@@ -285,7 +285,7 @@ deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel build, clean
 force-install, `pip check`, and installed-wheel entry-point/SET round-trip smoke
 passed.
 
-### P10 — COMMENT ON family — `TODO`
+### P10 — COMMENT ON family — `DONE`
 
 **Outcome.** Make the complete documented COMMENT ON family semantic, including
 comment removal with `NULL`.
@@ -302,7 +302,23 @@ length/truncation behavior.
 
 **Primary source.** [COMMENT ON statements](https://docs.vertica.com/26.2.x/en/sql-reference/statements/comment-on-statements/).
 
-**Completion record.** Pending.
+**Completion record.** Added an atomic `CommentOn` root for all 13 documented
+target forms. Aggregate, analytic, scalar, and transform functions reuse typed
+qualified `RoutineSignature` children; ordinary catalog objects use qualified
+tables, columns preserve their database/schema/object ownership path, and a
+dedicated constraint target retains both the constraint and owning table.
+Standard-string comments and explicit `NULL` removal round-trip distinctly;
+malformed target/signature/value shapes fail atomically at every error level,
+and direct or nested foreign generation rejects the Vertica nodes. The 26.2
+source consistently documents an 8192-character server limit with truncation
+and a message, so length enforcement remains deliberately server-side along
+with ownership and existence, as required by the task exclusion. The focused
+suite passed 130 tests. The default CPython 3.12.6 gate passed 3964 tests at
+93.48% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 3964 tests, with 3.15 treating
+deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel entry-point/COMMENT round-trip
+smoke passed.
 
 ### P11 — VIEW lifecycle — `TODO`
 
