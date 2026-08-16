@@ -32,6 +32,10 @@ plugin interface.
   password expiry, one-action ALTER rename/account/expiry, and ordered
   multi-user DROP with postfix `IF EXISTS` and `CASCADE`. Credential-bearing
   forms fail with sanitized errors and secret values never enter the AST.
+- Added semantic CREATE/ALTER/DROP PROFILE lifecycle with all 15 ordered
+  password-policy metadata settings, lexical numeric domains, `UNLIMITED`,
+  ALTER-only `DEFAULT` resets, rename, multi-target drop, and strict foreign
+  generation failure. User assignment and catalog effects remain server-side.
 - Added semantic classic and workload routing-rule lifecycle, every documented
   ALTER action, exact session workload/resource-pool assignment, SHOW workload
   controls, and canonical `ON ROUTING RULE` privilege alias handling.

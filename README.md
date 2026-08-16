@@ -84,6 +84,12 @@ The coverage matrix distinguishes semantic support from lossless command
 preservation. “Preserved” means SQLGlot retains a statement as a command but
 does not yet expose all of its clauses as traversable AST nodes.
 
+Security-policy DDL includes a typed, non-secret PROFILE lifecycle. CREATE and
+ALTER retain ordered password-policy metadata, ALTER also supports reset and
+rename actions, and DROP retains ordered targets and dependency cascading.
+PROFILE nodes never contain password values; user assignment and catalog
+effects remain separate server concerns.
+
 ## License
 
 MIT

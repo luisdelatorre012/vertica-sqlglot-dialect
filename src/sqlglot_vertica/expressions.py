@@ -702,6 +702,38 @@ class DropUsers(exp.Drop):
     """Drop one or more Vertica users with optional dependency cascading."""
 
 
+class ProfileParameter(exp.Expression):
+    """One named password-policy setting inside a PROFILE LIMIT clause."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": True,
+    }
+
+
+class ProfileLimit(exp.Expression):
+    """An ordered, nonempty set of PROFILE policy parameters."""
+
+    arg_types: t.ClassVar = {"expressions": True}
+
+
+class CreateProfile(exp.Create):
+    """Create a Vertica password-policy profile."""
+
+    arg_types: t.ClassVar = {
+        **exp.Create.arg_types,
+        "limit": True,
+    }
+
+
+class AlterProfile(exp.Alter):
+    """Alter PROFILE limits or rename one profile."""
+
+
+class DropProfiles(exp.Drop):
+    """Drop one or more profiles with optional user reassignment."""
+
+
 class ResourcePoolSubcluster(exp.Expression):
     """A named or current-subcluster resource-pool selector."""
 

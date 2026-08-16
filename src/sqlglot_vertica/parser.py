@@ -298,6 +298,40 @@ class VerticaParser(PostgresParser):
         TokenType.STRING,
         TokenType.UNICODE_STRING,
     }
+    PROFILE_PARAMETERS: t.ClassVar[tuple[str, ...]] = (
+        "PASSWORD_LIFE_TIME",
+        "PASSWORD_MIN_LIFE_TIME",
+        "PASSWORD_GRACE_TIME",
+        "FAILED_LOGIN_ATTEMPTS",
+        "PASSWORD_LOCK_TIME",
+        "PASSWORD_REUSE_MAX",
+        "PASSWORD_REUSE_TIME",
+        "PASSWORD_MAX_LENGTH",
+        "PASSWORD_MIN_LENGTH",
+        "PASSWORD_MIN_LETTERS",
+        "PASSWORD_MIN_UPPERCASE_LETTERS",
+        "PASSWORD_MIN_LOWERCASE_LETTERS",
+        "PASSWORD_MIN_DIGITS",
+        "PASSWORD_MIN_SYMBOLS",
+        "PASSWORD_MIN_CHAR_CHANGE",
+    )
+    PROFILE_POSITIVE_PARAMETERS: t.ClassVar[set[str]] = {
+        "FAILED_LOGIN_ATTEMPTS",
+        "PASSWORD_GRACE_TIME",
+        "PASSWORD_LIFE_TIME",
+        "PASSWORD_LOCK_TIME",
+        "PASSWORD_REUSE_MAX",
+        "PASSWORD_REUSE_TIME",
+    }
+    PROFILE_CHARACTER_MINIMUM_PARAMETERS: t.ClassVar[set[str]] = {
+        "PASSWORD_MIN_CHAR_CHANGE",
+        "PASSWORD_MIN_DIGITS",
+        "PASSWORD_MIN_LENGTH",
+        "PASSWORD_MIN_LETTERS",
+        "PASSWORD_MIN_LOWERCASE_LETTERS",
+        "PASSWORD_MIN_SYMBOLS",
+        "PASSWORD_MIN_UPPERCASE_LETTERS",
+    }
 
     USER_DEFINED_EXTENSION_KINDS: t.ClassVar = (
         "AGGREGATE FUNCTION",
@@ -2907,6 +2941,18 @@ class VerticaParser(PostgresParser):
         if index:
             self._raise_user_error(f"{statement} USER does not support modifiers")
 
+    def _reject_prefixed_profile(self, statement: str, words: list[str]) -> None:
+        index = self._user_prefix_length(statement, words)
+        if index >= len(words) or words[index] != "PROFILE":
+            return
+        token = self._tokens[self._index + index]
+        if token.token_type != TokenType.VAR or not token.text.isascii():
+            self._raise_profile_error(
+                f"{statement} PROFILE requires the unquoted ASCII PROFILE object keyword"
+            )
+        if index:
+            self._raise_profile_error(f"{statement} PROFILE does not support modifiers")
+
     def _reject_sensitive_user_statement(self, statement: str, words: list[str]) -> None:
         index = self._user_prefix_length(statement, words)
         if index >= len(words) or words[index] != "USER":
@@ -2983,11 +3029,44 @@ class VerticaParser(PostgresParser):
         if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
             raise ParseError(message)
 
+    def _raise_profile_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
     def _match_user_object(self, *, advance: bool = True) -> bool:
         matched = (
             self._curr.token_type == TokenType.VAR
             and self._curr.text.isascii()
             and self._curr.text.upper() == "USER"
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _match_profile_object(self, *, advance: bool = True) -> bool:
+        matched = (
+            self._curr.token_type == TokenType.VAR
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == "PROFILE"
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _match_profile_var(self, word: str, *, advance: bool = True) -> bool:
+        token_types = {
+            "DEFAULT": TokenType.DEFAULT,
+            "EXISTS": TokenType.EXISTS,
+            "LIMIT": TokenType.LIMIT,
+            "RENAME": TokenType.RENAME,
+        }
+        matched = (
+            self._curr.token_type == token_types.get(word, TokenType.VAR)
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == word
         )
         if matched and advance:
             self._advance()
@@ -3017,6 +3096,7 @@ class VerticaParser(PostgresParser):
         self._reject_prefixed_routing_rule("CREATE", words)
         self._reject_prefixed_load_balance_group("CREATE", words)
         self._reject_prefixed_network_address("CREATE", words)
+        self._reject_prefixed_profile("CREATE", words)
         self._reject_prefixed_user("CREATE", words)
         unsupported_directed_prefixes = (
             ("IF", "NOT", "EXISTS", "DIRECTED", "QUERY"),
@@ -3057,6 +3137,10 @@ class VerticaParser(PostgresParser):
             "INTERFACE", advance=False
         ):
             self._raise_network_address_error("CREATE NETWORK must be followed by ADDRESS")
+        if self._match_profile_object():
+            return self._parse_create_profile(replace=replace)
+        if self._curr.text.upper() == "PROFILE":
+            self._raise_profile_error("CREATE PROFILE requires the unquoted PROFILE object kind")
         if self._match_user_object():
             return self._parse_create_user(replace=replace)
         if self._curr.text.upper() == "USER":
@@ -3805,6 +3889,104 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_create_profile(self, replace: bool) -> vexp.CreateProfile:
+        if replace:
+            self._raise_profile_error("CREATE OR REPLACE PROFILE is not supported by Vertica")
+        if self._match_profile_var("IF", advance=False):
+            self._raise_profile_error("CREATE PROFILE does not support IF NOT EXISTS")
+
+        profile = self._parse_profile_identifier("CREATE PROFILE")
+        if not self._match_profile_var("LIMIT"):
+            self._raise_profile_error("CREATE PROFILE requires LIMIT")
+        limit = self._parse_profile_limit(alter=False)
+        return self.expression(vexp.CreateProfile(this=profile, kind="PROFILE", limit=limit))
+
+    def _parse_profile_identifier(
+        self, statement: str, *, allow_default: bool = False
+    ) -> exp.Identifier:
+        if allow_default and self._match_profile_var("DEFAULT"):
+            return self.expression(exp.Identifier(this="DEFAULT", quoted=False))
+        identifier = self._parse_user_identifier(statement)
+        if identifier.name.upper() == "DEFAULT":
+            self._raise_profile_error(f"{statement} cannot use the DEFAULT profile")
+        return identifier
+
+    def _parse_profile_limit(self, *, alter: bool) -> vexp.ProfileLimit:
+        parameters: list[vexp.ProfileParameter] = []
+        seen: set[str] = set()
+
+        while self._curr:
+            if self._match(TokenType.COMMA):
+                self._raise_profile_error("PROFILE parameters are separated by spaces, not commas")
+            if self._curr.token_type != TokenType.VAR or not self._curr.text.isascii():
+                self._raise_profile_error(
+                    f"Unsupported PROFILE parameter starting at {self._curr.text!r}"
+                )
+            name = self._curr.text.upper()
+            if name not in self.PROFILE_PARAMETERS:
+                self._raise_profile_error(f"Unsupported PROFILE parameter {name}")
+            self._advance()
+            if name in seen:
+                self._raise_profile_error(f"Duplicate PROFILE parameter {name}")
+            seen.add(name)
+            value = self._parse_profile_value(name=name, alter=alter)
+            parameters.append(
+                self.expression(vexp.ProfileParameter(this=exp.var(name), expression=value))
+            )
+
+        if not parameters:
+            self._raise_profile_error("PROFILE LIMIT requires at least one parameter")
+        self._validate_profile_maximum(parameters)
+        return self.expression(vexp.ProfileLimit(expressions=parameters))
+
+    def _parse_profile_value(self, *, name: str, alter: bool) -> exp.Expr:
+        if self._match_profile_var("UNLIMITED"):
+            return self.expression(exp.var("UNLIMITED"))
+        if self._match_profile_var("DEFAULT"):
+            if not alter:
+                self._raise_profile_error("CREATE PROFILE does not accept explicit DEFAULT values")
+            return self.expression(exp.var("DEFAULT"))
+        if not self._curr or self._curr.token_type != TokenType.NUMBER:
+            self._raise_profile_error(f"PROFILE {name} requires an unsigned integer or UNLIMITED")
+        raw = self._curr.text
+        if not raw.isascii() or not raw.isdigit():
+            self._raise_profile_error(f"PROFILE {name} requires an unsigned integer")
+        self._advance()
+        if name in self.PROFILE_POSITIVE_PARAMETERS and self._profile_digits_less(raw, "1"):
+            self._raise_profile_error(f"PROFILE {name} must be at least 1")
+        if name == "PASSWORD_MAX_LENGTH":
+            if self._profile_digits_less(raw, "8"):
+                self._raise_profile_error("PROFILE PASSWORD_MAX_LENGTH must be at least 8")
+            if self._profile_digits_less("512", raw):
+                self._raise_profile_error("PROFILE PASSWORD_MAX_LENGTH must be at most 512")
+        return self.expression(exp.Literal.number(raw))
+
+    @staticmethod
+    def _profile_digits_less(left: str, right: str) -> bool:
+        left_normalized = left.lstrip("0") or "0"
+        right_normalized = right.lstrip("0") or "0"
+        return (len(left_normalized), left_normalized) < (
+            len(right_normalized),
+            right_normalized,
+        )
+
+    def _validate_profile_maximum(self, parameters: list[vexp.ProfileParameter]) -> None:
+        values = {parameter.name.upper(): parameter.expression for parameter in parameters}
+        maximum = values.get("PASSWORD_MAX_LENGTH")
+        if not isinstance(maximum, exp.Literal) or maximum.is_string or not maximum.this.isdigit():
+            return
+        for name in self.PROFILE_CHARACTER_MINIMUM_PARAMETERS:
+            value = values.get(name)
+            if (
+                isinstance(value, exp.Literal)
+                and not value.is_string
+                and value.this.isdigit()
+                and self._profile_digits_less(maximum.this, value.this)
+            ):
+                self._raise_profile_error(
+                    f"PROFILE {name} cannot exceed explicit PASSWORD_MAX_LENGTH"
+                )
+
     def _parse_create_resource_pool(self, replace: bool) -> vexp.CreateResourcePool:
         if replace:
             self.raise_error("CREATE OR REPLACE RESOURCE POOL is not supported by Vertica")
@@ -4387,6 +4569,27 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_alter_profile(self) -> vexp.AlterProfile:
+        profile = self._parse_profile_identifier("ALTER PROFILE", allow_default=True)
+
+        if self._match_profile_var("LIMIT"):
+            action: exp.Expr = self._parse_profile_limit(alter=True)
+        elif self._match_profile_var("RENAME"):
+            if profile.name.upper() == "DEFAULT":
+                self._raise_profile_error("ALTER PROFILE cannot rename the DEFAULT profile")
+            if not self._match_profile_var("TO"):
+                self._raise_profile_error("ALTER PROFILE RENAME requires TO")
+            action = self.expression(
+                exp.AlterRename(this=self._parse_profile_identifier("ALTER PROFILE RENAME TO"))
+            )
+            if self._curr:
+                self._raise_profile_error(f"Unexpected ALTER PROFILE clause at {self._curr.text!r}")
+        else:
+            self._raise_profile_error("ALTER PROFILE requires LIMIT or RENAME TO")
+            action = self.expression(vexp.ProfileLimit(expressions=[]))
+
+        return self.expression(vexp.AlterProfile(this=profile, kind="PROFILE", actions=[action]))
+
     def _parse_alter_resource_pool(self) -> vexp.AlterResourcePool:
         pool = self._parse_lifecycle_identifier("ALTER RESOURCE POOL")
         subcluster = self._parse_resource_pool_subcluster()
@@ -4794,6 +4997,7 @@ class VerticaParser(PostgresParser):
         self._reject_prefixed_routing_rule("ALTER", words)
         self._reject_prefixed_load_balance_group("ALTER", words)
         self._reject_prefixed_network_address("ALTER", words)
+        self._reject_prefixed_profile("ALTER", words)
         self._reject_prefixed_user("ALTER", words)
         if self._curr.token_type == TokenType.TABLE and self._has_mixed_reorganize_action():
             self.raise_error(
@@ -4811,6 +5015,10 @@ class VerticaParser(PostgresParser):
             "INTERFACE", advance=False
         ):
             self._raise_network_address_error("ALTER NETWORK must be followed by ADDRESS")
+        if self._match_profile_object():
+            return self._parse_alter_profile()
+        if self._curr.text.upper() == "PROFILE":
+            self._raise_profile_error("ALTER PROFILE requires the unquoted PROFILE object kind")
         if self._match_user_object():
             return self._parse_alter_user()
         if self._curr.text.upper() == "USER":
@@ -5664,6 +5872,32 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_drop_profile(self, exists: bool) -> vexp.DropProfiles:
+        if exists:
+            self._raise_profile_error("DROP PROFILE IF EXISTS must follow PROFILE")
+        if_exists = self._match_profile_var("IF")
+        if if_exists and not self._match_profile_var("EXISTS"):
+            self._raise_profile_error("DROP PROFILE IF must be followed by EXISTS")
+
+        profiles = [self._parse_profile_identifier("DROP PROFILE")]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self._raise_profile_error("DROP PROFILE requires a name after each comma")
+            profiles.append(self._parse_profile_identifier("DROP PROFILE"))
+
+        cascade = self._match_profile_var("CASCADE")
+        if self._curr:
+            self._raise_profile_error(f"Unexpected DROP PROFILE clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.DropProfiles(
+                this=profiles[0],
+                expressions=profiles[1:] or None,
+                kind="PROFILE",
+                exists=if_exists,
+                cascade=cascade,
+            )
+        )
+
     def _parse_user_identifier(self, statement: str) -> exp.Identifier:
         identifier = self._parse_connection_policy_identifier(statement)
         if not isinstance(identifier.this, str) or not identifier.this:
@@ -5765,6 +5999,7 @@ class VerticaParser(PostgresParser):
         self._reject_prefixed_routing_rule("DROP", words)
         self._reject_prefixed_load_balance_group("DROP", words)
         self._reject_prefixed_network_address("DROP", words)
+        self._reject_prefixed_profile("DROP", words)
         self._reject_prefixed_user("DROP", words)
         lookahead = words[:3]
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
@@ -5795,6 +6030,10 @@ class VerticaParser(PostgresParser):
             "INTERFACE", advance=False
         ):
             self._raise_network_address_error("DROP NETWORK must be followed by ADDRESS")
+        if self._match_profile_object():
+            return self._parse_drop_profile(exists=exists)
+        if self._curr.text.upper() == "PROFILE":
+            self._raise_profile_error("DROP PROFILE requires the unquoted PROFILE object kind")
         if self._match_user_object():
             return self._parse_drop_user(exists=exists)
         if self._curr.text.upper() == "USER":

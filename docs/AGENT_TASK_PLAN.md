@@ -17,13 +17,9 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Clean committed baseline: `6ca2a0d` (`feat: model non-secret user lifecycle`).
-- Active task: **P01 — PROFILE lifecycle**.
-- The working tree already contains partial P01 edits in
-  `src/sqlglot_vertica/expressions.py` and `src/sqlglot_vertica/parser.py`.
-- Those edits are intentional but incomplete: dispatch calls methods that do
-  not yet exist, and generator/tests/docs are absent. The tree is therefore not
-  expected to pass until P01 is completed.
+- Completed through **P01 — PROFILE lifecycle**.
+- Next eligible tasks are selected by dependency and numeric order; P02 is the
+  lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Status dashboard
@@ -33,7 +29,7 @@ task may be `IN_PROGRESS`.
 
 | ID | Status | Task | Required dependency | Commit title |
 | --- | --- | --- | --- | --- |
-| P01 | IN_PROGRESS | PROFILE lifecycle | `6ca2a0d` | `feat: model profile lifecycle` |
+| P01 | DONE | PROFILE lifecycle | `6ca2a0d` | `feat: model profile lifecycle` |
 | P02 | TODO | Executable `PROFILE` statement | P01 | `feat: model profiled statement execution` |
 | P03 | TODO | USER profile and resource-pool assignments | P01 | `feat: add user workload assignments` |
 | P04 | TODO | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
@@ -176,7 +172,7 @@ Every feature task must complete all applicable checks:
 
 ## Detailed tasks
 
-### P01 — PROFILE lifecycle — `IN_PROGRESS`
+### P01 — PROFILE lifecycle — `DONE`
 
 **Outcome.** Finish the already-started semantic CREATE/ALTER/DROP PROFILE
 family. No unrelated slice may land first because the current dispatch calls
@@ -223,7 +219,18 @@ undefined methods.
 [DROP PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-profile/),
 and the [Profiles guide](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/hash-authentication/passwords/profiles/).
 
-**Completion record.** Pending.
+**Completion record.** Added typed CREATE/ALTER/DROP PROFILE roots and ordered
+limit/parameter children for all 15 policy settings, including lexical value
+domains, ALTER-only DEFAULT resets, rename, multi-drop, identifier parity,
+serialization/optimizer/type stability, and atomic foreign failure. The 26.2
+source re-audit found no material grammar contradiction. PROFILE values are
+policy metadata, not passwords; USER assignment, ownership, inheritance and
+current-password effects remain catalog/server concerns, and executable
+top-level PROFILE remains P02. The default CPython 3.12.6 gate passed 2633 tests
+at 93.76% branch coverage; Ruff, formatting, strict mypy, full pre-commit,
+sdist/wheel build, clean force-install, `pip check`, and isolated installed-wheel
+smoke passed. CPython 3.14 and 3.15 were not available locally (`py -0p` exposed
+only 3.12), so those runtime suites were not claimed.
 
 ### P02 — executable `PROFILE` statement — `TODO`
 

@@ -80,9 +80,18 @@ parser errors can retain or log their values, with a fixed sanitized error at
 every `ErrorLevel`. This is defense in depth, not a secret-handling API:
 SQLGlot tokenization happens before parser hooks, and an upstream tokenizer
 error (for example, an unterminated credential string) can include raw input.
-Callers must never submit real credentials to this dialect. PROFILE,
-AUTHENTICATION, and remaining USER account parameters stay outside the current
-semantic contract and fail closed when recognized.
+Callers must never submit real credentials to this dialect. AUTHENTICATION and
+remaining USER account parameters stay outside the current semantic contract
+and fail closed when recognized.
+
+PROFILE lifecycle uses `CreateProfile`, `AlterProfile`, and `DropProfiles`
+roots plus ordered `ProfileLimit` and `ProfileParameter` children. The values
+are password-policy metadata—unsigned numeric settings or explicit policy
+sentinels—not passwords or other credential material. Parser and generator
+validate documented deterministic ranges lexically, including arbitrarily
+large source digits, and reject only same-statement minimum/maximum conflicts
+that can be decided without catalog state. Profile assignment, inherited
+effects, ownership, and effects on current passwords remain server concerns.
 
 Workload-routing lifecycle roots likewise subclass canonical CREATE, ALTER,
 and DROP nodes while keeping their route specification, name/workload target,

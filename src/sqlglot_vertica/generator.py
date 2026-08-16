@@ -203,6 +203,40 @@ class VerticaGenerator(PostgresGenerator):
             "REJECT_ON_MATERIALIZED_TYPE_ERROR",
         },
     }
+    PROFILE_PARAMETERS: t.ClassVar[tuple[str, ...]] = (
+        "PASSWORD_LIFE_TIME",
+        "PASSWORD_MIN_LIFE_TIME",
+        "PASSWORD_GRACE_TIME",
+        "FAILED_LOGIN_ATTEMPTS",
+        "PASSWORD_LOCK_TIME",
+        "PASSWORD_REUSE_MAX",
+        "PASSWORD_REUSE_TIME",
+        "PASSWORD_MAX_LENGTH",
+        "PASSWORD_MIN_LENGTH",
+        "PASSWORD_MIN_LETTERS",
+        "PASSWORD_MIN_UPPERCASE_LETTERS",
+        "PASSWORD_MIN_LOWERCASE_LETTERS",
+        "PASSWORD_MIN_DIGITS",
+        "PASSWORD_MIN_SYMBOLS",
+        "PASSWORD_MIN_CHAR_CHANGE",
+    )
+    PROFILE_POSITIVE_PARAMETERS: t.ClassVar[set[str]] = {
+        "FAILED_LOGIN_ATTEMPTS",
+        "PASSWORD_GRACE_TIME",
+        "PASSWORD_LIFE_TIME",
+        "PASSWORD_LOCK_TIME",
+        "PASSWORD_REUSE_MAX",
+        "PASSWORD_REUSE_TIME",
+    }
+    PROFILE_CHARACTER_MINIMUM_PARAMETERS: t.ClassVar[set[str]] = {
+        "PASSWORD_MIN_CHAR_CHANGE",
+        "PASSWORD_MIN_DIGITS",
+        "PASSWORD_MIN_LENGTH",
+        "PASSWORD_MIN_LETTERS",
+        "PASSWORD_MIN_LOWERCASE_LETTERS",
+        "PASSWORD_MIN_SYMBOLS",
+        "PASSWORD_MIN_UPPERCASE_LETTERS",
+    }
 
     TRANSFORMS: t.ClassVar = {
         **PostgresGenerator.TRANSFORMS,
@@ -250,6 +284,7 @@ class VerticaGenerator(PostgresGenerator):
             expression
         ),
         vexp.AlterNetworkAddress: lambda self, expression: self.alternetworkaddress_sql(expression),
+        vexp.AlterProfile: lambda self, expression: self.alterprofile_sql(expression),
         vexp.AlterResourcePool: lambda self, expression: self.alterresourcepool_sql(expression),
         vexp.AlterRoutingRule: lambda self, expression: self.alterroutingrule_sql(expression),
         vexp.AlterTablePartition: lambda self, expression: self.altertablepartition_sql(expression),
@@ -273,6 +308,7 @@ class VerticaGenerator(PostgresGenerator):
             expression
         ),
         vexp.CreateProjection: lambda self, expression: self.createprojection_sql(expression),
+        vexp.CreateProfile: lambda self, expression: self.createprofile_sql(expression),
         vexp.CreateResourcePool: lambda self, expression: self.createresourcepool_sql(expression),
         vexp.CreateRoutingRule: lambda self, expression: self.createroutingrule_sql(expression),
         vexp.CreateUserDefinedExtension: lambda self, expression: (
@@ -312,6 +348,7 @@ class VerticaGenerator(PostgresGenerator):
             expression
         ),
         vexp.DropNetworkAddress: lambda self, expression: self.dropnetworkaddress_sql(expression),
+        vexp.DropProfiles: lambda self, expression: self.dropprofiles_sql(expression),
         vexp.DropResourcePool: lambda self, expression: self.dropresourcepool_sql(expression),
         vexp.DropRoutingRule: lambda self, expression: self.droproutingrule_sql(expression),
         vexp.DropRoles: lambda self, expression: self.droproles_sql(expression),
@@ -372,6 +409,8 @@ class VerticaGenerator(PostgresGenerator):
         vexp.ProjectionSegmentation: lambda self, expression: self.projectionsegmentation_sql(
             expression
         ),
+        vexp.ProfileLimit: lambda self, expression: self.profilelimit_sql(expression),
+        vexp.ProfileParameter: lambda self, expression: self.profileparameter_sql(expression),
         vexp.RoleGrant: lambda self, expression: self.rolegrant_sql(expression),
         vexp.RoleRevoke: lambda self, expression: self.rolerevoke_sql(expression),
         vexp.RoutingRuleAction: lambda self, expression: self.routingruleaction_sql(expression),
@@ -1115,6 +1154,264 @@ class VerticaGenerator(PostgresGenerator):
 
         user_sql = self.sql(user) if user_valid else ""
         return f"CREATE USER {user_sql}{action_sql}".rstrip()
+
+    def createprofile_sql(self, expression: vexp.CreateProfile) -> str:
+        valid = self._validate_profile_root(
+            expression,
+            statement="CREATE PROFILE",
+            allowed={"this", "kind", "limit"},
+            allow_default_name=False,
+        )
+        limit = expression.args.get("limit")
+        if not isinstance(limit, vexp.ProfileLimit):
+            self.unsupported("CREATE PROFILE requires a structured LIMIT clause")
+            valid = False
+        elif not self._validate_profile_limit(limit, alter=False):
+            valid = False
+        if not valid:
+            return ""
+        return f"CREATE PROFILE {self.sql(expression, 'this')} LIMIT {self.sql(limit)}"
+
+    def alterprofile_sql(self, expression: vexp.AlterProfile) -> str:
+        valid = self._validate_profile_root(
+            expression,
+            statement="ALTER PROFILE",
+            allowed={"this", "kind", "actions"},
+            allow_default_name=True,
+        )
+        raw_actions = expression.args.get("actions")
+        if not isinstance(raw_actions, list):
+            self.unsupported("ALTER PROFILE actions must be a list")
+            return ""
+        if len(raw_actions) != 1:
+            self.unsupported("ALTER PROFILE requires exactly one action")
+            return ""
+        action = raw_actions[0]
+        target = expression.args.get("this")
+        if isinstance(action, vexp.ProfileLimit):
+            valid = self._validate_profile_limit(action, alter=True) and valid
+            action_sql = f"LIMIT {self.sql(action)}" if valid else ""
+        elif isinstance(action, exp.AlterRename):
+            if self._has_user_extras(action, {"this"}):
+                self.unsupported("ALTER PROFILE RENAME requires one unqualified name")
+                valid = False
+            if isinstance(target, exp.Identifier) and target.name.upper() == "DEFAULT":
+                self.unsupported("ALTER PROFILE cannot rename the DEFAULT profile")
+                valid = False
+            rename = action.args.get("this")
+            rename_valid = self._validate_profile_identifier(
+                rename, "ALTER PROFILE RENAME TO", allow_default=False
+            )
+            valid = rename_valid and valid
+            action_sql = self.sql(action) if valid else ""
+        else:
+            self.unsupported("ALTER PROFILE requires LIMIT or RENAME TO")
+            return ""
+        if not valid:
+            return ""
+        return f"ALTER PROFILE {self.sql(target)} {action_sql}"
+
+    def dropprofiles_sql(self, expression: vexp.DropProfiles) -> str:
+        valid = self._validate_profile_root(
+            expression,
+            statement="DROP PROFILE",
+            allowed={"this", "expressions", "kind", "exists", "cascade"},
+            allow_default_name=False,
+        )
+        raw_profiles = expression.args.get("expressions")
+        if raw_profiles is None:
+            secondary: list[exp.Expr] = []
+        elif not isinstance(raw_profiles, list):
+            self.unsupported("DROP PROFILE secondary targets must be a list")
+            return ""
+        else:
+            secondary = raw_profiles
+        profiles = [expression.args.get("this"), *secondary]
+        if not profiles:
+            self.unsupported("DROP PROFILE requires at least one target")
+            return ""
+        for profile in profiles:
+            valid = (
+                self._validate_profile_identifier(profile, "DROP PROFILE name", allow_default=False)
+                and valid
+            )
+        exists = expression.args.get("exists")
+        cascade = expression.args.get("cascade")
+        if exists is not None and not isinstance(exists, bool):
+            self.unsupported("DropProfiles exists must be boolean")
+            valid = False
+        if cascade is not None and not isinstance(cascade, bool):
+            self.unsupported("DropProfiles cascade must be boolean")
+            valid = False
+        if not valid:
+            return ""
+        exists_sql = " IF EXISTS" if exists else ""
+        cascade_sql = " CASCADE" if cascade else ""
+        return (
+            f"DROP PROFILE{exists_sql} {', '.join(self.sql(profile) for profile in profiles)}"
+            f"{cascade_sql}"
+        )
+
+    def profilelimit_sql(self, expression: vexp.ProfileLimit) -> str:
+        if not self._validate_profile_limit(
+            expression, alter=isinstance(expression.parent, vexp.AlterProfile)
+        ):
+            return ""
+        return " ".join(self.sql(parameter) for parameter in expression.expressions)
+
+    def profileparameter_sql(self, expression: vexp.ProfileParameter) -> str:
+        limit = expression.parent
+        if not self._validate_profile_parameter(
+            expression,
+            alter=isinstance(limit, vexp.ProfileLimit)
+            and isinstance(limit.parent, vexp.AlterProfile),
+        ):
+            return ""
+        return f"{expression.name.upper()} {self.sql(expression, 'expression')}"
+
+    def _validate_profile_root(
+        self,
+        expression: exp.Expr,
+        *,
+        statement: str,
+        allowed: set[str],
+        allow_default_name: bool,
+    ) -> bool:
+        valid = True
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "PROFILE":
+            self.unsupported(f"{type(expression).__name__} requires kind PROFILE")
+            valid = False
+        if self._has_user_extras(expression, allowed):
+            self.unsupported(f"{statement} does not support additional statement clauses")
+            valid = False
+        return (
+            self._validate_profile_identifier(
+                expression.args.get("this"), f"{statement} name", allow_default=allow_default_name
+            )
+            and valid
+        )
+
+    def _validate_profile_identifier(
+        self, expression: object, label: str, *, allow_default: bool
+    ) -> bool:
+        if (
+            allow_default
+            and isinstance(expression, exp.Identifier)
+            and isinstance(expression.this, str)
+            and expression.this.upper() == "DEFAULT"
+            and expression.args.get("quoted", False) is False
+        ):
+            valid = self._validate_connection_policy_identifier(expression, label)
+            if self._has_user_extras(expression, {"this", "quoted"}):
+                self.unsupported(f"{label} contains unsupported identifier fields")
+                valid = False
+            return valid
+        valid = self._validate_user_identifier(expression, label)
+        if (
+            isinstance(expression, exp.Identifier)
+            and isinstance(expression.this, str)
+            and expression.name.upper() == "DEFAULT"
+            and (not allow_default or expression.args.get("quoted", False) is not False)
+        ):
+            self.unsupported(f"{label} cannot use the DEFAULT profile")
+            valid = False
+        return valid
+
+    def _validate_profile_limit(self, expression: vexp.ProfileLimit, *, alter: bool) -> bool:
+        if self._has_user_extras(expression, {"expressions"}):
+            self.unsupported("ProfileLimit contains unsupported fields")
+            return False
+        raw_parameters = expression.args.get("expressions")
+        if not isinstance(raw_parameters, list):
+            self.unsupported("ProfileLimit expressions must be a list")
+            return False
+        if not raw_parameters:
+            self.unsupported("PROFILE LIMIT requires at least one parameter")
+            return False
+        valid = True
+        seen: set[str] = set()
+        values: dict[str, exp.Expr | None] = {}
+        for parameter in raw_parameters:
+            if not isinstance(parameter, vexp.ProfileParameter):
+                self.unsupported("PROFILE LIMIT requires structured parameters")
+                valid = False
+                continue
+            name = parameter.name.upper()
+            if name in seen:
+                self.unsupported(f"Duplicate PROFILE parameter {name}")
+                valid = False
+            seen.add(name)
+            values[name] = parameter.args.get("expression")
+            valid = self._validate_profile_parameter(parameter, alter=alter) and valid
+
+        maximum = values.get("PASSWORD_MAX_LENGTH")
+        if isinstance(maximum, exp.Literal) and not maximum.is_string and maximum.this.isdigit():
+            for name in self.PROFILE_CHARACTER_MINIMUM_PARAMETERS:
+                value = values.get(name)
+                if (
+                    isinstance(value, exp.Literal)
+                    and not value.is_string
+                    and value.this.isdigit()
+                    and self._profile_digits_less(maximum.this, value.this)
+                ):
+                    self.unsupported(f"PROFILE {name} cannot exceed explicit PASSWORD_MAX_LENGTH")
+                    valid = False
+        return valid
+
+    def _validate_profile_parameter(
+        self, expression: vexp.ProfileParameter, *, alter: bool
+    ) -> bool:
+        if self._has_user_extras(expression, {"this", "expression"}):
+            self.unsupported("ProfileParameter contains unsupported fields")
+            return False
+        marker = expression.args.get("this")
+        if not isinstance(marker, exp.Var) or self._has_user_extras(marker, {"this"}):
+            self.unsupported("PROFILE parameter requires a typed keyword marker")
+            return False
+        raw_name = marker.args.get("this")
+        if not isinstance(raw_name, str) or not raw_name.isascii():
+            self.unsupported("PROFILE parameter marker must be unquoted ASCII text")
+            return False
+        name = raw_name.upper()
+        if name not in self.PROFILE_PARAMETERS:
+            self.unsupported(f"Unsupported PROFILE parameter {name}")
+            return False
+        value = expression.args.get("expression")
+        if isinstance(value, exp.Var):
+            if self._has_user_extras(value, {"this"}) or not isinstance(value.this, str):
+                self.unsupported(f"PROFILE {name} requires a valid sentinel")
+                return False
+            sentinel = value.this.upper() if value.this.isascii() else ""
+            if sentinel == "UNLIMITED":
+                return True
+            if sentinel == "DEFAULT" and alter:
+                return True
+            self.unsupported(f"PROFILE {name} does not accept sentinel {sentinel!r}")
+            return False
+        if not isinstance(value, exp.Literal) or value.is_string or not value.this.isdigit():
+            self.unsupported(f"PROFILE {name} requires an unsigned integer or UNLIMITED")
+            return False
+        if name in self.PROFILE_POSITIVE_PARAMETERS and self._profile_digits_less(value.this, "1"):
+            self.unsupported(f"PROFILE {name} must be at least 1")
+            return False
+        if name == "PASSWORD_MAX_LENGTH":
+            if self._profile_digits_less(value.this, "8"):
+                self.unsupported("PROFILE PASSWORD_MAX_LENGTH must be at least 8")
+                return False
+            if self._profile_digits_less("512", value.this):
+                self.unsupported("PROFILE PASSWORD_MAX_LENGTH must be at most 512")
+                return False
+        return True
+
+    @staticmethod
+    def _profile_digits_less(left: str, right: str) -> bool:
+        left_normalized = left.lstrip("0") or "0"
+        right_normalized = right.lstrip("0") or "0"
+        return (len(left_normalized), left_normalized) < (
+            len(right_normalized),
+            right_normalized,
+        )
 
     def alteruser_sql(self, expression: vexp.AlterUser) -> str:
         kind = expression.args.get("kind")

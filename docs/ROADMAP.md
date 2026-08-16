@@ -59,6 +59,8 @@ Implemented P0:
 - add a bounded, non-secret USER lifecycle with typed account/password-expiry
   actions, rename, ordered multi-target DROP, sanitized credential rejection,
   and strict 128-byte identifier validation;
+- add semantic PROFILE lifecycle DDL with ordered typed policy settings,
+  lexical value-domain validation, ALTER reset/rename actions, and multi-drop;
 - add ordered typed CREATE/ALTER/DROP RESOURCE POOL parameters, keyword
   sentinels, subcluster selectors, and syntax-level conflict validation.
 - add typed classic and workload routing-rule lifecycle statements, exact
@@ -73,8 +75,8 @@ Implemented P0:
 
 P1:
 
-- add remaining USER account parameters plus PROFILE and AUTHENTICATION
-  lifecycle statements, with a separately reviewed credential-handling policy;
+- add remaining USER account parameters and AUTHENTICATION lifecycle
+  statements, with a separately reviewed credential-handling policy;
 - expand privilege targets for UDx, data loaders, keys, libraries, and TLS
   configurations.
 
