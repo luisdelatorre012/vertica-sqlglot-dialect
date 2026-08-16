@@ -65,6 +65,25 @@ subclass their corresponding canonical statement classes, but retain explicit
 Vertica transforms because ordered typed parameters and subcluster selectors
 have no lossless canonical property representation.
 
+USER lifecycle deliberately has a narrower security boundary. `CreateUser`,
+`AlterUser`, and `DropUsers` retain ordinary identifier and rename children,
+but explicit Vertica transforms validate the bounded non-secret grammar and
+prevent foreign generators from silently discarding account state or secondary
+drop targets. `UserAction` contains only an account lock/unlock or password
+expiry keyword marker; no password, TOTP secret, or other credential value has
+an AST slot. Names share the connection-policy lexical rules, additionally
+enforce Vertica's 128-byte UTF-8 limit, and use the active Vertica tokenizer's
+identifier-token domain rather than a frozen reserved-word list.
+
+Tokenizable credential-bearing USER clauses are rejected before ordinary
+parser errors can retain or log their values, with a fixed sanitized error at
+every `ErrorLevel`. This is defense in depth, not a secret-handling API:
+SQLGlot tokenization happens before parser hooks, and an upstream tokenizer
+error (for example, an unterminated credential string) can include raw input.
+Callers must never submit real credentials to this dialect. PROFILE,
+AUTHENTICATION, and remaining USER account parameters stay outside the current
+semantic contract and fail closed when recognized.
+
 Workload-routing lifecycle roots likewise subclass canonical CREATE, ALTER,
 and DROP nodes while keeping their route specification, name/workload target,
 and single ALTER action explicit. Session controls retain a canonical

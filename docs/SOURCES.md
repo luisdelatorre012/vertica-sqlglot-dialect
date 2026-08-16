@@ -145,6 +145,10 @@ called out in code review.
 - [CREATE ROLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-role/)
 - [ALTER ROLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-role/)
 - [DROP ROLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-role/)
+- [CREATE USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-user/)
+- [ALTER USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-user/)
+- [DROP USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-user/)
+- [KEYWORDS system table](https://docs.vertica.com/26.2.x/en/sql-reference/system-tables/v-catalog-schema/keywords/)
 - [CREATE RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-resource-pool/)
 - [ALTER RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-resource-pool/)
 - [DROP RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-resource-pool/)
@@ -168,7 +172,6 @@ called out in code review.
 
 ## Audited next-phase statements
 
-- [CREATE USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-user/)
 - [CREATE AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-authentication/)
 
 The source list is reviewed when the target server version changes. A version

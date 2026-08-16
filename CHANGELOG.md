@@ -28,6 +28,10 @@ plugin interface.
   CREATE VIEW extensions with ordered and conflicting-clause validation.
 - Added semantic role lifecycle DDL and typed CREATE/ALTER/DROP RESOURCE POOL
   statements with subcluster selectors and parameter-domain validation.
+- Added a bounded non-secret USER lifecycle: CREATE account lock/unlock or
+  password expiry, one-action ALTER rename/account/expiry, and ordered
+  multi-user DROP with postfix `IF EXISTS` and `CASCADE`. Credential-bearing
+  forms fail with sanitized errors and secret values never enter the AST.
 - Added semantic classic and workload routing-rule lifecycle, every documented
   ALTER action, exact session workload/resource-pool assignment, SHOW workload
   controls, and canonical `ON ROUTING RULE` privilege alias handling.

@@ -52,6 +52,9 @@ Implemented P0:
   location, workload, and resource-pool forms;
 - add canonical-safe CREATE/ALTER/single-target DROP ROLE and an atomic custom
   root for multi-role drops;
+- add a bounded, non-secret USER lifecycle with typed account/password-expiry
+  actions, rename, ordered multi-target DROP, sanitized credential rejection,
+  and strict 128-byte identifier validation;
 - add ordered typed CREATE/ALTER/DROP RESOURCE POOL parameters, keyword
   sentinels, subcluster selectors, and syntax-level conflict validation.
 - add typed classic and workload routing-rule lifecycle statements, exact
@@ -66,7 +69,8 @@ Implemented P0:
 
 P1:
 
-- add USER, PROFILE, and AUTHENTICATION lifecycle statements;
+- add remaining USER account parameters plus PROFILE and AUTHENTICATION
+  lifecycle statements, with a separately reviewed credential-handling policy;
 - expand privilege targets for UDx, data loaders, keys, libraries, and TLS
   configurations.
 

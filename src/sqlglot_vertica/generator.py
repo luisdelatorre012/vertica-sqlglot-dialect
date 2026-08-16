@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import typing as t
 
-from sqlglot import exp
+from sqlglot import TokenType, exp
 from sqlglot.dialects.dialect import rename_func
 from sqlglot.generator import Generator
 from sqlglot.generators.postgres import PostgresGenerator
@@ -253,6 +253,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AlterResourcePool: lambda self, expression: self.alterresourcepool_sql(expression),
         vexp.AlterRoutingRule: lambda self, expression: self.alterroutingrule_sql(expression),
         vexp.AlterTablePartition: lambda self, expression: self.altertablepartition_sql(expression),
+        vexp.AlterUser: lambda self, expression: self.alteruser_sql(expression),
         vexp.CreateDirectedQuery: lambda self, expression: self.createdirectedquery_sql(expression),
         vexp.CreateExternalProcedure: lambda self, expression: self.createexternalprocedure_sql(
             expression
@@ -277,6 +278,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.CreateUserDefinedExtension: lambda self, expression: (
             self.createuserdefinedextension_sql(expression)
         ),
+        vexp.CreateUser: lambda self, expression: self.createuser_sql(expression),
         vexp.CopyColumn: lambda self, expression: self.copycolumn_sql(expression),
         vexp.CopyFile: lambda self, expression: self.copyfile_sql(expression),
         vexp.CopyFiles: lambda self, expression: self.copyfiles_sql(expression),
@@ -316,6 +318,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.DropUserDefinedExtension: lambda self, expression: self.dropuserdefinedextension_sql(
             expression
         ),
+        vexp.DropUsers: lambda self, expression: self.dropusers_sql(expression),
         vexp.EncodedByProperty: lambda self, expression: (
             f"ENCODED BY {self.expressions(expression, flat=True)}"
         ),
@@ -415,6 +418,7 @@ class VerticaGenerator(PostgresGenerator):
         ),
         vexp.UtcStatementTimestamp: lambda self, expression: "GETUTCDATE()",
         vexp.UsingParameters: lambda self, expression: self.usingparameters_sql(expression),
+        vexp.UserAction: lambda self, expression: self.useraction_sql(expression),
         vexp.VerticaArrayLength: lambda self, expression: self.verticaarraylength_sql(expression),
         vexp.VerticaCopy: lambda self, expression: self.verticacopy_sql(expression),
         vexp.VerticaExplode: lambda self, expression: self.verticaexplode_sql(expression),
@@ -1081,6 +1085,168 @@ class VerticaGenerator(PostgresGenerator):
         cascade = " CASCADE" if expression.args.get("cascade") else ""
         targets_sql = ", ".join(self.sql(target) for target in targets)
         return f"DROP ROLE{exists} {targets_sql}{cascade}"
+
+    def createuser_sql(self, expression: vexp.CreateUser) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "USER":
+            self.unsupported("CreateUser requires kind USER")
+        if self._has_user_extras(expression, {"this", "kind", "action"}):
+            self.unsupported("CREATE USER does not support additional CREATE clauses")
+
+        user = expression.args.get("this")
+        user_valid = self._validate_user_identifier(user, "CREATE USER name")
+        action = expression.args.get("action")
+        action_sql = ""
+        if action is not None:
+            if not isinstance(action, vexp.UserAction):
+                self.unsupported("CREATE USER account state requires a typed action")
+            else:
+                action_name = self._user_action_name(action)
+                if action_name not in {
+                    "ACCOUNT LOCK",
+                    "ACCOUNT UNLOCK",
+                    "PASSWORD EXPIRE",
+                }:
+                    self.unsupported(
+                        "CREATE USER supports ACCOUNT LOCK, ACCOUNT UNLOCK, or PASSWORD EXPIRE"
+                    )
+                else:
+                    action_sql = f" {self.sql(action)}"
+
+        user_sql = self.sql(user) if user_valid else ""
+        return f"CREATE USER {user_sql}{action_sql}".rstrip()
+
+    def alteruser_sql(self, expression: vexp.AlterUser) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "USER":
+            self.unsupported("AlterUser requires kind USER")
+        if self._has_user_extras(expression, {"this", "kind", "actions"}):
+            self.unsupported("ALTER USER does not support additional ALTER clauses")
+
+        user = expression.args.get("this")
+        user_valid = self._validate_user_identifier(user, "ALTER USER name")
+        raw_actions = expression.args.get("actions")
+        if not isinstance(raw_actions, list):
+            self.unsupported("ALTER USER actions must be a list")
+            actions: list[exp.Expr] = []
+        else:
+            actions = raw_actions
+        if len(actions) != 1:
+            self.unsupported("ALTER USER requires exactly one action")
+            action: exp.Expr | None = actions[0] if actions else None
+        else:
+            action = actions[0]
+
+        if isinstance(action, exp.AlterRename):
+            rename_valid = True
+            if self._has_user_extras(action, {"this"}):
+                self.unsupported("ALTER USER RENAME requires one unqualified name")
+                rename_valid = False
+            rename_valid = (
+                self._validate_user_identifier(action.args.get("this"), "ALTER USER RENAME TO")
+                and rename_valid
+            )
+            action_sql = self.sql(action) if rename_valid else ""
+        elif isinstance(action, vexp.UserAction):
+            action_sql = self.sql(action)
+        else:
+            self.unsupported("ALTER USER requires a structured action")
+            action_sql = ""
+
+        user_sql = self.sql(user) if user_valid else ""
+        return f"ALTER USER {user_sql} {action_sql}".rstrip()
+
+    def dropusers_sql(self, expression: vexp.DropUsers) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "USER":
+            self.unsupported("DropUsers requires kind USER")
+        if self._has_user_extras(expression, {"this", "expressions", "kind", "exists", "cascade"}):
+            self.unsupported("DROP USER does not support additional DROP clauses")
+
+        raw_users = expression.args.get("expressions")
+        if raw_users is None:
+            secondary_users: list[exp.Expr] = []
+        elif not isinstance(raw_users, list):
+            self.unsupported("DROP USER secondary targets must be a list")
+            secondary_users = []
+        else:
+            secondary_users = raw_users
+        users = [expression.args.get("this"), *secondary_users]
+        rendered_users = []
+        for user in users:
+            if self._validate_user_identifier(user, "DROP USER name"):
+                rendered_users.append(self.sql(user))
+        if not rendered_users:
+            self.unsupported("DROP USER requires at least one user name")
+
+        exists_value = expression.args.get("exists")
+        cascade_value = expression.args.get("cascade")
+        if exists_value is not None and not isinstance(exists_value, bool):
+            self.unsupported("DropUsers exists must be boolean")
+        if cascade_value is not None and not isinstance(cascade_value, bool):
+            self.unsupported("DropUsers cascade must be boolean")
+        exists = " IF EXISTS" if isinstance(exists_value, bool) and exists_value else ""
+        cascade = " CASCADE" if isinstance(cascade_value, bool) and cascade_value else ""
+        return f"DROP USER{exists} {', '.join(rendered_users)}{cascade}".rstrip()
+
+    def useraction_sql(self, expression: vexp.UserAction) -> str:
+        action = self._user_action_name(expression)
+        if action not in {"ACCOUNT LOCK", "ACCOUNT UNLOCK", "PASSWORD EXPIRE"}:
+            self.unsupported("UserAction must be ACCOUNT LOCK, ACCOUNT UNLOCK, or PASSWORD EXPIRE")
+            return ""
+        return action
+
+    def _user_action_name(self, expression: vexp.UserAction) -> str:
+        if self._has_user_extras(expression, {"this"}):
+            self.unsupported("UserAction contains unsupported fields")
+        marker = expression.args.get("this")
+        if not isinstance(marker, exp.Var) or self._has_user_extras(marker, {"this"}):
+            self.unsupported("UserAction requires a typed keyword marker")
+            return ""
+        raw_marker = marker.args.get("this")
+        if not isinstance(raw_marker, str) or not raw_marker.isascii():
+            self.unsupported("UserAction marker text must be a string")
+            return ""
+        return raw_marker.upper()
+
+    def _validate_user_identifier(self, expression: object, label: str) -> bool:
+        valid = self._validate_connection_policy_identifier(expression, label)
+        if not isinstance(expression, exp.Identifier) or not isinstance(expression.this, str):
+            return False
+        if self._has_user_extras(expression, {"this", "quoted"}):
+            self.unsupported(f"{label} contains unsupported identifier fields")
+            valid = False
+        try:
+            size = len(expression.this.encode("utf-8"))
+        except UnicodeEncodeError:
+            self.unsupported(f"{label} must be valid UTF-8")
+            valid = False
+        else:
+            if size > 128:
+                self.unsupported(f"{label} cannot exceed 128 UTF-8 bytes")
+                valid = False
+        if valid and expression.args.get("quoted", False) is False:
+            from sqlglot_vertica.parser import VerticaParser
+
+            tokens = self.dialect.tokenize(expression.this)
+            if (
+                len(tokens) != 1
+                or tokens[0].text != expression.this
+                or tokens[0].token_type not in VerticaParser.ID_VAR_TOKENS
+                or tokens[0].token_type
+                in {TokenType.DEFAULT, TokenType.FALSE, TokenType.NULL, TokenType.TRUE}
+            ):
+                self.unsupported(f"{label} requires quoting for this keyword")
+                valid = False
+        return valid
+
+    @staticmethod
+    def _has_user_extras(expression: exp.Expr, allowed: set[str]) -> bool:
+        return any(
+            key not in allowed
+            and (key not in expression.arg_types or (value is not None and value is not False))
+            for key, value in expression.args.items()
+        )
 
     def createresourcepool_sql(self, expression: vexp.CreateResourcePool) -> str:
         self._validate_resource_pool_target(expression)

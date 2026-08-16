@@ -5,8 +5,9 @@ from __future__ import annotations
 import re
 import typing as t
 
-from sqlglot import ErrorLevel, TokenType, exp
+from sqlglot import ErrorLevel, Token, TokenType, exp
 from sqlglot.dialects.dialect import Dialect, map_date_part
+from sqlglot.errors import ParseError
 from sqlglot.helper import seq_get
 from sqlglot.parsers.postgres import PostgresParser
 
@@ -214,6 +215,88 @@ class VerticaParser(PostgresParser):
         "NETWORK INTERFACE",
         "RESOURCE POOL",
         "ROUTING RULE",
+    }
+    USER_PREFIX_WORDS: t.ClassVar[dict[str, set[str]]] = {
+        "CREATE": {
+            "CLUSTERED",
+            "COLUMNSTORE",
+            "CONCURRENTLY",
+            "DYNAMIC",
+            "EXTERNAL",
+            "FLEX",
+            "FLEXIBLE",
+            "GLOBAL",
+            "HYBRID",
+            "ICEBERG",
+            "LOCAL",
+            "MATERIALIZED",
+            "MULTISET",
+            "NONCLUSTERED",
+            "PRIVATE",
+            "SECURE",
+            "SET",
+            "TEMP",
+            "TEMPORARY",
+            "TRANSIENT",
+            "UNIQUE",
+            "UNLOGGED",
+            "VOLATILE",
+        },
+        "ALTER": {
+            "CONCURRENTLY",
+            "EXTERNAL",
+            "FLEX",
+            "ICEBERG",
+            "MATERIALIZED",
+            "ONLY",
+        },
+        "DROP": {
+            "CASCADE",
+            "CONCURRENTLY",
+            "EXTERNAL",
+            "ICEBERG",
+            "MATERIALIZED",
+            "RESTRICT",
+            "TEMP",
+            "TEMPORARY",
+        },
+    }
+    USER_PREFIX_SEQUENCES: t.ClassVar[dict[str, set[tuple[str, ...]]]] = {
+        "CREATE": {
+            ("IF", "NOT", "EXISTS"),
+            ("OR", "ALTER"),
+            ("OR", "REFRESH"),
+            ("OR", "REPLACE"),
+        },
+        "ALTER": {("IF", "EXISTS")},
+        "DROP": {("IF", "EXISTS")},
+    }
+    USER_KEYWORD_TOKEN_TYPES: t.ClassVar[dict[str, TokenType]] = {
+        "ACCOUNT": TokenType.VAR,
+        "BY": TokenType.VAR,
+        "CASCADE": TokenType.VAR,
+        "EXPIRE": TokenType.VAR,
+        "EXISTS": TokenType.EXISTS,
+        "IF": TokenType.VAR,
+        "IDENTIFIED": TokenType.VAR,
+        "LOCK": TokenType.LOCK,
+        "NOT": TokenType.NOT,
+        "PASSWORD": TokenType.VAR,
+        "RENAME": TokenType.RENAME,
+        "RESTRICT": TokenType.VAR,
+        "TO": TokenType.VAR,
+        "TOTPSECRET": TokenType.VAR,
+        "UNLOCK": TokenType.VAR,
+    }
+    USER_SENSITIVE_LITERAL_TOKENS: t.ClassVar[set[TokenType]] = {
+        TokenType.BIT_STRING,
+        TokenType.BYTE_STRING,
+        TokenType.HEREDOC_STRING,
+        TokenType.HEX_STRING,
+        TokenType.NATIONAL_STRING,
+        TokenType.RAW_STRING,
+        TokenType.STRING,
+        TokenType.UNICODE_STRING,
     }
 
     USER_DEFINED_EXTENSION_KINDS: t.ClassVar = (
@@ -2812,13 +2895,129 @@ class VerticaParser(PostgresParser):
             self._advance()
         return matched
 
+    def _reject_prefixed_user(self, statement: str, words: list[str]) -> None:
+        index = self._user_prefix_length(statement, words)
+        if index >= len(words) or words[index] != "USER":
+            return
+        token = self._tokens[self._index + index]
+        if token.token_type != TokenType.VAR or not token.text.isascii():
+            self._raise_user_error(
+                f"{statement} USER requires the unquoted ASCII USER object keyword"
+            )
+        if index:
+            self._raise_user_error(f"{statement} USER does not support modifiers")
+
+    def _reject_sensitive_user_statement(self, statement: str, words: list[str]) -> None:
+        index = self._user_prefix_length(statement, words)
+        if index >= len(words) or words[index] != "USER":
+            return
+
+        tokens = self._tokens[self._index :]
+        after_user = tokens[index + 1 :]
+        if not after_user:
+            return
+        if any(token.token_type in self.USER_SENSITIVE_LITERAL_TOKENS for token in after_user):
+            raise ParseError("Unsupported secret-bearing USER clause")
+        if statement == "DROP":
+            position = 0
+            if self._tokens_are_user_keywords(after_user, "IF", "EXISTS"):
+                position = 2
+            if position < len(after_user):
+                position += 1
+            while position < len(after_user) and after_user[position].token_type == TokenType.COMMA:
+                position += 2
+            if self._tokens_are_user_keywords(after_user[position:], "CASCADE"):
+                position += 1
+            unsupported_tail = after_user[position:]
+        else:
+            tail = after_user[1:]
+            account_state = self._tokens_are_user_keywords(
+                tail, "ACCOUNT", "LOCK"
+            ) or self._tokens_are_user_keywords(tail, "ACCOUNT", "UNLOCK")
+            password_expire = self._tokens_are_user_keywords(tail, "PASSWORD", "EXPIRE")
+            if statement == "ALTER" and self._tokens_are_user_keywords(tail, "RENAME", "TO"):
+                supported_length = min(3, len(tail))
+            elif account_state or password_expire:
+                supported_length = 2
+            else:
+                supported_length = 0
+            unsupported_tail = tail[supported_length:]
+
+        sensitive_keyword = any(
+            self._tokens_are_user_keywords(unsupported_tail[token_index:], "IDENTIFIED", "BY")
+            or self._tokens_are_user_keywords(unsupported_tail[token_index:], "TOTPSECRET")
+            or (
+                self._tokens_are_user_keywords(unsupported_tail[token_index:], "PASSWORD")
+                and not self._tokens_are_user_keywords(
+                    unsupported_tail[token_index:], "PASSWORD", "EXPIRE"
+                )
+            )
+            for token_index in range(len(unsupported_tail))
+        )
+        if sensitive_keyword:
+            raise ParseError("Unsupported secret-bearing USER clause")
+
+    def _user_prefix_length(self, statement: str, words: list[str]) -> int:
+        index = 0
+        while index < len(words):
+            sequence = next(
+                (
+                    prefix
+                    for prefix in self.USER_PREFIX_SEQUENCES[statement]
+                    if words[index : index + len(prefix)] == list(prefix)
+                ),
+                None,
+            )
+            if sequence:
+                index += len(sequence)
+            elif words[index] in self.USER_PREFIX_WORDS[statement]:
+                index += 1
+            else:
+                break
+        return index
+
+    def _raise_user_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
+    def _match_user_object(self, *, advance: bool = True) -> bool:
+        matched = (
+            self._curr.token_type == TokenType.VAR
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == "USER"
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _match_user_keywords(self, *words: str, advance: bool = True) -> bool:
+        tokens = self._tokens[self._index : self._index + len(words)]
+        matched = self._tokens_are_user_keywords(tokens, *words)
+        if matched and advance:
+            for _ in words:
+                self._advance()
+        return matched
+
+    def _tokens_are_user_keywords(self, tokens: list[Token], *words: str) -> bool:
+        return len(tokens) >= len(words) and all(
+            token.text.isascii()
+            and token.text.upper() == word
+            and token.token_type == self.USER_KEYWORD_TOKEN_TYPES[word]
+            for token, word in zip(tokens[: len(words)], words)
+        )
+
     def _parse_create(  # type: ignore[override]
         self,
     ) -> exp.Create | vexp.CreateDirectedQuery | exp.Command:
         words = [token.text.upper() for token in self._tokens[self._index :]]
+        self._reject_sensitive_user_statement("CREATE", words)
         self._reject_prefixed_routing_rule("CREATE", words)
         self._reject_prefixed_load_balance_group("CREATE", words)
         self._reject_prefixed_network_address("CREATE", words)
+        self._reject_prefixed_user("CREATE", words)
         unsupported_directed_prefixes = (
             ("IF", "NOT", "EXISTS", "DIRECTED", "QUERY"),
             ("TEMPORARY", "DIRECTED", "QUERY"),
@@ -2858,6 +3057,10 @@ class VerticaParser(PostgresParser):
             "INTERFACE", advance=False
         ):
             self._raise_network_address_error("CREATE NETWORK must be followed by ADDRESS")
+        if self._match_user_object():
+            return self._parse_create_user(replace=replace)
+        if self._curr.text.upper() == "USER":
+            self._raise_user_error("CREATE USER requires the unquoted USER object kind")
         if self._match_text_seq("ROLE"):
             return self._parse_create_role(replace=replace)
         if self._match_text_seq("RESOURCE", "POOL"):
@@ -3570,6 +3773,38 @@ class VerticaParser(PostgresParser):
             self.raise_error(f"Unexpected CREATE ROLE clause at {self._curr.text!r}")
         return self.expression(exp.Create(this=role, kind="ROLE"))
 
+    def _parse_create_user(self, replace: bool) -> vexp.CreateUser:
+        if replace:
+            self._raise_user_error("CREATE OR REPLACE USER is not supported by Vertica")
+        if self._match_user_keywords("IF", "NOT", "EXISTS", advance=False):
+            self._raise_user_error("CREATE USER does not support IF NOT EXISTS")
+
+        user = self._parse_user_identifier("CREATE USER")
+        action = None
+        if self._match_user_keywords("ACCOUNT"):
+            if self._match_user_keywords("LOCK"):
+                state = "LOCK"
+            elif self._match_user_keywords("UNLOCK"):
+                state = "UNLOCK"
+            else:
+                self._raise_user_error("CREATE USER ACCOUNT requires LOCK or UNLOCK")
+                state = ""
+            action = self.expression(vexp.UserAction(this=exp.var(f"ACCOUNT {state}")))
+        elif self._match_user_keywords("PASSWORD"):
+            if not self._match_user_keywords("EXPIRE"):
+                self._raise_user_error("CREATE USER PASSWORD requires EXPIRE")
+            action = self.expression(vexp.UserAction(this=exp.var("PASSWORD EXPIRE")))
+
+        if self._curr:
+            self._raise_user_error(f"Unsupported CREATE USER clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.CreateUser(
+                this=user,
+                kind="USER",
+                action=action,
+            )
+        )
+
     def _parse_create_resource_pool(self, replace: bool) -> vexp.CreateResourcePool:
         if replace:
             self.raise_error("CREATE OR REPLACE RESOURCE POOL is not supported by Vertica")
@@ -4116,6 +4351,42 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_alter_user(self) -> vexp.AlterUser:
+        user = self._parse_user_identifier("ALTER USER")
+        action: exp.Expr = self.expression(vexp.UserAction(this=exp.Var(this="")))
+
+        if self._match_user_keywords("RENAME"):
+            if not self._match_user_keywords("TO"):
+                self._raise_user_error("ALTER USER RENAME requires TO")
+            action = self.expression(
+                exp.AlterRename(this=self._parse_user_identifier("ALTER USER RENAME TO"))
+            )
+        elif self._match_user_keywords("ACCOUNT"):
+            if self._match_user_keywords("LOCK"):
+                state = "LOCK"
+            elif self._match_user_keywords("UNLOCK"):
+                state = "UNLOCK"
+            else:
+                self._raise_user_error("ALTER USER ACCOUNT requires LOCK or UNLOCK")
+                state = ""
+            action = self.expression(vexp.UserAction(this=exp.var(f"ACCOUNT {state}")))
+        elif self._match_user_keywords("PASSWORD"):
+            if not self._match_user_keywords("EXPIRE"):
+                self._raise_user_error("ALTER USER PASSWORD requires EXPIRE")
+            action = self.expression(vexp.UserAction(this=exp.var("PASSWORD EXPIRE")))
+        else:
+            self._raise_user_error("ALTER USER requires a supported action")
+
+        if self._curr:
+            self._raise_user_error(f"Unsupported ALTER USER clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.AlterUser(
+                this=user,
+                kind="USER",
+                actions=[action],
+            )
+        )
+
     def _parse_alter_resource_pool(self) -> vexp.AlterResourcePool:
         pool = self._parse_lifecycle_identifier("ALTER RESOURCE POOL")
         subcluster = self._parse_resource_pool_subcluster()
@@ -4519,9 +4790,11 @@ class VerticaParser(PostgresParser):
     def _parse_alter(self) -> exp.Alter | exp.Command:
         index = self._index
         words = [token.text.upper() for token in self._tokens[self._index :]]
+        self._reject_sensitive_user_statement("ALTER", words)
         self._reject_prefixed_routing_rule("ALTER", words)
         self._reject_prefixed_load_balance_group("ALTER", words)
         self._reject_prefixed_network_address("ALTER", words)
+        self._reject_prefixed_user("ALTER", words)
         if self._curr.token_type == TokenType.TABLE and self._has_mixed_reorganize_action():
             self.raise_error(
                 "Mixed ALTER TABLE REORGANIZE action lists are not yet represented semantically"
@@ -4538,6 +4811,10 @@ class VerticaParser(PostgresParser):
             "INTERFACE", advance=False
         ):
             self._raise_network_address_error("ALTER NETWORK must be followed by ADDRESS")
+        if self._match_user_object():
+            return self._parse_alter_user()
+        if self._curr.text.upper() == "USER":
+            self._raise_user_error("ALTER USER requires the unquoted USER object kind")
         if self._match_text_seq("RESOURCE", "POOL"):
             return self._parse_alter_resource_pool()
         if self._match_text_seq("ROUTING", "RULE"):
@@ -5361,6 +5638,48 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_drop_user(self, exists: bool) -> vexp.DropUsers:
+        if exists:
+            self._raise_user_error("DROP USER IF EXISTS must follow USER")
+        if_exists = self._match_user_keywords("IF", "EXISTS")
+        users = [self._parse_user_identifier("DROP USER")]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self._raise_user_error("DROP USER requires a name after each comma")
+            users.append(self._parse_user_identifier("DROP USER"))
+
+        cascade = self._match_user_keywords("CASCADE")
+        if self._match_user_keywords("RESTRICT", advance=False):
+            self._raise_user_error("DROP USER does not support RESTRICT")
+        if self._curr:
+            self._raise_user_error(f"Unsupported DROP USER clause at {self._curr.text!r}")
+
+        return self.expression(
+            vexp.DropUsers(
+                this=users[0],
+                expressions=users[1:] or None,
+                kind="USER",
+                exists=if_exists,
+                cascade=cascade,
+            )
+        )
+
+    def _parse_user_identifier(self, statement: str) -> exp.Identifier:
+        identifier = self._parse_connection_policy_identifier(statement)
+        if not isinstance(identifier.this, str) or not identifier.this:
+            self._raise_user_error(f"{statement} requires a nonempty identifier")
+        elif not identifier.quoted and not self._is_connection_policy_identifier(identifier.this):
+            self._raise_user_error(f"{statement} requires a valid unquoted identifier")
+        else:
+            try:
+                size = len(identifier.this.encode("utf-8"))
+            except UnicodeEncodeError:
+                self._raise_user_error(f"{statement} names must be valid UTF-8")
+            else:
+                if size > 128:
+                    self._raise_user_error(f"{statement} names cannot exceed 128 UTF-8 bytes")
+        return identifier
+
     def _parse_drop_resource_pool(self, exists: bool) -> vexp.DropResourcePool:
         if exists or self._match_text_seq("IF", "EXISTS", advance=False):
             self.raise_error("DROP RESOURCE POOL does not support IF EXISTS")
@@ -5442,9 +5761,11 @@ class VerticaParser(PostgresParser):
         self, exists: bool = False
     ) -> exp.Drop | vexp.DirectedQueryAction | exp.Command:
         words = [token.text.upper() for token in self._tokens[self._index :]]
+        self._reject_sensitive_user_statement("DROP", words)
         self._reject_prefixed_routing_rule("DROP", words)
         self._reject_prefixed_load_balance_group("DROP", words)
         self._reject_prefixed_network_address("DROP", words)
+        self._reject_prefixed_user("DROP", words)
         lookahead = words[:3]
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
             self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
@@ -5474,6 +5795,10 @@ class VerticaParser(PostgresParser):
             "INTERFACE", advance=False
         ):
             self._raise_network_address_error("DROP NETWORK must be followed by ADDRESS")
+        if self._match_user_object():
+            return self._parse_drop_user(exists=exists)
+        if self._curr.text.upper() == "USER":
+            self._raise_user_error("DROP USER requires the unquoted USER object kind")
         if self._match_text_seq("ROLE"):
             return self._parse_drop_role(exists=exists)
         if self._match_text_seq("RESOURCE", "POOL"):

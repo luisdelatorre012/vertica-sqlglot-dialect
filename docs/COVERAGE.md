@@ -78,7 +78,7 @@ Status meanings:
 | Object `GRANT` / `REVOKE` | Semantic | Canonical single-target grants, multi-object and all-in-schema targets, `EXTEND`, routine signatures, locations, resource-pool subclusters, grant options, and cascade semantics |
 | Role and authentication `GRANT` / `REVOKE` | Semantic | Compound role/grantee lists, admin-option revocation, cascade, and authentication associations use dedicated AST nodes |
 | Role lifecycle | Semantic | Canonical `CREATE`, rename, and single-target `DROP`; atomic custom AST for comma-separated drops; exact unqualified-name and option validation |
-| User, profile, and authentication lifecycle | Planned | Security assignment is semantic; lifecycle `CREATE`/`ALTER`/`DROP` dispatch remains a separate phase |
+| User, profile, and authentication lifecycle | Partial | The non-secret USER core is semantic: CREATE with one optional account-lock/unlock or password-expiry action, one-action ALTER rename/account/expiry, and ordered multi-user DROP with postfix `IF EXISTS`/`CASCADE`; credential-bearing and all other USER parameters fail closed without entering the AST, while PROFILE and AUTHENTICATION lifecycle remain planned |
 | Resource-pool lifecycle | Semantic | Ordered typed parameters, `DEFAULT`/`NONE`/`AUTO`/`HOLD` sentinels, named/current subcluster selectors, and CREATE/ALTER/DROP restrictions use dedicated AST roots |
 | Load-balance-group lifecycle | Semantic | Address, fault-group, and subcluster member specifications, mandatory filters, selection policies, every ALTER action, and dependency-cascading DROP use typed ASTs with atomic foreign failure |
 | Network-address lifecycle | Semantic | Fixed-order node/address/port/state creation, rename/endpoint/state ALTER actions, and postfix `IF EXISTS`/`CASCADE` DROP use typed ASTs; NETWORK INTERFACE remains intentionally opaque and distinct |
@@ -122,6 +122,11 @@ Some rules require information that a syntax-only dialect does not have:
   mutability, subcluster connection state, and secondary-pool dependency cycles
   require server/catalog state. The dialect validates documented value domains,
   required parameter pairs, duplicate parameters, and clause order only.
+- USER existence, uniqueness, privilege and own-account restrictions,
+  LDAP/external-authentication behavior, dependency effects, and the runtime
+  `V_CATALOG.KEYWORDS` reserved-word catalog require server state. The dialect
+  enforces the documented 128-byte UTF-8 name limit and parser/generator token
+  parity, but does not freeze a version-sensitive reserved-word list.
 - Directed-query name existence, query compatibility, optimizer-version/date
   provenance, and activation effects require the Vertica catalog. The dialect
   validates statement grammar, target cardinality, nonempty query structure,

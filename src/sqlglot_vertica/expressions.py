@@ -679,6 +679,29 @@ class DropRoles(exp.Drop):
     arg_types: t.ClassVar = {**exp.Drop.arg_types}
 
 
+class UserAction(exp.Expression):
+    """A typed account-state or password-expiry USER lifecycle action."""
+
+    arg_types: t.ClassVar = {"this": True}
+
+
+class CreateUser(exp.Create):
+    """Create one Vertica user without retaining credential material."""
+
+    arg_types: t.ClassVar = {
+        **exp.Create.arg_types,
+        "action": False,
+    }
+
+
+class AlterUser(exp.Alter):
+    """Apply exactly one bounded, non-secret change to a Vertica user."""
+
+
+class DropUsers(exp.Drop):
+    """Drop one or more Vertica users with optional dependency cascading."""
+
+
 class ResourcePoolSubcluster(exp.Expression):
     """A named or current-subcluster resource-pool selector."""
 
