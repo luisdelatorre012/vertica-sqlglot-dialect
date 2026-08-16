@@ -4,6 +4,10 @@ The coverage matrix records the current contract. This roadmap orders the
 remaining work so that “comprehensive” stays testable instead of becoming a
 single undifferentiated dialect file.
 
+The executable, one-task-per-agent backlog is maintained in
+[`AGENT_TASK_PLAN.md`](AGENT_TASK_PLAN.md). It is the source of truth for task
+order, dependencies, acceptance criteria, and completion status.
+
 Every phase keeps the same release gate: structured AST assertions, compact
 and pretty round trips, dump/load stability, malformed-clause regressions,
 optimizer or foreign-generation contracts where relevant, at least 90% branch
