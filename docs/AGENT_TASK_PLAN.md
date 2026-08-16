@@ -17,10 +17,31 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P02 — executable PROFILE statement**.
-- Next eligible tasks are selected by dependency and numeric order; P03 is the
+- Completed through **P03 — USER profile and resource-pool assignments**.
+- Next eligible tasks are selected by dependency and numeric order; P04 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
+
+## Installed local Python runtimes
+
+The Windows development host has every supported CPython minor installed and
+testable through versioned shims in `C:\Users\luisd\.local\bin`:
+
+| Minor | Installed release | Executable |
+| --- | --- | --- |
+| 3.9 | 3.9.25 | `python3.9.exe` |
+| 3.10 | 3.10.20 | `python3.10.exe` |
+| 3.11 | 3.11.15 | `python3.11.exe` |
+| 3.12 | 3.12.13 | `python3.12.exe` |
+| 3.13 | 3.13.15 | `python3.13.exe` |
+| 3.14 | 3.14.7 | `python3.14.exe` |
+| 3.15 | 3.15.0rc1 | `python3.15.exe` |
+
+These interpreters are managed outside the Windows Python launcher registry,
+so `py -0p` is not an authoritative inventory and can show only the older
+system 3.12 installation. Agents must invoke each versioned shim directly.
+Historical completion records below describe what was actually run at the time
+and must not be used to infer current runtime availability.
 
 ## Status dashboard
 
@@ -162,9 +183,29 @@ Every feature task must complete all applicable checks:
    git diff --check
    ```
 
-8. Full tests on the available CPython 3.14 and 3.15 runtimes; run 3.15 with
-   `-W error::DeprecationWarning`. If an expected local runtime is unavailable,
-   record that fact and run the closest available prerelease—do not claim it ran.
+8. Full tests on every installed supported runtime, CPython 3.9 through 3.15.
+   Use the exact shims documented in **Installed local Python runtimes**; do not
+   infer availability from `py -0p`. Run 3.15 with
+   `-W error::DeprecationWarning`. Use isolated per-version environments so
+   dependencies and bytecode cannot leak between minors. A suitable PowerShell
+   pattern is:
+
+   ```powershell
+   $env:UV_CACHE_DIR = Join-Path $env:TEMP "vertica-uv-cache"
+   foreach ($minor in @("3.9", "3.10", "3.11", "3.12", "3.13", "3.14")) {
+       $python = Join-Path $env:USERPROFILE ".local\bin\python$minor.exe"
+       & $python --version
+       uv run --isolated --python $python --extra dev python -m pytest
+   }
+   $python315 = Join-Path $env:USERPROFILE ".local\bin\python3.15.exe"
+   & $python315 --version
+   uv run --isolated --python $python315 --extra dev `
+       python -W error::DeprecationWarning -m pytest
+   ```
+
+   If a shim is missing or fails to run, diagnose the local installation and
+   restore it with `uv python install <minor> --upgrade`; do not silently skip
+   the runtime or claim that it is unavailable.
 9. Build sdist/wheel without isolation when the sandbox cannot download build
    dependencies. Force-install the exact new wheel into a clean `.wheel-venv`,
    run `pip check`, and use `python -I` to verify entry-point discovery plus one
