@@ -88,6 +88,8 @@ called out in code review.
 - [DROP SEQUENCE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-sequence/)
 - [CREATE SCHEMA](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-schema/)
 - [CREATE VIEW](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-view/)
+- [ALTER VIEW](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-view/)
+- [DROP VIEW](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-view/)
 - [INSERT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/insert/)
 - [UPDATE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/update/)
 - [DELETE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/delete/)

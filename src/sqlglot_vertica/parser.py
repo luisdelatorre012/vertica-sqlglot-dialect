@@ -3362,6 +3362,13 @@ class VerticaParser(PostgresParser):
         if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
             raise ParseError(message)
 
+    def _raise_view_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
     def _match_user_object(self, *, advance: bool = True) -> bool:
         matched = (
             self._curr.token_type == TokenType.VAR
@@ -5781,6 +5788,105 @@ class VerticaParser(PostgresParser):
 
         return self.expression(exp.Neg(this=number)) if negative else number
 
+    def _match_view_keyword(self, word: str, *, advance: bool = True) -> bool:
+        token_types = {
+            "RENAME": TokenType.RENAME,
+            "SCHEMA": TokenType.SCHEMA,
+            "SET": TokenType.SET,
+        }
+        matched = (
+            self._curr.token_type == token_types.get(word, TokenType.VAR)
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == word
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _parse_view_name(self, statement: str) -> exp.Table:
+        name = self._parse_table_parts(schema=True)
+        if not isinstance(name, exp.Table) or not isinstance(name.this, exp.Identifier):
+            self._raise_view_error(f"{statement} requires a view name")
+        assert isinstance(name, exp.Table)
+        for component in (name.args.get("catalog"), name.args.get("db"), name.this):
+            if isinstance(component, exp.Identifier):
+                self._validate_user_name_component(component, statement)
+        return name
+
+    def _parse_view_identifier(self, statement: str) -> exp.Identifier:
+        identifier = self._parse_id_var()
+        if not isinstance(identifier, exp.Identifier):
+            self._raise_view_error(f"{statement} requires an unqualified name")
+        assert isinstance(identifier, exp.Identifier)
+        self._validate_user_name_component(identifier, statement)
+        if self._match(TokenType.DOT, advance=False):
+            self._raise_view_error(f"{statement} names cannot be schema-qualified")
+        return identifier
+
+    def _parse_alter_view(self) -> vexp.AlterView:
+        views = [self._parse_view_name("ALTER VIEW")]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self._raise_view_error("ALTER VIEW requires a name after each comma")
+            views.append(self._parse_view_name("ALTER VIEW"))
+
+        if self._match_view_keyword("OWNER"):
+            if len(views) != 1:
+                self._raise_view_error("ALTER VIEW OWNER accepts exactly one view")
+            if not self._match_view_keyword("TO"):
+                self._raise_view_error("ALTER VIEW OWNER requires TO")
+            action: exp.Expr = self.expression(
+                vexp.ViewOwnerToAction(this=self._parse_view_identifier("ALTER VIEW OWNER TO"))
+            )
+        elif self._match_view_keyword("SET"):
+            if len(views) != 1:
+                self._raise_view_error("ALTER VIEW SET SCHEMA accepts exactly one view")
+            if not self._match_view_keyword("SCHEMA"):
+                self._raise_view_error("ALTER VIEW SET requires SCHEMA")
+            action = self.expression(
+                vexp.ViewSetSchemaAction(this=self._parse_view_identifier("ALTER VIEW SET SCHEMA"))
+            )
+        elif any(
+            self._match_view_keyword(mode, advance=False)
+            for mode in ("INCLUDE", "EXCLUDE", "MATERIALIZE")
+        ):
+            if len(views) != 1:
+                self._raise_view_error("ALTER VIEW privilege actions accept exactly one view")
+            mode = self._curr.text.upper()
+            self._advance()
+            schema = self._match_view_keyword("SCHEMA")
+            if not self._match_view_keyword("PRIVILEGES"):
+                self._raise_view_error(f"ALTER VIEW {mode} requires PRIVILEGES")
+            action = self.expression(vexp.ViewPrivilegeAction(this=exp.var(mode), schema=schema))
+        elif self._match_view_keyword("RENAME"):
+            if not self._match_view_keyword("TO"):
+                self._raise_view_error("ALTER VIEW RENAME requires TO")
+            targets = [self._parse_view_identifier("ALTER VIEW RENAME TO")]
+            while self._match(TokenType.COMMA):
+                if not self._curr:
+                    self._raise_view_error("ALTER VIEW RENAME requires a name after each comma")
+                targets.append(self._parse_view_identifier("ALTER VIEW RENAME TO"))
+            if len(targets) != len(views):
+                self._raise_view_error(
+                    "ALTER VIEW RENAME source and target lists must have equal length"
+                )
+            action = self.expression(vexp.ViewRenameAction(expressions=targets))
+        else:
+            self._raise_view_error(
+                "ALTER VIEW requires OWNER, SET SCHEMA, a privilege action, or RENAME"
+            )
+
+        if self._curr:
+            self._raise_view_error(f"Unexpected ALTER VIEW clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.AlterView(
+                this=views[0],
+                expressions=views[1:] or None,
+                kind="VIEW",
+                actions=[action],
+            )
+        )
+
     def _parse_alter(self) -> exp.Alter | exp.Command:
         index = self._index
         words = [token.text.upper() for token in self._tokens[self._index :]]
@@ -5830,6 +5936,8 @@ class VerticaParser(PostgresParser):
             self.raise_error("ALTER ROUTING must be followed by RULE")
         if self._match(TokenType.SEQUENCE):
             return self._parse_alter_sequence()
+        if self._match(TokenType.VIEW):
+            return self._parse_alter_view()
         if self._match(TokenType.TABLE):
             if self._match_text_seq("REORGANIZE", advance=False) and not self._next:
                 self.raise_error("ALTER TABLE REORGANIZE requires a table name")
@@ -6791,6 +6899,28 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_drop_view(self, exists: bool) -> vexp.DropViews:
+        if exists:
+            self._raise_view_error("DROP VIEW IF EXISTS must follow VIEW")
+        if_exists = bool(self._parse_exists())
+        views = [self._parse_view_name("DROP VIEW")]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self._raise_view_error("DROP VIEW requires a name after each comma")
+            views.append(self._parse_view_name("DROP VIEW"))
+        if self._match_texts(("CASCADE", "RESTRICT"), advance=False):
+            self._raise_view_error("Vertica DROP VIEW does not support dependency modifiers")
+        if self._curr:
+            self._raise_view_error(f"Unexpected DROP VIEW clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.DropViews(
+                this=views[0],
+                expressions=views[1:] or None,
+                kind="VIEW",
+                exists=if_exists,
+            )
+        )
+
     def _parse_drop_user(self, exists: bool) -> vexp.DropUsers:
         if exists:
             self._raise_user_error("DROP USER IF EXISTS must follow USER")
@@ -6974,6 +7104,8 @@ class VerticaParser(PostgresParser):
         self._reject_prefixed_user("DROP", words)
         self._reject_prefixed_authentication("DROP", words)
         lookahead = words[:3]
+        if lookahead == ["IF", "EXISTS", "VIEW"]:
+            self._raise_view_error("DROP VIEW IF EXISTS must follow VIEW")
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
             self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
         if lookahead[:2] == ["TEMPORARY", "DIRECTED"]:
@@ -7025,6 +7157,8 @@ class VerticaParser(PostgresParser):
             return self._parse_drop_routing_rule(exists=exists)
         if self._match_text_seq("ROUTING", advance=False):
             self.raise_error("DROP ROUTING must be followed by RULE")
+        if self._match(TokenType.VIEW):
+            return self._parse_drop_view(exists=exists)
 
         if self._match(TokenType.PROCEDURE):
             if_exists = exists or self._parse_exists()

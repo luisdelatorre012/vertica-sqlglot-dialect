@@ -46,7 +46,7 @@ def test_core_dml_is_semantic(sql: str, node_type: type[exp.Expr]) -> None:
         "CREATE SCHEMA IF NOT EXISTS analytics",
         "CREATE SEQUENCE IF NOT EXISTS public.ids",
         "CREATE OR REPLACE VIEW public.v (id, amount) AS SELECT id, amount FROM sales",
-        "DROP VIEW IF EXISTS public.v CASCADE",
+        "DROP VIEW IF EXISTS public.v",
         "TRUNCATE TABLE staging",
     ],
 )

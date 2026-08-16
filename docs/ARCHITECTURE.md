@@ -218,6 +218,18 @@ than conflating it with an absent AST child. Catalog ownership/existence and
 the server's documented 8192-character truncation remain server concerns.
 Foreign dialects reject both the root and the detached constraint target.
 
+Persistent views retain canonical `exp.Create` nodes because SQLGlot preserves
+their target, optional columns, query, replacement flag, and inherited-
+privilege property exactly. `AlterView` and `DropViews` are atomic roots around
+qualified table-shaped names: ALTER owns exactly one typed owner, schema,
+privilege, or ordered rename action, while DROP owns an ordered nonempty target
+list and postfix `IF EXISTS`. Multi-view rename source and unqualified target
+lists have equal cardinality. The 26.2 DROP grammar has no dependency modifier,
+so `CASCADE` and `RESTRICT` fail closed rather than inheriting generic SQLGlot
+behavior. Ownership, existence, name uniqueness, current-database resolution,
+and dependency effects remain catalog/server checks. Local temporary CREATE
+VIEW syntax and TABLE lifecycle dispatch remain separate.
+
 Directed-query statements use atomic custom roots because SQLGlot has no
 canonical SAVE/GET/CREATE/activation lifecycle. Their input SELECTs and WHERE
 filters remain ordinary traversable query children. `DirectedConstantHint`

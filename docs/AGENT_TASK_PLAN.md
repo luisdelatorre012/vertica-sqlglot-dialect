@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P10 — COMMENT ON family**.
-- Next eligible tasks are selected by dependency and numeric order; P11 is the
+- Completed through **P11 — VIEW lifecycle**.
+- Next eligible tasks are selected by dependency and numeric order; P12 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -62,7 +62,7 @@ task may be `IN_PROGRESS`.
 | P08 | DONE   | AUTHENTICATION structural ALTER actions       | P07                 | `feat: model authentication alter actions`              |
 | P09 | DONE   | AUTHENTICATION SET security boundary          | P08                 | `feat: add safe authentication parameters`              |
 | P10 | DONE   | COMMENT ON family                             | P02                 | `feat: make Vertica comment statements semantic`        |
-| P11 | TODO   | VIEW lifecycle                                | P10                 | `feat: complete semantic view lifecycle`                |
+| P11 | DONE   | VIEW lifecycle                                | P10                 | `feat: complete semantic view lifecycle`                |
 | P12 | TODO   | SCHEMA lifecycle                              | P11                 | `feat: complete semantic schema lifecycle`              |
 | P13 | TODO   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
 | P14 | TODO   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
@@ -320,7 +320,7 @@ deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel build, clean
 force-install, `pip check`, and installed-wheel entry-point/COMMENT round-trip
 smoke passed.
 
-### P11 — VIEW lifecycle — `TODO`
+### P11 — VIEW lifecycle — `DONE`
 
 **Outcome.** Complete typed ALTER/DROP VIEW around the existing semantic CREATE
 VIEW implementation.
@@ -335,7 +335,23 @@ atomicity.
 **Primary sources.** [ALTER VIEW](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-view/)
 and [DROP VIEW](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-view/).
 
-**Completion record.** Pending.
+**Completion record.** Added atomic `AlterView` and `DropViews` roots around
+qualified, table-shaped names while retaining the existing canonical CREATE
+VIEW tree. ALTER supports exactly one typed owner transfer, schema move,
+INCLUDE/EXCLUDE/MATERIALIZE privilege action, or equal-cardinality ordered
+multi-view rename; rename targets remain unqualified. DROP preserves an ordered
+nonempty target list and postfix `IF EXISTS`. The re-opened 26.2 DROP syntax has
+no dependency modifier, consistent with the view-management documentation, so
+`CASCADE` and `RESTRICT` now fail closed rather than leaking through SQLGlot's
+generic DROP grammar. Name existence, uniqueness, ownership, current-database
+resolution, and dependency effects remain catalog/server checks. CREATE VIEW,
+TABLE lifecycle, and local-temporary-view dispatch remain separate. The focused
+schema/view suite passed 201 tests. The default CPython 3.12.6 gate passed 4149
+tests at 93.43% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 4149 tests, with
+3.15 treating deprecations as errors. Ruff, formatting, strict mypy,
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+entry-point/ALTER VIEW round-trip smoke passed.
 
 ### P12 — SCHEMA lifecycle — `TODO`
 

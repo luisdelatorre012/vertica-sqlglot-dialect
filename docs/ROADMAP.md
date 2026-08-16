@@ -95,6 +95,9 @@ Implemented catalog P0:
 
 - semantic COMMENT ON statements for every documented catalog-object and
   routine target, including typed ownership paths and `NULL` removal;
+- complete semantic VIEW lifecycle with typed owner, schema, inherited-
+  privilege, and equal-cardinality multi-rename ALTER actions plus ordered
+  multi-target DROP without undocumented dependency modifiers;
 - semantic `CREATE`/`DROP LIBRARY` with dependency, language, and cascade
   clauses;
 - a shared semantic factory specification for scalar, aggregate, analytic,

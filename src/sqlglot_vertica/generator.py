@@ -322,6 +322,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AlterRoutingRule: lambda self, expression: self.alterroutingrule_sql(expression),
         vexp.AlterTablePartition: lambda self, expression: self.altertablepartition_sql(expression),
         vexp.AlterUser: lambda self, expression: self.alteruser_sql(expression),
+        vexp.AlterView: lambda self, expression: self.alterview_sql(expression),
         vexp.CreateDirectedQuery: lambda self, expression: self.createdirectedquery_sql(expression),
         vexp.CreateAuthentication: lambda self, expression: self.createauthentication_sql(
             expression
@@ -397,6 +398,7 @@ class VerticaGenerator(PostgresGenerator):
             expression
         ),
         vexp.DropUsers: lambda self, expression: self.dropusers_sql(expression),
+        vexp.DropViews: lambda self, expression: self.dropviews_sql(expression),
         vexp.EncodedByProperty: lambda self, expression: (
             f"ENCODED BY {self.expressions(expression, flat=True)}"
         ),
@@ -428,6 +430,10 @@ class VerticaGenerator(PostgresGenerator):
         vexp.InheritedPrivilegesProperty: lambda self, expression: (
             self.inheritedprivilegesproperty_sql(expression)
         ),
+        vexp.ViewOwnerToAction: lambda self, expression: self.viewownertoaction_sql(expression),
+        vexp.ViewPrivilegeAction: lambda self, expression: self.viewprivilegeaction_sql(expression),
+        vexp.ViewRenameAction: lambda self, expression: self.viewrenameaction_sql(expression),
+        vexp.ViewSetSchemaAction: lambda self, expression: self.viewsetschemaaction_sql(expression),
         vexp.KsafeProperty: lambda self, expression: self.ksafeproperty_sql(expression),
         vexp.ListAgg: lambda self, expression: self.vertica_listagg_sql(expression),
         vexp.LoadBalanceGroupAction: lambda self, expression: self.loadbalancegroupaction_sql(
@@ -3937,6 +3943,151 @@ class VerticaGenerator(PostgresGenerator):
         if active_partition_count:
             sql += f" ACTIVEPARTITIONCOUNT {active_partition_count}"
         return sql
+
+    def _validate_view_name(self, expression: object, label: str) -> bool:
+        if not isinstance(expression, exp.Table):
+            self.unsupported(f"{label} requires a qualified table-shaped name")
+            return False
+        valid = True
+        if self._has_user_extras(expression, {"this", "db", "catalog"}):
+            self.unsupported(f"{label} contains unsupported table fields")
+            valid = False
+        parts = [expression.args.get("catalog"), expression.args.get("db"), expression.this]
+        if parts[0] is not None and parts[1] is None:
+            self.unsupported(f"{label} cannot have a database without a schema")
+            valid = False
+        for part_label, part in zip(("database", "schema", "view"), parts):
+            if part is not None:
+                valid = self._validate_user_identifier(part, f"{label} {part_label}") and valid
+        return valid
+
+    def _validate_view_root(self, expression: exp.Expr, statement: str) -> bool:
+        valid = True
+        if expression.args.get("kind") != "VIEW":
+            self.unsupported(f"{type(expression).__name__} requires kind VIEW")
+            valid = False
+        allowed = {"this", "expressions", "kind", "actions"}
+        if isinstance(expression, vexp.DropViews):
+            allowed = {"this", "expressions", "kind", "exists"}
+        if self._has_user_extras(expression, allowed):
+            self.unsupported(f"{statement} contains unsupported statement fields")
+            valid = False
+        raw_secondary = expression.args.get("expressions")
+        if raw_secondary is None:
+            secondary: list[exp.Expr] = []
+        elif not isinstance(raw_secondary, list):
+            self.unsupported(f"{statement} secondary targets must be a list")
+            secondary = []
+            valid = False
+        else:
+            secondary = raw_secondary
+        targets = [expression.args.get("this"), *secondary]
+        for target in targets:
+            valid = self._validate_view_name(target, f"{statement} target") and valid
+        return valid
+
+    def alterview_sql(self, expression: vexp.AlterView) -> str:
+        valid = self._validate_view_root(expression, "ALTER VIEW")
+        raw_sources = expression.args.get("expressions")
+        sources = (
+            [expression.args.get("this"), *raw_sources]
+            if isinstance(raw_sources, list)
+            else [expression.args.get("this")]
+        )
+        raw_actions = expression.args.get("actions")
+        if not isinstance(raw_actions, list) or len(raw_actions) != 1:
+            self.unsupported("ALTER VIEW requires exactly one typed action")
+            return ""
+        action = raw_actions[0]
+        if not isinstance(
+            action,
+            (
+                vexp.ViewOwnerToAction,
+                vexp.ViewSetSchemaAction,
+                vexp.ViewPrivilegeAction,
+                vexp.ViewRenameAction,
+            ),
+        ):
+            self.unsupported("ALTER VIEW requires a supported typed action")
+            return ""
+        if isinstance(action, vexp.ViewRenameAction):
+            targets = action.args.get("expressions")
+            if not isinstance(targets, list) or len(targets) != len(sources):
+                self.unsupported("ALTER VIEW RENAME source and target lists must have equal length")
+                valid = False
+        elif len(sources) != 1:
+            self.unsupported("Only ALTER VIEW RENAME accepts multiple source views")
+            valid = False
+        if not valid:
+            return ""
+        return f"ALTER VIEW {', '.join(self.sql(source) for source in sources)} {self.sql(action)}"
+
+    def dropviews_sql(self, expression: vexp.DropViews) -> str:
+        valid = self._validate_view_root(expression, "DROP VIEW")
+        exists = expression.args.get("exists")
+        if exists is not None and not isinstance(exists, bool):
+            self.unsupported("DropViews exists must be boolean")
+            valid = False
+        raw_secondary = expression.args.get("expressions")
+        targets = (
+            [expression.args.get("this"), *raw_secondary]
+            if isinstance(raw_secondary, list)
+            else [expression.args.get("this")]
+        )
+        if not valid:
+            return ""
+        exists_sql = " IF EXISTS" if exists else ""
+        return f"DROP VIEW{exists_sql} {', '.join(self.sql(target) for target in targets)}"
+
+    def viewownertoaction_sql(self, expression: vexp.ViewOwnerToAction) -> str:
+        if self._has_user_extras(expression, {"this"}) or not self._validate_user_identifier(
+            expression.args.get("this"), "ALTER VIEW OWNER TO"
+        ):
+            return ""
+        return f"OWNER TO {self.sql(expression, 'this')}"
+
+    def viewsetschemaaction_sql(self, expression: vexp.ViewSetSchemaAction) -> str:
+        if self._has_user_extras(expression, {"this"}) or not self._validate_user_identifier(
+            expression.args.get("this"), "ALTER VIEW SET SCHEMA"
+        ):
+            return ""
+        return f"SET SCHEMA {self.sql(expression, 'this')}"
+
+    def viewprivilegeaction_sql(self, expression: vexp.ViewPrivilegeAction) -> str:
+        if self._has_user_extras(expression, {"this", "schema"}):
+            self.unsupported("ViewPrivilegeAction contains unsupported fields")
+            return ""
+        marker = expression.args.get("this")
+        if (
+            not isinstance(marker, exp.Var)
+            or self._has_user_extras(marker, {"this"})
+            or not isinstance(marker.this, str)
+            or not marker.this.isascii()
+            or marker.this.upper() not in {"INCLUDE", "EXCLUDE", "MATERIALIZE"}
+        ):
+            self.unsupported("ViewPrivilegeAction requires a finite typed action marker")
+            return ""
+        schema = expression.args.get("schema")
+        if schema is not None and not isinstance(schema, bool):
+            self.unsupported("ViewPrivilegeAction schema must be boolean")
+            return ""
+        schema_sql = " SCHEMA" if schema else ""
+        return f"{marker.this.upper()}{schema_sql} PRIVILEGES"
+
+    def viewrenameaction_sql(self, expression: vexp.ViewRenameAction) -> str:
+        if self._has_user_extras(expression, {"expressions"}):
+            self.unsupported("ViewRenameAction contains unsupported fields")
+            return ""
+        targets = expression.args.get("expressions")
+        if not isinstance(targets, list) or not targets:
+            self.unsupported("ViewRenameAction requires a nonempty target list")
+            return ""
+        valid = all(
+            self._validate_user_identifier(target, "ALTER VIEW RENAME TO") for target in targets
+        )
+        if not valid:
+            return ""
+        return f"RENAME TO {', '.join(self.sql(target) for target in targets)}"
 
     def inheritedprivilegesproperty_sql(self, expression: vexp.InheritedPrivilegesProperty) -> str:
         action = "INCLUDE" if expression.args["include"] else "EXCLUDE"

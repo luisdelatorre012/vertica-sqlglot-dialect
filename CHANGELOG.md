@@ -27,8 +27,10 @@ plugin interface.
 - Added structured CREATE PROJECTION and CREATE TABLE physical design.
 - Added semantic CTAS, LIKE, global/local temporary tables, historical
   snapshots, inherited privileges, encodings, segmentation, and quotas.
-- Added semantic CREATE/ALTER/DROP SEQUENCE, CREATE SCHEMA extensions, and
-  CREATE VIEW extensions with ordered and conflicting-clause validation.
+- Added semantic CREATE/ALTER/DROP SEQUENCE, CREATE SCHEMA extensions, and a
+  complete VIEW lifecycle with typed metadata actions, equal-cardinality
+  multi-renames, ordered multi-target drops, and strict dependency-modifier
+  rejection.
 - Added semantic role lifecycle DDL and typed CREATE/ALTER/DROP RESOURCE POOL
   statements with subcluster selectors and parameter-domain validation.
 - Added a bounded non-secret USER lifecycle: ordered CREATE/ALTER account-state,

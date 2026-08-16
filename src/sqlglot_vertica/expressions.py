@@ -660,6 +660,40 @@ class DefaultInheritedPrivilegesProperty(InheritedPrivilegesProperty):
     """Default privilege inheritance policy for new objects in a schema."""
 
 
+class ViewOwnerToAction(exp.Expression):
+    """Transfer ownership of a view to one user."""
+
+    arg_types: t.ClassVar = {"this": True}
+
+
+class ViewSetSchemaAction(exp.Expression):
+    """Move a view to another schema."""
+
+    arg_types: t.ClassVar = {"this": True}
+
+
+class ViewPrivilegeAction(exp.Expression):
+    """Change or materialize a view's inherited schema privileges."""
+
+    arg_types: t.ClassVar = {"this": True, "schema": False}
+
+
+class ViewRenameAction(exp.Expression):
+    """Ordered target-name list for an equal-cardinality view rename."""
+
+    arg_types: t.ClassVar = {"expressions": True}
+
+
+class AlterView(exp.Alter):
+    """Alter one or more Vertica views with exactly one typed action."""
+
+    arg_types: t.ClassVar = {**exp.Alter.arg_types, "expressions": False}
+
+
+class DropViews(exp.Drop):
+    """Drop one or more Vertica views without dependency modifiers."""
+
+
 class SequenceSetSchemaAction(exp.Expression):
     """Move a named sequence to another schema."""
 

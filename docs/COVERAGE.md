@@ -69,7 +69,7 @@ Status meanings:
 | Libraries and factory-backed UDx catalog DDL | Semantic | `CREATE`/`DROP LIBRARY` and scalar, aggregate, analytic, transform, filter, parser, and source UDx registration use atomic ASTs; ordered factory clauses, explicit drop signatures, and language/fence restrictions are validated |
 | Named sequences | Semantic | Ordered CREATE/ALTER behavior options, explicit `NO` forms, restart/rename/schema/owner actions, and multi-object DROP; catalog-dependent numeric consistency remains server validation |
 | `CREATE SCHEMA` | Partial | Authorization, default privilege inheritance, namespace-qualified names, and quota are semantic; compound schema transactions containing embedded DDL/GRANT sub-statements remain planned |
-| `CREATE VIEW` | Semantic | Replacement, explicit column names, schema-qualified names, inherited privileges, and query bodies |
+| View lifecycle | Semantic | CREATE replacement, columns, privilege inheritance, and query bodies; ALTER owner/schema/inherited-privilege actions and equal-cardinality multi-rename; ordered multi-target DROP with postfix `IF EXISTS` and no dependency modifiers |
 | `COMMENT ON` statements | Semantic | Aggregate, analytic, scalar, and transform routine signatures plus column, constraint, library, node, projection, schema, sequence, table, and view targets are typed; standard-string comments and `NULL` removal are preserved |
 | Flex tables and map-specific DDL | Planned | Map functions currently parse generically |
 
