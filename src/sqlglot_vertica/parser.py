@@ -605,7 +605,14 @@ class VerticaParser(PostgresParser):
         )
 
         expression: exp.Expr | None
-        if self._match_text_seq("SAVE", "QUERY"):
+        profile_comments = list(self._curr.comments)
+        if self._match_profile_object():
+            expression = self._parse_profile_statement(comments=profile_comments)
+        elif self._curr.text.upper() == "PROFILE":
+            self._raise_profile_error(
+                "PROFILE requires the unquoted ASCII PROFILE statement keyword"
+            )
+        elif self._match_text_seq("SAVE", "QUERY"):
             expression = self._parse_saved_or_get_directed_query(save=True)
         elif self._match_text_seq("GET", "DIRECTED"):
             if not self._match_text_seq("QUERY"):
@@ -634,6 +641,41 @@ class VerticaParser(PostgresParser):
                     "Directed-query constant annotations are valid only inside SELECT queries"
                 )
         return expression
+
+    def _parse_profile_statement(self, comments: list[str]) -> vexp.ProfileStatement:
+        if not self._curr:
+            self._raise_profile_error("PROFILE requires one SQL statement")
+        if self._match_profile_object(advance=False) or self._curr.text.upper() == "PROFILE":
+            self._raise_profile_error("Nested PROFILE statements are not supported")
+
+        body_starts_with_query = self._curr.token_type in {TokenType.SELECT, TokenType.WITH}
+        original_error_level = self.error_level
+        self.error_level = ErrorLevel.IMMEDIATE
+        try:
+            statement = super()._parse_statement()
+        finally:
+            self.error_level = original_error_level
+        if isinstance(statement, exp.Query) and not body_starts_with_query:
+            self._raise_profile_error("PROFILE query bodies must start with SELECT or WITH")
+        if not self._is_profile_statement_body(statement):
+            self._raise_profile_error(
+                "PROFILE requires SELECT, INSERT, UPDATE, DELETE, COPY, or MERGE"
+            )
+        assert statement is not None
+        return self.expression(vexp.ProfileStatement(this=statement), comments=comments)
+
+    @staticmethod
+    def _is_profile_statement_body(statement: exp.Expr | None) -> bool:
+        if isinstance(statement, exp.Select):
+            return bool(statement.expressions)
+        if isinstance(statement, exp.SetOperation):
+            return VerticaParser._is_profile_statement_body(
+                statement.args.get("this")
+            ) and VerticaParser._is_profile_statement_body(statement.args.get("expression"))
+        return isinstance(
+            statement,
+            (exp.Insert, exp.Update, exp.Delete, vexp.VerticaCopy, exp.Merge),
+        )
 
     def _parse_command(  # type: ignore[override]
         self,

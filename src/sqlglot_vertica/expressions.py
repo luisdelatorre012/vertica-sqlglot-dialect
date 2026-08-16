@@ -734,6 +734,12 @@ class DropProfiles(exp.Drop):
     """Drop one or more profiles with optional user reassignment."""
 
 
+class ProfileStatement(exp.Expression):
+    """Execute one traversable query or DML statement with profiling enabled."""
+
+    arg_types: t.ClassVar = {"this": True}
+
+
 class ResourcePoolSubcluster(exp.Expression):
     """A named or current-subcluster resource-pool selector."""
 

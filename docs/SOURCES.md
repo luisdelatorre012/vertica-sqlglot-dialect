@@ -21,6 +21,7 @@ called out in code review.
 ## Query extensions and functions
 
 - [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
+- [PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/profile/)
 - [TIMESERIES](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/timeseries-clause/)
 - [INTERPOLATE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/predicates/interpolate/)
 - [MATCH](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/match-clause/)

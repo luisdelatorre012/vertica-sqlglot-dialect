@@ -313,8 +313,6 @@ def test_profile_detached_leaves_fail_atomically_in_foreign_dialects() -> None:
                 leaf.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
 
 
-def test_excluded_profile_families_remain_outside_p01() -> None:
-    with pytest.raises(ParseError):
-        parse_one("PROFILE SELECT 1", read="vertica")
+def test_user_profile_assignment_remains_outside_p01() -> None:
     with pytest.raises(ParseError):
         parse_one("CREATE USER analyst PROFILE p", read="vertica")

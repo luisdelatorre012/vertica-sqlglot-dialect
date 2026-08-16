@@ -26,6 +26,8 @@ Implemented for the 0.2 rewrite:
 - exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE semantics with
   strict parse/generation validation and a lineage-safe UPDATE `FROM DEFAULT`
   relation;
+- semantic executable PROFILE wrappers with traversable SELECT and DML/COPY/
+  MERGE children and atomic foreign failure;
 - COPY, projections, definition-form tables, CTAS, LIKE, temporary tables,
   sequences, schema extensions, and view extensions;
 - optimizer-safe custom ASTs and explicit unsupported foreign generation.

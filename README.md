@@ -90,6 +90,10 @@ rename actions, and DROP retains ordered targets and dependency cascading.
 PROFILE nodes never contain password values; user assignment and catalog
 effects remain separate server concerns.
 
+Executable `PROFILE statement` is also semantic: the wrapper retains a
+traversable SELECT, INSERT, UPDATE, DELETE, COPY, or MERGE child so analysis and
+optimizer traversal can inspect the statement that Vertica profiles.
+
 ## License
 
 MIT

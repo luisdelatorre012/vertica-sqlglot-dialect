@@ -411,6 +411,7 @@ class VerticaGenerator(PostgresGenerator):
         ),
         vexp.ProfileLimit: lambda self, expression: self.profilelimit_sql(expression),
         vexp.ProfileParameter: lambda self, expression: self.profileparameter_sql(expression),
+        vexp.ProfileStatement: lambda self, expression: self.profilestatement_sql(expression),
         vexp.RoleGrant: lambda self, expression: self.rolegrant_sql(expression),
         vexp.RoleRevoke: lambda self, expression: self.rolerevoke_sql(expression),
         vexp.RoutingRuleAction: lambda self, expression: self.routingruleaction_sql(expression),
@@ -1268,6 +1269,34 @@ class VerticaGenerator(PostgresGenerator):
         ):
             return ""
         return f"{expression.name.upper()} {self.sql(expression, 'expression')}"
+
+    def profilestatement_sql(self, expression: vexp.ProfileStatement) -> str:
+        if self._has_user_extras(expression, {"this"}):
+            self.unsupported("ProfileStatement contains unsupported fields")
+            return ""
+        statement = expression.args.get("this")
+        if isinstance(statement, vexp.ProfileStatement):
+            self.unsupported("Nested PROFILE statements are not supported")
+            return ""
+        if not self._is_profile_statement_body(statement):
+            self.unsupported(
+                "PROFILE requires a structured SELECT, INSERT, UPDATE, DELETE, COPY, or MERGE"
+            )
+            return ""
+        return f"PROFILE {self.sql(statement)}"
+
+    @classmethod
+    def _is_profile_statement_body(cls, statement: object) -> bool:
+        if isinstance(statement, exp.Select):
+            return bool(statement.expressions)
+        if isinstance(statement, exp.SetOperation):
+            return cls._is_profile_statement_body(
+                statement.args.get("this")
+            ) and cls._is_profile_statement_body(statement.args.get("expression"))
+        return isinstance(
+            statement,
+            (exp.Insert, exp.Update, exp.Delete, vexp.VerticaCopy, exp.Merge),
+        )
 
     def _validate_profile_root(
         self,

@@ -93,6 +93,16 @@ large source digits, and reject only same-statement minimum/maximum conflicts
 that can be decided without catalog state. Profile assignment, inherited
 effects, ownership, and effects on current passwords remain server concerns.
 
+Executable `PROFILE` uses a separate atomic `ProfileStatement` wrapper whose
+required `this` child is the complete profiled statement. SELECT/set-operation
+queries and the documented INSERT, UPDATE, DELETE, COPY, and MERGE families
+remain canonical or existing Vertica-specific children, so hints, comments,
+column/table traversal, optimization, and serialization do not depend on
+recovering SQL from opaque text. The wrapper owns only its one batch statement;
+DDL, transaction control, VALUES-only queries, and nested PROFILE fail closed.
+Foreign dialects reject the wrapper atomically because dropping PROFILE would
+change execution behavior.
+
 Workload-routing lifecycle roots likewise subclass canonical CREATE, ALTER,
 and DROP nodes while keeping their route specification, name/workload target,
 and single ALTER action explicit. Session controls retain a canonical

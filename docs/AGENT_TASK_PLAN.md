@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P01 — PROFILE lifecycle**.
-- Next eligible tasks are selected by dependency and numeric order; P02 is the
+- Completed through **P02 — executable PROFILE statement**.
+- Next eligible tasks are selected by dependency and numeric order; P03 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -30,7 +30,7 @@ task may be `IN_PROGRESS`.
 | ID | Status | Task | Required dependency | Commit title |
 | --- | --- | --- | --- | --- |
 | P01 | DONE | PROFILE lifecycle | `6ca2a0d` | `feat: model profile lifecycle` |
-| P02 | TODO | Executable `PROFILE` statement | P01 | `feat: model profiled statement execution` |
+| P02 | DONE | Executable `PROFILE` statement | P01 | `feat: model profiled statement execution` |
 | P03 | TODO | USER profile and resource-pool assignments | P01 | `feat: add user workload assignments` |
 | P04 | TODO | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
 | P05 | TODO | USER search path and default roles | P03 | `feat: model user path and default roles` |
@@ -232,7 +232,7 @@ sdist/wheel build, clean force-install, `pip check`, and isolated installed-whee
 smoke passed. CPython 3.14 and 3.15 were not available locally (`py -0p` exposed
 only 3.12), so those runtime suites were not claimed.
 
-### P02 — executable `PROFILE` statement — `TODO`
+### P02 — executable `PROFILE` statement — `DONE`
 
 **Outcome.** Add one custom wrapper with a traversable statement child for
 `PROFILE {sql-statement}`.
@@ -245,7 +245,18 @@ serialization/optimizer traversal, and atomic foreign failure.
 
 **Primary source.** [PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/profile/).
 
-**Completion record.** Pending.
+**Completion record.** Added an atomic `ProfileStatement` wrapper around one
+traversable SELECT/set-operation, INSERT, UPDATE, DELETE, Vertica COPY, or MERGE
+child. Hints/comments, serialization, optimizer/type traversal, parent links,
+and batch/semicolon ownership are preserved; empty, VALUES-only, malformed,
+DDL, transaction-control, and nested PROFILE bodies fail closed at every error
+level, and foreign generation is atomic. The 26.2 source re-audit found no
+material contradiction; execution output and catalog writes remain Vertica
+runtime effects. The default CPython 3.12.6 gate passed 2769 tests at 93.82%
+branch coverage; Ruff, formatting, strict mypy, full pre-commit, sdist/wheel
+build, clean force-install, `pip check`, and isolated installed-wheel smoke
+passed. CPython 3.14 and 3.15 were not available locally (`py -0p` exposed only
+3.12), so those runtime suites were not claimed.
 
 ### P03 — USER profile and resource-pool assignments — `TODO`
 

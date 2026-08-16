@@ -21,6 +21,9 @@ plugin interface.
 - Added exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE TABLE
   semantics, including both MERGE filter spellings, strict foreign-clause
   rejection, and a lineage-safe UPDATE `FROM DEFAULT` relation.
+- Added semantic executable PROFILE wrappers whose SELECT, INSERT, UPDATE,
+  DELETE, COPY, and MERGE statement children remain fully traversable, while
+  unsupported bodies and foreign generation fail atomically.
 - Added structured CREATE PROJECTION and CREATE TABLE physical design.
 - Added semantic CTAS, LIKE, global/local temporary tables, historical
   snapshots, inherited privileges, encodings, segmentation, and quotas.

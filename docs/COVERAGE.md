@@ -50,6 +50,7 @@ Status meanings:
 | `UPDATE` | Semantic | Canonical `exp.Update`; aliases, column aliases, `DEFAULT`, joins, `FROM`, and predicates are preserved; SET subqueries and foreign tail clauses are rejected; `FROM DEFAULT … JOIN` uses a non-table relation leaf |
 | `DELETE` | Semantic | Canonical `exp.Delete`; labels and subquery predicates are preserved while aliases, joined/`USING` targets, leading `WITH`, `RETURNING`, ordering, and limits are rejected |
 | `MERGE` | Semantic | Canonical `exp.Merge` plus the existing hinted subtype; required clauses, table/subquery sources, aliases, branch cardinality/actions, pre-`THEN` and trailing `WHERE` filters, and unqualified target columns are validated |
+| Executable `PROFILE` | Semantic | A dedicated wrapper retains one traversable SELECT/set-operation, INSERT, UPDATE, DELETE, COPY, or MERGE child with hints/comments and exact batch boundaries; unsupported bodies and foreign generation fail atomically |
 | `TRUNCATE TABLE` | Semantic | Canonical single-target `exp.TruncateTable`; required `TABLE` and exact Vertica grammar are enforced without accepting database, identity, partition, cluster, cascade, or multi-target extensions |
 
 ## Data definition and loading
