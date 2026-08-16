@@ -172,17 +172,34 @@ class VerticaParser(PostgresParser):
         "FUNCTION",
         "INDEX",
         "LIBRARY",
+        "LOAD",
         "MODEL",
         "PROCEDURE",
         "PROJECTION",
         "RESOURCE",
         "ROLE",
+        "ROUTING",
         "SCHEMA",
         "SEQUENCE",
         "TABLE",
         "TYPE",
         "USER",
         "VIEW",
+    }
+    LOAD_BALANCE_GROUP_MEMBER_KINDS: t.ClassVar = {
+        "ADDRESS",
+        "FAULT GROUP",
+        "SUBCLUSTER",
+    }
+    LOAD_BALANCE_GROUP_POLICIES: t.ClassVar = {"NONE", "RANDOM", "ROUNDROBIN"}
+    LOAD_BALANCE_GROUP_COMPOUND_BOUNDARIES: t.ClassVar = {
+        "DIRECTED QUERY",
+        "EXTERNAL PROCEDURE",
+        "EXTERNAL TABLE",
+        "FLEX EXTERNAL",
+        "FLEXIBLE EXTERNAL",
+        "RESOURCE POOL",
+        "ROUTING RULE",
     }
 
     USER_DEFINED_EXTENSION_KINDS: t.ClassVar = (
@@ -596,7 +613,7 @@ class VerticaParser(PostgresParser):
         else:
             if self._curr.token_type == TokenType.STRING:
                 self.raise_error(f"SET SESSION {name} requires an identifier, not a string")
-            value = self._parse_routing_identifier(f"SET SESSION {name}")
+            value = self._parse_connection_policy_identifier(f"SET SESSION {name}")
 
         if self._curr:
             self.raise_error(f"Unexpected SET SESSION {name} clause at {self._curr.text!r}")
@@ -2729,11 +2746,28 @@ class VerticaParser(PostgresParser):
             if word in self.ROUTING_RULE_OBJECT_BOUNDARIES:
                 return
 
+    def _reject_prefixed_load_balance_group(self, statement: str, words: list[str]) -> None:
+        compound_starts = {
+            boundary.split(" ", 1)[0] for boundary in self.LOAD_BALANCE_GROUP_COMPOUND_BOUNDARIES
+        }
+        for index, word in enumerate(words):
+            if words[index : index + 3] == ["LOAD", "BALANCE", "GROUP"]:
+                if index:
+                    self.raise_error(f"{statement} LOAD BALANCE GROUP does not support modifiers")
+                return
+            if " ".join(words[index : index + 2]) in self.LOAD_BALANCE_GROUP_COMPOUND_BOUNDARIES:
+                return
+            if word in self.ROUTING_RULE_OBJECT_BOUNDARIES and word not in compound_starts | {
+                "LOAD"
+            }:
+                return
+
     def _parse_create(  # type: ignore[override]
         self,
     ) -> exp.Create | vexp.CreateDirectedQuery | exp.Command:
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_prefixed_routing_rule("CREATE", words)
+        self._reject_prefixed_load_balance_group("CREATE", words)
         unsupported_directed_prefixes = (
             ("IF", "NOT", "EXISTS", "DIRECTED", "QUERY"),
             ("TEMPORARY", "DIRECTED", "QUERY"),
@@ -2763,6 +2797,10 @@ class VerticaParser(PostgresParser):
         if self._match_text_seq("LIBRARY"):
             return self._parse_create_library(replace=replace)
 
+        if self._match(TokenType.LOAD):
+            if not self._match_text_seq("BALANCE", "GROUP"):
+                self.raise_error("CREATE LOAD must be followed by BALANCE GROUP")
+            return self._parse_create_load_balance_group(replace=replace)
         if self._match_text_seq("ROLE"):
             return self._parse_create_role(replace=replace)
         if self._match_text_seq("RESOURCE", "POOL"):
@@ -3494,6 +3532,96 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_create_load_balance_group(self, replace: bool) -> vexp.CreateLoadBalanceGroup:
+        if replace:
+            self.raise_error("CREATE OR REPLACE LOAD BALANCE GROUP is not supported by Vertica")
+        if self._match_text_seq("IF", "NOT", "EXISTS", advance=False):
+            self.raise_error("CREATE LOAD BALANCE GROUP does not support IF NOT EXISTS")
+
+        name = self._parse_connection_policy_identifier("CREATE LOAD BALANCE GROUP")
+        if not self._match(TokenType.WITH):
+            self.raise_error("CREATE LOAD BALANCE GROUP requires WITH")
+
+        member_kind = self._parse_load_balance_group_member_kind("CREATE LOAD BALANCE GROUP WITH")
+        members = self._parse_load_balance_group_members(member_kind, create=True)
+
+        filter_value: exp.Literal | None = None
+        if member_kind == "ADDRESS":
+            if self._match_text_seq("FILTER"):
+                self.raise_error("ADDRESS load balance groups do not support FILTER")
+        else:
+            if not self._match_text_seq("FILTER"):
+                self.raise_error(f"{member_kind} load balance groups require FILTER")
+            filter_value = self._parse_load_balance_group_string(
+                f"{member_kind} load balance group FILTER"
+            )
+
+        policy: exp.Literal | None = None
+        if self._match_text_seq("POLICY"):
+            policy = self._parse_load_balance_group_string("LOAD BALANCE GROUP POLICY")
+            if policy.this.upper() not in self.LOAD_BALANCE_GROUP_POLICIES:
+                self.raise_error("LOAD BALANCE GROUP POLICY must be ROUNDROBIN, RANDOM, or NONE")
+
+        if self._curr:
+            self.raise_error(f"Unexpected CREATE LOAD BALANCE GROUP clause at {self._curr.text!r}")
+
+        spec = self.expression(
+            vexp.LoadBalanceGroupSpec(
+                this=exp.var(member_kind),
+                expressions=members,
+                filter=filter_value,
+                policy=policy,
+            )
+        )
+        return self.expression(
+            vexp.CreateLoadBalanceGroup(
+                this=name,
+                kind="LOAD BALANCE GROUP",
+                spec=spec,
+            )
+        )
+
+    def _parse_load_balance_group_member_kind(self, label: str) -> str:
+        if self._match_text_seq("ADDRESS"):
+            return "ADDRESS"
+        if self._match_text_seq("FAULT", "GROUP"):
+            return "FAULT GROUP"
+        if self._match_text_seq("SUBCLUSTER"):
+            return "SUBCLUSTER"
+        self.raise_error(f"{label} requires ADDRESS, FAULT GROUP, or SUBCLUSTER")
+        return ""
+
+    def _parse_load_balance_group_members(
+        self, member_kind: str, *, create: bool = False
+    ) -> list[exp.Identifier]:
+        label = f"LOAD BALANCE GROUP {member_kind} member"
+        members: list[exp.Identifier] = []
+        while True:
+            if not self._curr or (create and self._is_load_balance_group_clause_ahead(member_kind)):
+                self.raise_error(f"{label} list cannot be empty")
+            members.append(self._parse_connection_policy_identifier(label))
+            if not self._match(TokenType.COMMA):
+                break
+            if not self._curr or (create and self._is_load_balance_group_clause_ahead(member_kind)):
+                self.raise_error(f"Expected {label} after each comma")
+        return members
+
+    def _is_load_balance_group_clause_ahead(self, member_kind: str) -> bool:
+        if (
+            self._curr.token_type == TokenType.IDENTIFIER
+            or self._next.token_type != TokenType.STRING
+        ):
+            return False
+        clause = self._curr.text.upper()
+        return clause == ("POLICY" if member_kind == "ADDRESS" else "FILTER")
+
+    def _parse_load_balance_group_string(self, label: str) -> exp.Literal:
+        value = self._parse_string()
+        if not isinstance(value, exp.Literal) or not value.is_string:
+            self.raise_error(f"{label} requires a quoted string literal")
+        assert isinstance(value, exp.Literal)
+        return value
+
     def _parse_create_routing_rule(self, replace: bool) -> vexp.CreateRoutingRule:
         if replace:
             self.raise_error("CREATE OR REPLACE ROUTING RULE is not supported by Vertica")
@@ -3505,16 +3633,16 @@ class VerticaParser(PostgresParser):
         if unnamed_workload:
             self._match_text_seq("ROUTE")
         else:
-            name = self._parse_routing_identifier("CREATE ROUTING RULE")
+            name = self._parse_connection_policy_identifier("CREATE ROUTING RULE")
             if not self._match_text_seq("ROUTE"):
                 self.raise_error("CREATE ROUTING RULE requires ROUTE")
 
         source: exp.Expr | None
         if self._match_text_seq("WORKLOAD"):
-            source = self._parse_routing_identifier("CREATE ROUTING RULE ROUTE WORKLOAD")
+            source = self._parse_connection_policy_identifier("CREATE ROUTING RULE ROUTE WORKLOAD")
             if not self._match_text_seq("TO", "SUBCLUSTER"):
                 self.raise_error("Workload routing rules require TO SUBCLUSTER")
-            destinations = self._parse_routing_rule_identifiers("routing subcluster")
+            destinations = self._parse_connection_policy_identifiers("routing subcluster")
             priority = None
             if self._match_text_seq("PRIORITY"):
                 priority = self._parse_routing_rule_priority()
@@ -3527,7 +3655,7 @@ class VerticaParser(PostgresParser):
                 self.raise_error("Classic routing rules require a quoted address range")
             if not self._match_text_seq("TO"):
                 self.raise_error("Classic routing rules require TO")
-            destinations = [self._parse_routing_identifier("classic routing rule group")]
+            destinations = [self._parse_connection_policy_identifier("classic routing rule group")]
             priority = None
             mode = "ADDRESS"
 
@@ -3544,26 +3672,33 @@ class VerticaParser(PostgresParser):
         )
         return self.expression(vexp.CreateRoutingRule(this=name, kind="ROUTING RULE", route=route))
 
-    def _parse_routing_rule_identifiers(self, label: str) -> list[exp.Identifier]:
-        identifiers = [self._parse_routing_identifier(label)]
+    def _parse_connection_policy_identifiers(self, label: str) -> list[exp.Identifier]:
+        identifiers = [self._parse_connection_policy_identifier(label)]
         while self._match(TokenType.COMMA):
             if not self._curr:
                 self.raise_error(f"Expected {label} after each comma")
-            identifiers.append(self._parse_routing_identifier(label))
+            identifiers.append(self._parse_connection_policy_identifier(label))
         return identifiers
 
-    def _parse_routing_identifier(self, statement: str) -> exp.Identifier:
-        if self._curr.token_type not in self.ID_VAR_TOKENS or self._curr.token_type in {
-            TokenType.DEFAULT,
-            TokenType.FALSE,
-            TokenType.NULL,
-            TokenType.TRUE,
-        }:
+    def _parse_connection_policy_identifier(self, statement: str) -> exp.Identifier:
+        if (
+            not self._curr
+            or self._curr.token_type not in self.ID_VAR_TOKENS
+            or self._curr.token_type
+            in {
+                TokenType.DEFAULT,
+                TokenType.FALSE,
+                TokenType.NULL,
+                TokenType.TRUE,
+            }
+        ):
             self.raise_error(f"{statement} requires an identifier")
         identifier = self._parse_id_var(any_token=False)
         if not isinstance(identifier, exp.Identifier):
             self.raise_error(f"{statement} requires an identifier")
         assert isinstance(identifier, exp.Identifier)
+        if not isinstance(identifier.this, str) or not identifier.this:
+            self.raise_error(f"{statement} requires a nonempty identifier")
         if self._match(TokenType.DOT, advance=False):
             self.raise_error(f"{statement} names cannot be schema-qualified")
         return identifier
@@ -3582,8 +3717,69 @@ class VerticaParser(PostgresParser):
         workload = self._match_text_seq("FOR", "WORKLOAD")
         if not workload and self._match(TokenType.FOR, advance=False):
             self.raise_error(f"{statement} FOR must be followed by WORKLOAD")
-        target = self._parse_routing_identifier(statement)
+        target = self._parse_connection_policy_identifier(statement)
         return self.expression(vexp.RoutingRuleTarget(this=target, workload=workload))
+
+    def _parse_alter_load_balance_group(self) -> vexp.AlterLoadBalanceGroup:
+        target = self._parse_connection_policy_identifier("ALTER LOAD BALANCE GROUP")
+
+        if self._match_text_seq("RENAME"):
+            if not self._match_text_seq("TO"):
+                self.raise_error("ALTER LOAD BALANCE GROUP RENAME requires TO")
+            action: exp.Expr = self.expression(
+                exp.AlterRename(
+                    this=self._parse_connection_policy_identifier("ALTER LOAD BALANCE GROUP RENAME")
+                )
+            )
+        elif self._match_text_seq("SET"):
+            action = self._parse_set_load_balance_group_action()
+        elif self._match_texts(("ADD", "DROP")):
+            verb = self._prev.text.upper()
+            member_kind = self._parse_load_balance_group_member_kind(
+                f"ALTER LOAD BALANCE GROUP {verb}"
+            )
+            action = self.expression(
+                vexp.LoadBalanceGroupAction(
+                    this=exp.var(verb),
+                    member_kind=exp.var(member_kind),
+                    expressions=self._parse_load_balance_group_members(member_kind),
+                )
+            )
+        else:
+            self.raise_error("ALTER LOAD BALANCE GROUP requires a supported action")
+
+        if self._curr:
+            self.raise_error(f"Unexpected ALTER LOAD BALANCE GROUP clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.AlterLoadBalanceGroup(
+                this=target,
+                kind="LOAD BALANCE GROUP",
+                actions=[action],
+            )
+        )
+
+    def _parse_set_load_balance_group_action(self) -> vexp.LoadBalanceGroupAction:
+        if self._match_text_seq("FILTER"):
+            property_name = "FILTER"
+        elif self._match_text_seq("POLICY"):
+            property_name = "POLICY"
+        else:
+            self.raise_error("ALTER LOAD BALANCE GROUP SET requires FILTER or POLICY")
+            property_name = ""
+
+        if not self._match_text_seq("TO"):
+            self.raise_error(f"ALTER LOAD BALANCE GROUP SET {property_name} requires TO")
+        value = self._parse_load_balance_group_string(
+            f"ALTER LOAD BALANCE GROUP SET {property_name}"
+        )
+        if property_name == "POLICY" and value.this.upper() not in self.LOAD_BALANCE_GROUP_POLICIES:
+            self.raise_error("LOAD BALANCE GROUP POLICY must be ROUNDROBIN, RANDOM, or NONE")
+        return self.expression(
+            vexp.LoadBalanceGroupAction(
+                this=exp.var(f"SET {property_name}"),
+                expression=value,
+            )
+        )
 
     def _parse_alter_routing_rule(self) -> vexp.AlterRoutingRule:
         target = self._parse_routing_rule_target("ALTER ROUTING RULE")
@@ -3592,7 +3788,9 @@ class VerticaParser(PostgresParser):
             if not self._match_text_seq("TO"):
                 self.raise_error("ALTER ROUTING RULE RENAME requires TO")
             action: exp.Expr = self.expression(
-                exp.AlterRename(this=self._parse_routing_identifier("ALTER ROUTING RULE RENAME"))
+                exp.AlterRename(
+                    this=self._parse_connection_policy_identifier("ALTER ROUTING RULE RENAME")
+                )
             )
         elif self._match_text_seq("SET"):
             action = self._parse_set_routing_rule_action()
@@ -3603,7 +3801,7 @@ class VerticaParser(PostgresParser):
             action = self.expression(
                 vexp.RoutingRuleAction(
                     this=exp.var(f"{verb} SUBCLUSTER"),
-                    expressions=self._parse_routing_rule_identifiers("routing subcluster"),
+                    expressions=self._parse_connection_policy_identifiers("routing subcluster"),
                 )
             )
         else:
@@ -3633,7 +3831,7 @@ class VerticaParser(PostgresParser):
             return self.expression(
                 vexp.RoutingRuleAction(
                     this=exp.var("SET SUBCLUSTER"),
-                    expressions=self._parse_routing_rule_identifiers("routing subcluster"),
+                    expressions=self._parse_connection_policy_identifiers("routing subcluster"),
                 )
             )
         if property_name == "PRIORITY":
@@ -3644,9 +3842,30 @@ class VerticaParser(PostgresParser):
                 )
             )
 
-        value = self._parse_routing_identifier(f"ALTER ROUTING RULE SET {property_name}")
+        value = self._parse_connection_policy_identifier(f"ALTER ROUTING RULE SET {property_name}")
         return self.expression(
             vexp.RoutingRuleAction(this=exp.var(f"SET {property_name}"), expression=value)
+        )
+
+    def _parse_drop_load_balance_group(self, exists: bool) -> vexp.DropLoadBalanceGroup:
+        if exists:
+            self.raise_error("DROP LOAD BALANCE GROUP IF EXISTS must follow LOAD BALANCE GROUP")
+        if_exists = bool(self._parse_exists())
+        target = self._parse_connection_policy_identifier("DROP LOAD BALANCE GROUP")
+        if self._match(TokenType.COMMA, advance=False):
+            self.raise_error("DROP LOAD BALANCE GROUP accepts exactly one target")
+        cascade = self._match_text_seq("CASCADE")
+        if self._match_text_seq("RESTRICT", advance=False):
+            self.raise_error("DROP LOAD BALANCE GROUP does not support RESTRICT")
+        if self._curr:
+            self.raise_error(f"Unexpected DROP LOAD BALANCE GROUP clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.DropLoadBalanceGroup(
+                this=target,
+                kind="LOAD BALANCE GROUP",
+                exists=if_exists,
+                cascade=cascade,
+            )
         )
 
     def _parse_drop_routing_rule(self, exists: bool) -> vexp.DropRoutingRule:
@@ -4086,12 +4305,17 @@ class VerticaParser(PostgresParser):
         index = self._index
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_prefixed_routing_rule("ALTER", words)
+        self._reject_prefixed_load_balance_group("ALTER", words)
         if self._curr.token_type == TokenType.TABLE and self._has_mixed_reorganize_action():
             self.raise_error(
                 "Mixed ALTER TABLE REORGANIZE action lists are not yet represented semantically"
             )
         if self._match_text_seq("ROLE"):
             return self._parse_alter_role()
+        if self._match(TokenType.LOAD):
+            if not self._match_text_seq("BALANCE", "GROUP"):
+                self.raise_error("ALTER LOAD must be followed by BALANCE GROUP")
+            return self._parse_alter_load_balance_group()
         if self._match_text_seq("RESOURCE", "POOL"):
             return self._parse_alter_resource_pool()
         if self._match_text_seq("ROUTING", "RULE"):
@@ -4997,6 +5221,7 @@ class VerticaParser(PostgresParser):
     ) -> exp.Drop | vexp.DirectedQueryAction | exp.Command:
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_prefixed_routing_rule("DROP", words)
+        self._reject_prefixed_load_balance_group("DROP", words)
         lookahead = words[:3]
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
             self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
@@ -5016,6 +5241,10 @@ class VerticaParser(PostgresParser):
         if self._match_text_seq("LIBRARY"):
             return self._parse_drop_library(exists=exists)
 
+        if self._match(TokenType.LOAD):
+            if not self._match_text_seq("BALANCE", "GROUP"):
+                self.raise_error("DROP LOAD must be followed by BALANCE GROUP")
+            return self._parse_drop_load_balance_group(exists=exists)
         if self._match_text_seq("ROLE"):
             return self._parse_drop_role(exists=exists)
         if self._match_text_seq("RESOURCE", "POOL"):

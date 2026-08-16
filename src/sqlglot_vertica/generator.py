@@ -181,6 +181,12 @@ class VerticaGenerator(PostgresGenerator):
         "RUNTIMEPRIORITYTHRESHOLD",
         "SINGLEINITIATOR",
     }
+    LOAD_BALANCE_GROUP_MEMBER_KINDS: t.ClassVar = {
+        "ADDRESS",
+        "FAULT GROUP",
+        "SUBCLUSTER",
+    }
+    LOAD_BALANCE_GROUP_POLICIES: t.ClassVar = {"NONE", "RANDOM", "ROUNDROBIN"}
     RESOURCE_POOL_EXTENDED_PRIORITY_NAMES: t.ClassVar = {"RECOVERY", "SYSQUERY", "TM"}
     COPY_FORMAT_PARAMETERS: t.ClassVar = {
         "ORC": {
@@ -240,6 +246,9 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AuthenticationRevoke: lambda self, expression: self.authenticationrevoke_sql(
             expression
         ),
+        vexp.AlterLoadBalanceGroup: lambda self, expression: self.alterloadbalancegroup_sql(
+            expression
+        ),
         vexp.AlterResourcePool: lambda self, expression: self.alterresourcepool_sql(expression),
         vexp.AlterRoutingRule: lambda self, expression: self.alterroutingrule_sql(expression),
         vexp.AlterTablePartition: lambda self, expression: self.altertablepartition_sql(expression),
@@ -255,6 +264,9 @@ class VerticaGenerator(PostgresGenerator):
             self.createicebergexternaltable_sql(expression)
         ),
         vexp.CreateLibrary: lambda self, expression: self.createlibrary_sql(expression),
+        vexp.CreateLoadBalanceGroup: lambda self, expression: self.createloadbalancegroup_sql(
+            expression
+        ),
         vexp.CreateProjection: lambda self, expression: self.createprojection_sql(expression),
         vexp.CreateResourcePool: lambda self, expression: self.createresourcepool_sql(expression),
         vexp.CreateRoutingRule: lambda self, expression: self.createroutingrule_sql(expression),
@@ -290,6 +302,9 @@ class VerticaGenerator(PostgresGenerator):
             expression
         ),
         vexp.DropLibrary: lambda self, expression: self.droplibrary_sql(expression),
+        vexp.DropLoadBalanceGroup: lambda self, expression: self.droploadbalancegroup_sql(
+            expression
+        ),
         vexp.DropResourcePool: lambda self, expression: self.dropresourcepool_sql(expression),
         vexp.DropRoutingRule: lambda self, expression: self.droproutingrule_sql(expression),
         vexp.DropRoles: lambda self, expression: self.droproles_sql(expression),
@@ -329,6 +344,12 @@ class VerticaGenerator(PostgresGenerator):
         ),
         vexp.KsafeProperty: lambda self, expression: self.ksafeproperty_sql(expression),
         vexp.ListAgg: lambda self, expression: self.vertica_listagg_sql(expression),
+        vexp.LoadBalanceGroupAction: lambda self, expression: self.loadbalancegroupaction_sql(
+            expression
+        ),
+        vexp.LoadBalanceGroupSpec: lambda self, expression: self.loadbalancegroupspec_sql(
+            expression
+        ),
         vexp.LocalProperty: lambda *_: "LOCAL",
         vexp.MaterializedWithMarker: lambda *_: "",
         vexp.Match: lambda self, expression: self.vertica_match_sql(expression),
@@ -1159,6 +1180,161 @@ class VerticaGenerator(PostgresGenerator):
         subcluster = self.sql(expression, "subcluster")
         return f"{sql} {subcluster}" if subcluster else sql
 
+    def createloadbalancegroup_sql(self, expression: vexp.CreateLoadBalanceGroup) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "LOAD BALANCE GROUP":
+            self.unsupported("CreateLoadBalanceGroup requires kind LOAD BALANCE GROUP")
+        if self._has_statement_extras(expression, {"this", "kind", "spec"}):
+            self.unsupported("CREATE LOAD BALANCE GROUP does not support additional CREATE clauses")
+
+        name = expression.args.get("this")
+        self._validate_connection_policy_identifier(name, "CREATE LOAD BALANCE GROUP name")
+        spec = expression.args.get("spec")
+        if not isinstance(spec, vexp.LoadBalanceGroupSpec):
+            self.unsupported("CREATE LOAD BALANCE GROUP requires a structured group specification")
+            spec_sql = ""
+        else:
+            spec_sql = self.sql(spec)
+        return f"CREATE LOAD BALANCE GROUP {self.sql(name)} {spec_sql}".rstrip()
+
+    def alterloadbalancegroup_sql(self, expression: vexp.AlterLoadBalanceGroup) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "LOAD BALANCE GROUP":
+            self.unsupported("AlterLoadBalanceGroup requires kind LOAD BALANCE GROUP")
+        if self._has_statement_extras(expression, {"this", "kind", "actions"}):
+            self.unsupported("ALTER LOAD BALANCE GROUP does not support additional ALTER clauses")
+
+        target = expression.args.get("this")
+        self._validate_connection_policy_identifier(target, "ALTER LOAD BALANCE GROUP name")
+        raw_actions = expression.args.get("actions")
+        if not isinstance(raw_actions, list):
+            self.unsupported("ALTER LOAD BALANCE GROUP actions must be a list")
+            actions: list[exp.Expr] = []
+        else:
+            actions = raw_actions
+        if len(actions) != 1:
+            self.unsupported("ALTER LOAD BALANCE GROUP requires exactly one action")
+            action: exp.Expr | None = actions[0] if actions else None
+        else:
+            action = actions[0]
+
+        if isinstance(action, exp.AlterRename):
+            if self._has_statement_extras(action, {"this"}):
+                self.unsupported("ALTER LOAD BALANCE GROUP RENAME requires one unqualified name")
+            self._validate_connection_policy_identifier(
+                action.args.get("this"), "ALTER LOAD BALANCE GROUP RENAME"
+            )
+        elif not isinstance(action, vexp.LoadBalanceGroupAction):
+            self.unsupported("ALTER LOAD BALANCE GROUP requires a structured action")
+
+        action_sql = (
+            self.sql(action)
+            if isinstance(action, (exp.AlterRename, vexp.LoadBalanceGroupAction))
+            else ""
+        )
+        return f"ALTER LOAD BALANCE GROUP {self.sql(target)} {action_sql}".rstrip()
+
+    def droploadbalancegroup_sql(self, expression: vexp.DropLoadBalanceGroup) -> str:
+        kind = expression.args.get("kind")
+        if not isinstance(kind, str) or kind != "LOAD BALANCE GROUP":
+            self.unsupported("DropLoadBalanceGroup requires kind LOAD BALANCE GROUP")
+        if self._has_statement_extras(expression, {"this", "kind", "exists", "cascade"}):
+            self.unsupported("DROP LOAD BALANCE GROUP does not support additional DROP clauses")
+
+        target = expression.args.get("this")
+        self._validate_connection_policy_identifier(target, "DROP LOAD BALANCE GROUP name")
+        exists_value = expression.args.get("exists")
+        cascade_value = expression.args.get("cascade")
+        if exists_value is not None and not isinstance(exists_value, bool):
+            self.unsupported("DropLoadBalanceGroup exists must be boolean")
+        if cascade_value is not None and not isinstance(cascade_value, bool):
+            self.unsupported("DropLoadBalanceGroup cascade must be boolean")
+        exists = " IF EXISTS" if exists_value else ""
+        cascade = " CASCADE" if cascade_value else ""
+        return f"DROP LOAD BALANCE GROUP{exists} {self.sql(target)}{cascade}"
+
+    def loadbalancegroupspec_sql(self, expression: vexp.LoadBalanceGroupSpec) -> str:
+        if self._has_statement_extras(expression, {"this", "expressions", "filter", "policy"}):
+            self.unsupported("LoadBalanceGroupSpec contains unsupported fields")
+        member_kind = self._load_balance_group_member_kind(expression.args.get("this"))
+        raw_members = expression.args.get("expressions")
+        if raw_members is None:
+            members: list[exp.Expr] = []
+        elif not isinstance(raw_members, list):
+            self.unsupported("LOAD BALANCE GROUP members must be a list")
+            members = []
+        else:
+            members = raw_members
+        if not members:
+            self.unsupported("LOAD BALANCE GROUP requires one or more members")
+        for member in members:
+            self._validate_connection_policy_identifier(member, f"{member_kind} member")
+
+        filter_value = expression.args.get("filter")
+        if member_kind == "ADDRESS":
+            if filter_value is not None:
+                self.unsupported("ADDRESS load balance groups do not support FILTER")
+            filter_sql = ""
+        else:
+            if not self._is_load_balance_group_string(filter_value):
+                self.unsupported(f"{member_kind} load balance groups require a quoted FILTER")
+                filter_sql = ""
+            else:
+                filter_sql = f" FILTER {self.sql(filter_value)}"
+
+        policy = expression.args.get("policy")
+        policy_sql = ""
+        if policy is not None:
+            self._validate_load_balance_group_policy(policy)
+            policy_sql = f" POLICY {self.sql(policy)}"
+        members_sql = ", ".join(self.sql(member) for member in members)
+        return f"WITH {member_kind} {members_sql}{filter_sql}{policy_sql}".rstrip()
+
+    def loadbalancegroupaction_sql(self, expression: vexp.LoadBalanceGroupAction) -> str:
+        if self._has_statement_extras(
+            expression, {"this", "member_kind", "expression", "expressions"}
+        ):
+            self.unsupported("LoadBalanceGroupAction contains unsupported fields")
+        marker = expression.args.get("this")
+        if not isinstance(marker, exp.Var):
+            self.unsupported("LoadBalanceGroupAction requires a typed action marker")
+            action = ""
+        else:
+            action = marker.name.upper()
+
+        member_marker = expression.args.get("member_kind")
+        scalar = expression.args.get("expression")
+        raw_members = expression.args.get("expressions")
+        if raw_members is None:
+            members: list[exp.Expr] = []
+        elif not isinstance(raw_members, list):
+            self.unsupported("LoadBalanceGroupAction members must be a list")
+            members = []
+        else:
+            members = raw_members
+        if action in {"SET FILTER", "SET POLICY"}:
+            if member_marker is not None or not self._is_load_balance_group_string(scalar):
+                self.unsupported(f"{action} requires exactly one quoted string value")
+            if members:
+                self.unsupported(f"{action} does not accept a member list")
+            if action == "SET POLICY":
+                self._validate_load_balance_group_policy(scalar)
+            return f"{action} TO {self.sql(scalar)}"
+
+        if action in {"ADD", "DROP"}:
+            if scalar is not None:
+                self.unsupported(f"{action} does not accept a scalar value")
+            member_kind = self._load_balance_group_member_kind(member_marker)
+            if not members:
+                self.unsupported(f"{action} {member_kind} requires one or more members")
+            for member in members:
+                self._validate_connection_policy_identifier(member, f"{action} {member_kind}")
+            members_sql = ", ".join(self.sql(member) for member in members)
+            return f"{action} {member_kind} {members_sql}".rstrip()
+
+        self.unsupported(f"Unsupported ALTER LOAD BALANCE GROUP action: {action}")
+        return action
+
     def createroutingrule_sql(self, expression: vexp.CreateRoutingRule) -> str:
         if expression.kind != "ROUTING RULE":
             self.unsupported("CreateRoutingRule requires kind ROUTING RULE")
@@ -1167,7 +1343,7 @@ class VerticaGenerator(PostgresGenerator):
 
         name = expression.args.get("this")
         if name is not None:
-            self._validate_routing_identifier(name, "CREATE ROUTING RULE name")
+            self._validate_connection_policy_identifier(name, "CREATE ROUTING RULE name")
         route = expression.args.get("route")
         if not isinstance(route, vexp.RoutingRuleSpec):
             self.unsupported("CREATE ROUTING RULE requires a structured route specification")
@@ -1201,7 +1377,7 @@ class VerticaGenerator(PostgresGenerator):
             rename_target = action.args.get("this")
             if self._has_statement_extras(action, {"this"}):
                 self.unsupported("ALTER ROUTING RULE RENAME requires one unqualified name")
-            self._validate_routing_identifier(rename_target, "ALTER ROUTING RULE RENAME")
+            self._validate_connection_policy_identifier(rename_target, "ALTER ROUTING RULE RENAME")
         elif not isinstance(action, vexp.RoutingRuleAction):
             self.unsupported("ALTER ROUTING RULE requires a structured action")
 
@@ -1243,15 +1419,17 @@ class VerticaGenerator(PostgresGenerator):
             if priority is not None:
                 self.unsupported("Classic routing rules do not support PRIORITY")
             destination = destinations[0] if destinations else None
-            self._validate_routing_identifier(destination, "Classic routing-rule group")
+            self._validate_connection_policy_identifier(destination, "Classic routing-rule group")
             return f"ROUTE {self.sql(source)} TO {self.sql(destination)}"
 
         if mode == "WORKLOAD":
-            self._validate_routing_identifier(source, "Workload routing-rule workload")
+            self._validate_connection_policy_identifier(source, "Workload routing-rule workload")
             if not destinations:
                 self.unsupported("Workload routing rules require one or more subclusters")
             for destination in destinations:
-                self._validate_routing_identifier(destination, "Workload routing-rule subcluster")
+                self._validate_connection_policy_identifier(
+                    destination, "Workload routing-rule subcluster"
+                )
             priority_sql = ""
             if priority is not None:
                 self._validate_routing_rule_priority(priority)
@@ -1268,7 +1446,7 @@ class VerticaGenerator(PostgresGenerator):
         if self._has_statement_extras(expression, {"this", "workload"}):
             self.unsupported("RoutingRuleTarget contains unsupported fields")
         target = expression.args.get("this")
-        self._validate_routing_identifier(target, "Routing-rule target")
+        self._validate_connection_policy_identifier(target, "Routing-rule target")
         workload = expression.args.get("workload")
         if workload is not None and not isinstance(workload, bool):
             self.unsupported("RoutingRuleTarget workload must be boolean")
@@ -1298,14 +1476,14 @@ class VerticaGenerator(PostgresGenerator):
             elif action == "SET PRIORITY":
                 self._validate_routing_rule_priority(scalar)
             else:
-                self._validate_routing_identifier(scalar, action)
+                self._validate_connection_policy_identifier(scalar, action)
             return f"{action} TO {self.sql(scalar)}"
 
         if action in list_actions:
             if scalar is not None or not values:
                 self.unsupported(f"{action} requires one or more unqualified subclusters")
             for value in values:
-                self._validate_routing_identifier(value, action)
+                self._validate_connection_policy_identifier(value, action)
             separator = " TO " if action == "SET SUBCLUSTER" else " "
             return f"{action}{separator}{self.expressions(expression, flat=True)}"
 
@@ -1352,7 +1530,7 @@ class VerticaGenerator(PostgresGenerator):
             name = left.name.upper()
 
         if isinstance(value, exp.Identifier):
-            self._validate_routing_identifier(value, f"SET SESSION {name} value")
+            self._validate_connection_policy_identifier(value, f"SET SESSION {name} value")
             if not value.quoted and value.name.upper() in {"DEFAULT", "NONE"}:
                 self.unsupported("SET SESSION routing sentinels require typed keyword nodes")
             value_sql = self.sql(value)
@@ -1382,6 +1560,34 @@ class VerticaGenerator(PostgresGenerator):
             self.unsupported("ShowWorkload available must be boolean")
         return "SHOW AVAILABLE WORKLOADS" if available else "SHOW WORKLOAD"
 
+    def _load_balance_group_member_kind(self, marker: object) -> str:
+        if not isinstance(marker, exp.Var):
+            self.unsupported("LOAD BALANCE GROUP member kind requires a typed marker")
+            return ""
+        member_kind = marker.name.upper()
+        if member_kind not in self.LOAD_BALANCE_GROUP_MEMBER_KINDS:
+            self.unsupported(
+                "LOAD BALANCE GROUP member kind must be ADDRESS, FAULT GROUP, or SUBCLUSTER"
+            )
+        return member_kind
+
+    def _validate_load_balance_group_policy(self, policy: object) -> None:
+        if not self._is_load_balance_group_string(policy):
+            self.unsupported("LOAD BALANCE GROUP POLICY requires a quoted string literal")
+            return
+        assert isinstance(policy, exp.Literal)
+        assert isinstance(policy.this, str)
+        if policy.this.upper() not in self.LOAD_BALANCE_GROUP_POLICIES:
+            self.unsupported("LOAD BALANCE GROUP POLICY must be ROUNDROBIN, RANDOM, or NONE")
+
+    @staticmethod
+    def _is_load_balance_group_string(expression: object) -> bool:
+        return (
+            isinstance(expression, exp.Literal)
+            and expression.is_string
+            and isinstance(expression.this, str)
+        )
+
     @staticmethod
     def _routing_rule_mode(expression: vexp.RoutingRuleSpec) -> str:
         mode = expression.args.get("mode")
@@ -1391,16 +1597,24 @@ class VerticaGenerator(PostgresGenerator):
         if not isinstance(value, exp.Literal) or not value.is_int or int(value.this) < 0:
             self.unsupported("ROUTING RULE PRIORITY must be a nonnegative integer")
 
-    def _validate_routing_identifier(self, expression: object, label: str) -> None:
+    def _validate_connection_policy_identifier(self, expression: object, label: str) -> None:
         if not isinstance(expression, exp.Identifier) or not isinstance(expression.this, str):
             self.unsupported(f"{label} requires an unqualified identifier")
             return
         if not expression.this:
             self.unsupported(f"{label} requires a nonempty identifier")
-        elif not expression.quoted and not re.fullmatch(
-            r"[A-Za-z_][A-Za-z0-9_$]*", expression.this
+        elif not expression.quoted and not self._is_safe_connection_policy_identifier(
+            expression.this
         ):
             self.unsupported(f"{label} requires a safely quoted identifier")
+
+    @staticmethod
+    def _is_safe_connection_policy_identifier(name: str) -> bool:
+        return (
+            bool(name)
+            and (name[0] == "_" or name[0].isalpha())
+            and all(character in {"_", "$"} or character.isalnum() for character in name[1:])
+        )
 
     @staticmethod
     def _has_statement_extras(expression: exp.Expr, allowed: set[str]) -> bool:
@@ -1791,7 +2005,9 @@ class VerticaGenerator(PostgresGenerator):
             workload = targets[0]
             if self._has_statement_extras(workload, {"this"}):
                 self.unsupported("Vertica WORKLOAD targets must be unqualified and unaliased")
-            self._validate_routing_identifier(workload.args.get("this"), "WORKLOAD target")
+            self._validate_connection_policy_identifier(
+                workload.args.get("this"), "WORKLOAD target"
+            )
 
         principals = expression.args.get("principals") or []
         if len(principals) != 1 or not isinstance(principals[0], exp.GrantPrincipal):
@@ -1800,7 +2016,9 @@ class VerticaGenerator(PostgresGenerator):
             principal = principals[0]
             if self._has_statement_extras(principal, {"this"}):
                 self.unsupported("Vertica WORKLOAD principals cannot use qualifiers")
-            self._validate_routing_identifier(principal.args.get("this"), "WORKLOAD principal")
+            self._validate_connection_policy_identifier(
+                principal.args.get("this"), "WORKLOAD principal"
+            )
 
     def extendedgrantprivilege_sql(self, expression: vexp.ExtendedGrantPrivilege) -> str:
         if not expression.args.get("extend") or expression.name.upper() != "ALL":

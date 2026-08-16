@@ -734,6 +734,45 @@ class DropResourcePool(exp.Drop):
     }
 
 
+class LoadBalanceGroupSpec(exp.Expression):
+    """The typed members, filter, and policy of a load balance group."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expressions": True,
+        "filter": False,
+        "policy": False,
+    }
+
+
+class LoadBalanceGroupAction(exp.Expression):
+    """A typed non-rename action in ``ALTER LOAD BALANCE GROUP``."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "member_kind": False,
+        "expression": False,
+        "expressions": False,
+    }
+
+
+class CreateLoadBalanceGroup(exp.Create):
+    """Create one address-, fault-group-, or subcluster-backed group."""
+
+    arg_types: t.ClassVar = {
+        **exp.Create.arg_types,
+        "spec": True,
+    }
+
+
+class AlterLoadBalanceGroup(exp.Alter):
+    """Apply exactly one typed change to a load balance group."""
+
+
+class DropLoadBalanceGroup(exp.Drop):
+    """Drop one load balance group with optional dependency cascading."""
+
+
 class RoutingRuleSpec(exp.Expression):
     """The source and destinations of one classic or workload routing rule."""
 

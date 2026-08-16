@@ -57,6 +57,9 @@ Implemented P0:
 - add typed classic and workload routing-rule lifecycle statements, exact
   session workload/resource-pool controls, SHOW workload commands, and the
   documented `ON ROUTING RULE` grant alias.
+- add typed address-, fault-group-, and subcluster-backed LOAD BALANCE GROUP
+  lifecycle statements, including every documented ALTER action and cascading
+  DROP semantics.
 
 P1:
 

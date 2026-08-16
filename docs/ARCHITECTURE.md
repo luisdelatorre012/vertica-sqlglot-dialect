@@ -77,6 +77,15 @@ payloads as opaque command text. Workload privilege targets remain canonical
 GRANT/REVOKE roots, but `ON ROUTING RULE` normalizes to the documented
 `ON WORKLOAD` target and receives exact USAGE/target/principal validation.
 
+Load-balance-group roots follow the same atomic statement policy. A
+`LoadBalanceGroupSpec` keeps its ADDRESS, FAULT GROUP, or SUBCLUSTER members,
+optional policy, and required branch-specific filter traversable; a separate
+`LoadBalanceGroupAction` represents SET/ADD/DROP without conflating group
+membership with routing-rule destinations. Rename stays canonical as
+`AlterRename`. Parser and generator share neutral connection-policy identifier
+rules, while member existence, current group type, CIDR validity, and dependent
+routing rules remain catalog concerns.
+
 Factory-backed UDxs use a shared `CreateUserDefinedExtension` root and
 `UDxFactorySpec`: the catalog name remains canonical, while language, factory,
 library, and fenced mode remain an ordered atomic unit that cannot leak as a

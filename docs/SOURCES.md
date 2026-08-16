@@ -139,7 +139,7 @@ called out in code review.
 - [REVOKE user-defined extension](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-user-defined-extension/)
 - [REVOKE workload](https://docs.vertica.com/26.2.x/en/sql-reference/statements/revoke-statements/revoke-workload/)
 
-## Role, resource-pool, and workload-routing lifecycle
+## Role, resource-pool, and connection-routing lifecycle
 
 - [CREATE ROLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-role/)
 - [ALTER ROLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-role/)
@@ -147,12 +147,17 @@ called out in code review.
 - [CREATE RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-resource-pool/)
 - [ALTER RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-resource-pool/)
 - [DROP RESOURCE POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-resource-pool/)
+- [CREATE LOAD BALANCE GROUP](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-load-balance-group/)
+- [ALTER LOAD BALANCE GROUP](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-load-balance-group/)
+- [DROP LOAD BALANCE GROUP](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-load-balance-group/)
 - [CREATE ROUTING RULE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-routing-rule/)
 - [ALTER ROUTING RULE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-routing-rule/)
 - [DROP ROUTING RULE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-routing-rule/)
 - [SET SESSION WORKLOAD](https://docs.vertica.com/26.2.x/en/sql-reference/statements/set-statements/set-session-workload/)
 - [SET SESSION RESOURCE_POOL](https://docs.vertica.com/26.2.x/en/sql-reference/statements/set-statements/set-session-resource-pool/)
 - [Workload routing](https://docs.vertica.com/26.2.x/en/admin/managing-client-connections/connection-load-balancing/workload-routing/)
+- [Creating connection load balance groups](https://docs.vertica.com/26.2.x/en/admin/managing-client-connections/connection-load-balancing/connection-load-balancing-policies/creating-connection-load-balance-groups/)
+- [Creating load-balancing routing rules](https://docs.vertica.com/26.2.x/en/admin/managing-client-connections/connection-load-balancing/connection-load-balancing-policies/creating-load-balancing-routing-rules/)
 
 ## Audited next-phase statements
 
