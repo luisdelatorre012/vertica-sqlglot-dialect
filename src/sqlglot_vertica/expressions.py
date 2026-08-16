@@ -696,6 +696,24 @@ class UserParameter(exp.Expression):
     }
 
 
+class UserSearchPath(exp.Expression):
+    """An explicit ordered schema path or the database DEFAULT sentinel."""
+
+    arg_types: t.ClassVar = {
+        "expressions": False,
+        "default": False,
+    }
+
+
+class UserDefaultRoles(exp.Expression):
+    """One of the finite ALTER USER default-role selection modes."""
+
+    arg_types: t.ClassVar = {
+        "expressions": False,
+        "mode": True,
+    }
+
+
 class CreateUser(exp.Create):
     """Create one Vertica user without retaining credential material."""
 

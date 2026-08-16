@@ -34,9 +34,10 @@ plugin interface.
 - Added a bounded non-secret USER lifecycle: ordered CREATE/ALTER account-state,
   password-expiry, profile, global/subcluster resource-pool, time/capacity, and
   scoped connection settings; ALTER-only security-algorithm selection; isolated
-  ALTER rename; and ordered multi-user DROP with postfix `IF EXISTS` and
-  `CASCADE`. Credential-bearing forms fail with clause-aware sanitized errors
-  and secret values never enter the AST.
+  ALTER rename and default-role selection; ordered CREATE/ALTER search paths;
+  and ordered multi-user DROP with postfix `IF EXISTS` and `CASCADE`.
+  Credential-bearing forms fail with clause-aware sanitized errors and secret
+  values never enter the AST.
 - Added semantic CREATE/ALTER/DROP PROFILE lifecycle with all 15 ordered
   password-policy metadata settings, lexical numeric domains, `UNLIMITED`,
   ALTER-only `DEFAULT` resets, rename, multi-target drop, and strict foreign

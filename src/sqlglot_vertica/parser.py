@@ -278,10 +278,13 @@ class VerticaParser(PostgresParser):
     }
     USER_KEYWORD_TOKEN_TYPES: t.ClassVar[dict[str, TokenType]] = {
         "ACCOUNT": TokenType.VAR,
+        "ALL": TokenType.ALL,
         "BY": TokenType.VAR,
         "CASCADE": TokenType.VAR,
         "DATABASE": TokenType.DATABASE,
+        "DEFAULT": TokenType.DEFAULT,
         "EXPIRE": TokenType.VAR,
+        "EXCEPT": TokenType.EXCEPT,
         "EXISTS": TokenType.EXISTS,
         "FOR": TokenType.FOR,
         "IF": TokenType.VAR,
@@ -297,6 +300,8 @@ class VerticaParser(PostgresParser):
         "RENAME": TokenType.RENAME,
         "RESOURCE": TokenType.VAR,
         "RESTRICT": TokenType.VAR,
+        "ROLE": TokenType.VAR,
+        "SEARCH_PATH": TokenType.VAR,
         "SUBCLUSTER": TokenType.VAR,
         "TO": TokenType.VAR,
         "TOTPSECRET": TokenType.VAR,
@@ -3933,6 +3938,14 @@ class VerticaParser(PostgresParser):
             parameter, key = self._parse_user_parameter(statement)
             if key in seen:
                 self._raise_user_error(f"{statement} does not allow duplicate or conflicting {key}")
+            if key == "DEFAULT ROLE" and parameters:
+                self._raise_user_error(
+                    "ALTER USER DEFAULT ROLE cannot be combined with other parameters"
+                )
+            if parameters and self._user_parameter_key(parameters[0]) == "DEFAULT ROLE":
+                self._raise_user_error(
+                    "ALTER USER DEFAULT ROLE cannot be combined with other parameters"
+                )
             seen.add(key)
             parameters.append(parameter)
             if not self._match(TokenType.COMMA):
@@ -3988,6 +4001,55 @@ class VerticaParser(PostgresParser):
                     )
                 ),
                 key,
+            )
+        if self._match_user_keywords("SEARCH_PATH"):
+            if self._match_user_keywords("DEFAULT"):
+                search_path = self.expression(vexp.UserSearchPath(default=True))
+            else:
+                schemas = [self._parse_user_search_path_schema(statement)]
+                while self._match(
+                    TokenType.COMMA, advance=False
+                ) and not self._user_parameter_start(1):
+                    self._advance()
+                    if not self._curr:
+                        self._raise_user_error(
+                            f"{statement} SEARCH_PATH requires a schema after each comma"
+                        )
+                    schemas.append(self._parse_user_search_path_schema(statement))
+                self._reject_duplicate_user_names(schemas, f"{statement} SEARCH_PATH")
+                search_path = self.expression(
+                    vexp.UserSearchPath(expressions=schemas, default=False)
+                )
+            return (
+                self.expression(
+                    vexp.UserParameter(this=exp.var("SEARCH_PATH"), expression=search_path)
+                ),
+                "SEARCH_PATH",
+            )
+        if self._match_user_keywords("DEFAULT", "ROLE"):
+            if statement != "ALTER USER":
+                self._raise_user_error("DEFAULT ROLE is supported only by ALTER USER")
+            if self._match_user_keywords("NONE"):
+                mode = "NONE"
+                roles: list[exp.Expr] = []
+            elif self._match_user_keywords("ALL"):
+                if self._match_user_keywords("EXCEPT"):
+                    mode = "ALL EXCEPT"
+                    roles = self._parse_user_role_list(statement)
+                else:
+                    mode = "ALL"
+                    roles = []
+            else:
+                mode = "ROLES"
+                roles = self._parse_user_role_list(statement)
+            default_roles = self.expression(
+                vexp.UserDefaultRoles(expressions=roles or None, mode=exp.var(mode))
+            )
+            return (
+                self.expression(
+                    vexp.UserParameter(this=exp.var("DEFAULT ROLE"), expression=default_roles)
+                ),
+                "DEFAULT ROLE",
             )
         for name, maximum_seconds in self.USER_INTERVAL_MAX_SECONDS.items():
             if self._match_user_keywords(name):
@@ -4075,6 +4137,104 @@ class VerticaParser(PostgresParser):
             )
         self._raise_user_error(f"{statement} requires a supported account parameter")
         return self.expression(vexp.UserAction(this=exp.var(""))), ""
+
+    def _user_parameter_start(self, offset: int = 0) -> bool:
+        tokens = self._tokens[self._index + offset :]
+        return any(
+            self._tokens_are_user_keywords(tokens, *words)
+            for words in (
+                ("ACCOUNT",),
+                ("PASSWORD",),
+                ("PROFILE",),
+                ("RESOURCE", "POOL"),
+                ("SEARCH_PATH",),
+                ("DEFAULT", "ROLE"),
+                ("GRACEPERIOD",),
+                ("IDLESESSIONTIMEOUT",),
+                ("MAXCONNECTIONS",),
+                ("MEMORYCAP",),
+                ("RUNTIMECAP",),
+                ("SECURITY_ALGORITHM",),
+                ("TEMPSPACECAP",),
+            )
+        )
+
+    @staticmethod
+    def _user_parameter_key(parameter: exp.Expr) -> str:
+        if isinstance(parameter, vexp.UserParameter) and isinstance(parameter.this, exp.Var):
+            return parameter.this.name.upper()
+        return ""
+
+    def _parse_user_search_path_schema(self, statement: str) -> exp.Expr:
+        first = self._parse_user_name_component(f"{statement} SEARCH_PATH schema")
+        if not self._match(TokenType.DOT):
+            return first
+        second = self._parse_user_name_component(f"{statement} SEARCH_PATH schema")
+        if self._match(TokenType.DOT, advance=False):
+            self._raise_user_error(
+                f"{statement} SEARCH_PATH schemas accept at most a namespace qualifier"
+            )
+        return self.expression(exp.Table(this=second, db=first))
+
+    def _parse_user_role_list(self, statement: str) -> list[exp.Expr]:
+        roles: list[exp.Expr] = [self._parse_user_identifier(f"{statement} DEFAULT ROLE")]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self._raise_user_error(f"{statement} DEFAULT ROLE requires a role after each comma")
+            roles.append(self._parse_user_identifier(f"{statement} DEFAULT ROLE"))
+        self._reject_duplicate_user_names(roles, f"{statement} DEFAULT ROLE")
+        return roles
+
+    def _parse_user_name_component(self, statement: str) -> exp.Identifier:
+        if (
+            not self._curr
+            or self._curr.token_type not in self.ID_VAR_TOKENS
+            or self._curr.token_type
+            in {TokenType.DEFAULT, TokenType.FALSE, TokenType.NULL, TokenType.TRUE}
+        ):
+            self._raise_user_error(f"{statement} requires an identifier")
+        identifier = self._parse_id_var(any_token=False)
+        if not isinstance(identifier, exp.Identifier):
+            self._raise_user_error(f"{statement} requires an identifier")
+        assert isinstance(identifier, exp.Identifier)
+        self._validate_user_name_component(identifier, statement)
+        return identifier
+
+    def _validate_user_name_component(self, identifier: exp.Identifier, statement: str) -> None:
+        if not isinstance(identifier.this, str) or not identifier.this:
+            self._raise_user_error(f"{statement} requires a nonempty identifier")
+        elif not identifier.quoted and not self._is_connection_policy_identifier(identifier.this):
+            self._raise_user_error(f"{statement} requires a valid unquoted identifier")
+        else:
+            try:
+                size = len(identifier.this.encode("utf-8"))
+            except UnicodeEncodeError:
+                self._raise_user_error(f"{statement} names must be valid UTF-8")
+            else:
+                if size > 128:
+                    self._raise_user_error(f"{statement} names cannot exceed 128 UTF-8 bytes")
+
+    def _reject_duplicate_user_names(self, names: list[exp.Expr], statement: str) -> None:
+        seen: set[tuple[tuple[bool, str], ...]] = set()
+        for name in names:
+            if isinstance(name, exp.Table):
+                identifiers = name.parts
+            elif isinstance(name, exp.Identifier):
+                identifiers = [name]
+            else:
+                identifiers = []
+            parts = tuple(
+                (
+                    bool(identifier.args.get("quoted", False)),
+                    identifier.name
+                    if identifier.args.get("quoted", False)
+                    else identifier.name.casefold(),
+                )
+                for identifier in identifiers
+            )
+            if parts in seen:
+                self._raise_user_error(f"{statement} does not allow duplicate names")
+            seen.add(parts)
 
     def _parse_user_interval(self, name: str, maximum_seconds: int, statement: str) -> exp.Expr:
         if self._match_user_keywords("NONE"):

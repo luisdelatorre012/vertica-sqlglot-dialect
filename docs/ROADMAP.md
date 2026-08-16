@@ -61,6 +61,7 @@ Implemented P0:
 - add a bounded, non-secret USER lifecycle with typed account/password-expiry
   actions, ordered profile and global/subcluster resource-pool assignments,
   deterministic time/capacity limits, ALTER-only security-algorithm selection,
+  ordered CREATE/ALTER search paths, isolated ALTER default-role selection,
   rename, ordered multi-target DROP, clause-aware sanitized credential
   rejection, and strict 128-byte identifier validation;
 - add semantic PROFILE lifecycle DDL with ordered typed policy settings,
@@ -79,9 +80,8 @@ Implemented P0:
 
 P1:
 
-- add USER search paths, default roles, safe configuration actions, and
-  AUTHENTICATION lifecycle statements, with separately reviewed
-  credential-handling policies;
+- add safe USER configuration actions and AUTHENTICATION lifecycle statements,
+  with separately reviewed credential-handling policies;
 - expand privilege targets for UDx, data loaders, keys, libraries, and TLS
   configurations.
 

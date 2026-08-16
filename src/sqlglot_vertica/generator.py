@@ -465,7 +465,9 @@ class VerticaGenerator(PostgresGenerator):
         vexp.UtcStatementTimestamp: lambda self, expression: "GETUTCDATE()",
         vexp.UsingParameters: lambda self, expression: self.usingparameters_sql(expression),
         vexp.UserAction: lambda self, expression: self.useraction_sql(expression),
+        vexp.UserDefaultRoles: lambda self, expression: self.userdefaultroles_sql(expression),
         vexp.UserParameter: lambda self, expression: self.userparameter_sql(expression),
+        vexp.UserSearchPath: lambda self, expression: self.usersearchpath_sql(expression),
         vexp.VerticaArrayLength: lambda self, expression: self.verticaarraylength_sql(expression),
         vexp.VerticaCopy: lambda self, expression: self.verticacopy_sql(expression),
         vexp.VerticaExplode: lambda self, expression: self.verticaexplode_sql(expression),
@@ -1554,6 +1556,8 @@ class VerticaGenerator(PostgresGenerator):
         supported = {
             "PROFILE",
             "RESOURCE POOL",
+            "SEARCH_PATH",
+            "DEFAULT ROLE",
             "GRACEPERIOD",
             "IDLESESSIONTIMEOUT",
             "MAXCONNECTIONS",
@@ -1567,6 +1571,15 @@ class VerticaGenerator(PostgresGenerator):
             return ""
         subcluster = expression.args.get("subcluster")
         scope = expression.args.get("scope")
+        if name in {"SEARCH_PATH", "DEFAULT ROLE"}:
+            if subcluster is not None or scope is not None:
+                self.unsupported(f"USER {name} does not accept a subcluster or scope")
+                valid = False
+            expected = vexp.UserSearchPath if name == "SEARCH_PATH" else vexp.UserDefaultRoles
+            if not isinstance(value, expected):
+                self.unsupported(f"USER {name} requires a typed list value")
+                valid = False
+            return f"{name} {self.sql(value)}" if valid else ""
         if name == "PROFILE":
             if subcluster is not None or scope is not None:
                 self.unsupported("USER PROFILE does not accept a subcluster or scope")
@@ -1638,6 +1651,99 @@ class VerticaGenerator(PostgresGenerator):
                 self.unsupported("USER SECURITY_ALGORITHM requires 'NONE', 'SHA512', or 'MD5'")
                 valid = False
         return f"{name} {self.sql(value)}" if valid else ""
+
+    def usersearchpath_sql(self, expression: vexp.UserSearchPath) -> str:
+        if self._has_user_extras(expression, {"expressions", "default"}):
+            self.unsupported("UserSearchPath contains unsupported fields")
+            return ""
+        default = expression.args.get("default")
+        if default is not None and not isinstance(default, bool):
+            self.unsupported("UserSearchPath default flag must be boolean")
+            return ""
+        schemas = expression.args.get("expressions")
+        if schemas is None:
+            schemas = []
+        elif not isinstance(schemas, list):
+            self.unsupported("UserSearchPath schemas must be a list")
+            return ""
+        if default:
+            if schemas:
+                self.unsupported("UserSearchPath DEFAULT cannot include schemas")
+                return ""
+            return "DEFAULT"
+        if not schemas:
+            self.unsupported("UserSearchPath requires at least one schema")
+            return ""
+        if not self._validate_user_named_list(schemas, "USER SEARCH_PATH schema", qualified=True):
+            return ""
+        return ", ".join(self.sql(schema) for schema in schemas)
+
+    def userdefaultroles_sql(self, expression: vexp.UserDefaultRoles) -> str:
+        if self._has_user_extras(expression, {"expressions", "mode"}):
+            self.unsupported("UserDefaultRoles contains unsupported fields")
+            return ""
+        mode = self._user_keyword_value(expression.args.get("mode"))
+        if mode not in {"NONE", "ALL", "ROLES", "ALL EXCEPT"}:
+            self.unsupported("UserDefaultRoles requires NONE, ALL, ROLES, or ALL EXCEPT mode")
+            return ""
+        roles = expression.args.get("expressions")
+        if roles is None:
+            roles = []
+        elif not isinstance(roles, list):
+            self.unsupported("UserDefaultRoles roles must be a list")
+            return ""
+        requires_roles = mode in {"ROLES", "ALL EXCEPT"}
+        if requires_roles != bool(roles):
+            self.unsupported(f"UserDefaultRoles {mode} has invalid role cardinality")
+            return ""
+        if roles and not self._validate_user_named_list(
+            roles, "USER DEFAULT ROLE name", qualified=False
+        ):
+            return ""
+        roles_sql = ", ".join(self.sql(role) for role in roles)
+        if mode == "ROLES":
+            return roles_sql
+        return f"{mode}{f' {roles_sql}' if roles_sql else ''}"
+
+    def _validate_user_named_list(
+        self, names: list[object], label: str, *, qualified: bool
+    ) -> bool:
+        valid = True
+        seen: set[tuple[tuple[bool, str], ...]] = set()
+        for name in names:
+            components: list[exp.Expr]
+            if isinstance(name, exp.Identifier):
+                components = [name]
+            elif qualified and isinstance(name, exp.Table):
+                if self._has_user_extras(name, {"this", "db", "catalog"}) or name.catalog:
+                    self.unsupported(f"{label} accepts at most a namespace qualifier")
+                    valid = False
+                components = list(name.parts)
+                if len(components) != 2:
+                    self.unsupported(f"{label} accepts at most a namespace qualifier")
+                    valid = False
+            else:
+                self.unsupported(
+                    f"{label} requires {'schema names' if qualified else 'unqualified names'}"
+                )
+                valid = False
+                continue
+            for component in components:
+                valid = self._validate_user_identifier(component, label) and valid
+            key = tuple(
+                (
+                    bool(component.args.get("quoted", False)),
+                    component.name
+                    if component.args.get("quoted", False)
+                    else component.name.casefold(),
+                )
+                for component in components
+            )
+            if key in seen:
+                self.unsupported(f"{label} does not allow duplicate names")
+                valid = False
+            seen.add(key)
+        return valid
 
     def _validate_user_interval(self, name: str, value: object, maximum_seconds: int) -> bool:
         if self._user_keyword_value(value) == "NONE":
@@ -1715,6 +1821,11 @@ class VerticaGenerator(PostgresGenerator):
                         if parameter.args.get("subcluster") is not None
                         else "RESOURCE POOL"
                     )
+                elif name in {"SEARCH_PATH", "DEFAULT ROLE"}:
+                    key = name
+                    if name == "DEFAULT ROLE" and statement != "ALTER USER":
+                        self.unsupported("DEFAULT ROLE is supported only by ALTER USER")
+                        valid = False
                 elif name in {
                     "GRACEPERIOD",
                     "IDLESESSIONTIMEOUT",
@@ -1740,6 +1851,9 @@ class VerticaGenerator(PostgresGenerator):
                 self.unsupported(f"{statement} does not allow duplicate or conflicting {key}")
                 valid = False
             seen.add(key)
+        if "DEFAULT ROLE" in seen and len(parameters) != 1:
+            self.unsupported("ALTER USER DEFAULT ROLE cannot be combined with other parameters")
+            valid = False
         return valid
 
     def _user_action_name(self, expression: vexp.UserAction) -> str:

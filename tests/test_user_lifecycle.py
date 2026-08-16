@@ -621,9 +621,14 @@ def test_user_assignment_identifier_contract_applies_to_every_name_position() ->
     for sql in (
         f"CREATE USER analyst PROFILE {exact}",
         f"CREATE USER analyst RESOURCE POOL {exact}",
+        f"CREATE USER analyst SEARCH_PATH {exact}",
         f"ALTER USER analyst RESOURCE POOL pool FOR SUBCLUSTER {exact}",
+        f"ALTER USER analyst SEARCH_PATH namespace.{exact}",
+        f"ALTER USER analyst DEFAULT ROLE {exact}",
         'CREATE USER analyst PROFILE "βeta"',
+        'CREATE USER analyst SEARCH_PATH "βeta"',
         'ALTER USER analyst RESOURCE POOL "etl pool" FOR SUBCLUSTER "βeta"',
+        'ALTER USER analyst DEFAULT ROLE "βeta"',
     ):
         assert_roundtrip(sql)
 
@@ -631,7 +636,10 @@ def test_user_assignment_identifier_contract_applies_to_every_name_position() ->
     for sql in (
         f"CREATE USER analyst PROFILE {too_long}",
         f"CREATE USER analyst RESOURCE POOL {too_long}",
+        f"CREATE USER analyst SEARCH_PATH {too_long}",
         f"ALTER USER analyst RESOURCE POOL pool FOR SUBCLUSTER {too_long}",
+        f"ALTER USER analyst SEARCH_PATH namespace.{too_long}",
+        f"ALTER USER analyst DEFAULT ROLE {too_long}",
     ):
         with pytest.raises(ParseError):
             parse_one(sql, read="vertica")
@@ -669,7 +677,6 @@ def test_lone_surrogate_identifier_fails_cleanly() -> None:
         "CREATE USER analyst RESOURCE POOL general FOR etl",
         "CREATE USER analyst RESOURCE POOL general, RESOURCE POOL other",
         "CREATE USER analyst ACCOUNT LOCK, ACCOUNT UNLOCK",
-        "CREATE USER analyst DEFAULT ROLE public",
         "CREATE USER analyst SET PARAMETER x = 1",
         "CREATE USER IF NOT EXISTS analyst",
         "ALTER USER",
@@ -691,7 +698,6 @@ def test_lone_surrogate_identifier_fails_cleanly() -> None:
         "ALTER USER analyst RESOURCE POOL general, RESOURCE POOL other",
         "ALTER USER analyst ACCOUNT LOCK, ACCOUNT UNLOCK",
         "ALTER USER analyst RENAME TO renamed, PROFILE security",
-        "ALTER USER analyst DEFAULT ROLE public",
         "ALTER USER analyst SET PARAMETER x = 1",
         "ALTER USER analyst CLEAR PARAMETER x",
         "DROP USER",
@@ -1075,3 +1081,261 @@ def test_programmatic_unquoted_user_names_match_parser_keyword_domain(name: str)
         _strict(vexp.CreateUser(this=_identifier(name), kind="USER"))
     quoted = vexp.CreateUser(this=_identifier(name, quoted=True), kind="USER")
     assert _strict(quoted) == f'CREATE USER "{name}"'
+
+
+@pytest.mark.parametrize(
+    ("sql", "default", "schemas"),
+    [
+        ("CREATE USER analyst SEARCH_PATH DEFAULT", True, []),
+        ("ALTER USER analyst SEARCH_PATH public", False, ["public"]),
+        (
+            'CREATE USER analyst SEARCH_PATH "$user", public, analytics',
+            False,
+            ['"$user"', "public", "analytics"],
+        ),
+        (
+            'ALTER USER analyst SEARCH_PATH tenant.reporting, "Case Schema"',
+            False,
+            ["tenant.reporting", '"Case Schema"'],
+        ),
+    ],
+)
+def test_user_search_paths_are_typed_ordered_lists(
+    sql: str, default: bool, schemas: list[str]
+) -> None:
+    expression = assert_roundtrip(sql)
+    parameters = expression.args.get("parameters") or expression.args.get("actions")
+    assert isinstance(parameters, list)
+    parameter = parameters[0]
+    assert isinstance(parameter, vexp.UserParameter)
+    assert parameter.this.name == "SEARCH_PATH"
+    search_path = parameter.expression
+    assert isinstance(search_path, vexp.UserSearchPath)
+    assert bool(search_path.args.get("default")) is default
+    assert [schema.sql(dialect="vertica") for schema in search_path.expressions] == schemas
+    _assert_parent_links(expression)
+
+
+@pytest.mark.parametrize(
+    ("sql", "mode", "roles"),
+    [
+        ("ALTER USER analyst DEFAULT ROLE NONE", "NONE", []),
+        ("ALTER USER analyst DEFAULT ROLE ALL", "ALL", []),
+        ("ALTER USER analyst DEFAULT ROLE reporting", "ROLES", ["reporting"]),
+        (
+            'ALTER USER analyst DEFAULT ROLE reporting, "Case Role"',
+            "ROLES",
+            ["reporting", "Case Role"],
+        ),
+        (
+            "ALTER USER analyst DEFAULT ROLE ALL EXCEPT restricted, auditors",
+            "ALL EXCEPT",
+            ["restricted", "auditors"],
+        ),
+    ],
+)
+def test_user_default_roles_are_typed_exclusive_lists(
+    sql: str, mode: str, roles: list[str]
+) -> None:
+    expression = assert_roundtrip(sql)
+    assert isinstance(expression, vexp.AlterUser)
+    parameter = expression.actions[0]
+    assert isinstance(parameter, vexp.UserParameter)
+    default_roles = parameter.expression
+    assert isinstance(default_roles, vexp.UserDefaultRoles)
+    assert default_roles.args["mode"].name == mode
+    assert [role.name for role in default_roles.expressions] == roles
+    _assert_parent_links(expression)
+
+
+def test_search_path_commas_remain_distinct_from_outer_parameter_commas() -> None:
+    sql = (
+        "ALTER USER analyst SEARCH_PATH tenant.reporting, public, PROFILE strict, "
+        "MAXCONNECTIONS 4 ON NODE"
+    )
+    expression = assert_roundtrip(sql)
+    assert isinstance(expression, vexp.AlterUser)
+    assert [parameter.this.name for parameter in expression.actions] == [
+        "SEARCH_PATH",
+        "PROFILE",
+        "MAXCONNECTIONS",
+    ]
+    search_path = expression.actions[0].expression
+    assert isinstance(search_path, vexp.UserSearchPath)
+    assert [schema.sql(dialect="vertica") for schema in search_path.expressions] == [
+        "tenant.reporting",
+        "public",
+    ]
+
+
+def test_user_name_lists_serialize_transform_optimize_and_annotate() -> None:
+    expression = parse_one(
+        'ALTER USER analyst SEARCH_PATH tenant.reporting, "Case Schema", PROFILE strict',
+        read="vertica",
+    )
+    assert exp.Expr.load(expression.dump()) == expression
+    assert expression.copy() == expression
+    transformed = expression.transform(
+        lambda node: (
+            _identifier("warehouse")
+            if isinstance(node, exp.Identifier) and node.name == "reporting"
+            else node
+        )
+    )
+    assert "tenant.warehouse" in _strict(transformed)
+    optimized = optimize(expression, dialect="vertica")
+    assert isinstance(optimized, vexp.AlterUser)
+    assert len(list(optimized.find_all(vexp.UserSearchPath))) == 1
+    annotated = annotate_types(expression, dialect="vertica")
+    assert isinstance(annotated.find(vexp.UserSearchPath), vexp.UserSearchPath)
+
+
+def test_user_name_lists_preserve_comments_and_statement_boundaries() -> None:
+    expression = assert_roundtrip(
+        "/* lead */ CREATE USER analyst SEARCH_PATH tenant.reporting, public /* tail */"
+    )
+    assert _strict(expression).count("lead") == 1
+    assert _strict(expression).count("tail") == 1
+    statements = parse(
+        "CREATE USER analyst SEARCH_PATH DEFAULT; "
+        "ALTER USER analyst DEFAULT ROLE ALL EXCEPT restricted; "
+        "DROP USER analyst",
+        read="vertica",
+    )
+    assert [type(statement) for statement in statements] == [
+        vexp.CreateUser,
+        vexp.AlterUser,
+        vexp.DropUsers,
+    ]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE USER analyst SEARCH_PATH",
+        "CREATE USER analyst SEARCH_PATH DEFAULT public",
+        "CREATE USER analyst SEARCH_PATH public,",
+        "CREATE USER analyst SEARCH_PATH public,, analytics",
+        "CREATE USER analyst SEARCH_PATH tenant.reporting.extra",
+        "CREATE USER analyst SEARCH_PATH public, PUBLIC",
+        "CREATE USER analyst SEARCH_PATH 'public'",
+        "CREATE USER analyst SEARCH_PATH NULL",
+        "CREATE USER analyst SEARCH_PATH DEFAULT, SEARCH_PATH public",
+        "CREATE USER analyst DEFAULT ROLE reporting",
+        "ALTER USER analyst DEFAULT ROLE",
+        "ALTER USER analyst DEFAULT ROLE ALL EXCEPT",
+        "ALTER USER analyst DEFAULT ROLE NONE, reporting",
+        "ALTER USER analyst DEFAULT ROLE ALL, reporting",
+        "ALTER USER analyst DEFAULT ROLE app.reporting",
+        "ALTER USER analyst DEFAULT ROLE reporting, REPORTING",
+        "ALTER USER analyst ACCOUNT LOCK, DEFAULT ROLE reporting",
+        "ALTER USER analyst DEFAULT ROLE reporting ACCOUNT LOCK",
+        "ALTER USER analyst DEFAULT ROLE reporting, ACCOUNT LOCK",
+    ],
+)
+@pytest.mark.parametrize(
+    "error_level",
+    [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE],
+)
+def test_invalid_user_search_paths_and_default_roles_fail_closed(
+    sql: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'CREATE USER analyst "SEARCH_PATH" public',
+        'ALTER USER analyst "DEFAULT" ROLE reporting',
+        'ALTER USER analyst DEFAULT "ROLE" reporting',
+        "ALTER USER analyst DEFAULT RO" + chr(0x131) + "E reporting",
+        'ALTER USER analyst DEFAULT ROLE "ALL"',
+        'ALTER USER analyst DEFAULT ROLE "NONE"',
+    ],
+)
+def test_user_list_keyword_provenance_and_identifier_collisions(sql: str) -> None:
+    if sql.endswith('"ALL"') or sql.endswith('"NONE"'):
+        expression = assert_roundtrip(sql)
+        roles = expression.actions[0].expression
+        assert isinstance(roles, vexp.UserDefaultRoles)
+        assert roles.args["mode"].name == "ROLES"
+    else:
+        with pytest.raises(ParseError):
+            parse_one(sql, read="vertica")
+
+
+def _search_path_parameter(*schemas: exp.Expr, default: object = False) -> vexp.UserParameter:
+    return vexp.UserParameter(
+        this=exp.var("SEARCH_PATH"),
+        expression=vexp.UserSearchPath(expressions=list(schemas) or None, default=default),
+    )
+
+
+def _default_roles_parameter(mode: object, *roles: exp.Expr) -> vexp.UserParameter:
+    return vexp.UserParameter(
+        this=exp.var("DEFAULT ROLE"),
+        expression=vexp.UserDefaultRoles(
+            expressions=list(roles) or None,
+            mode=exp.var(mode) if isinstance(mode, str) else mode,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "parameter",
+    [
+        _search_path_parameter(),
+        _search_path_parameter(_identifier("public"), default=True),
+        _search_path_parameter(_identifier("public"), default="yes"),
+        _search_path_parameter(exp.Literal.string("public")),
+        _search_path_parameter(exp.to_table("db.namespace.schema")),
+        _search_path_parameter(_identifier("public"), _identifier("PUBLIC")),
+        _default_roles_parameter("NONE", _identifier("reporting")),
+        _default_roles_parameter("ROLES"),
+        _default_roles_parameter("ALL EXCEPT"),
+        _default_roles_parameter("UNKNOWN", _identifier("reporting")),
+        _default_roles_parameter("ROLES", exp.to_table("app.reporting")),
+        _default_roles_parameter("ROLES", _identifier("reporting"), _identifier("REPORTING")),
+    ],
+)
+def test_malformed_programmatic_user_name_lists_fail_atomically(
+    parameter: vexp.UserParameter,
+) -> None:
+    root = vexp.AlterUser(this=_identifier("analyst"), kind="USER", actions=[parameter])
+    with pytest.raises(UnsupportedError):
+        _strict(root)
+
+
+def test_programmatic_default_role_is_alter_only_and_isolated() -> None:
+    default_role = _default_roles_parameter("ROLES", _identifier("reporting"))
+    with pytest.raises(UnsupportedError):
+        _strict(
+            vexp.CreateUser(this=_identifier("analyst"), kind="USER", parameters=[default_role])
+        )
+    with pytest.raises(UnsupportedError):
+        _strict(
+            vexp.AlterUser(
+                this=_identifier("analyst"),
+                kind="USER",
+                actions=[default_role, _action("ACCOUNT LOCK")],
+            )
+        )
+
+
+@pytest.mark.parametrize("dialect", ["postgres", "duckdb", "mysql", "sqlite"])
+@pytest.mark.parametrize(
+    "expression",
+    [
+        vexp.UserSearchPath(expressions=[_identifier("public")], default=False),
+        vexp.UserDefaultRoles(expressions=[_identifier("reporting")], mode=exp.var("ROLES")),
+        parse_one("CREATE USER analyst SEARCH_PATH public", read="vertica"),
+        parse_one("ALTER USER analyst DEFAULT ROLE ALL", read="vertica"),
+    ],
+)
+def test_user_name_lists_fail_atomically_in_foreign_dialects(
+    dialect: str, expression: exp.Expr
+) -> None:
+    with pytest.raises((UnsupportedError, ValueError)):
+        expression.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)

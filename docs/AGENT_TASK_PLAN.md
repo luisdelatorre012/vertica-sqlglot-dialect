@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P04 — USER time and capacity limits**.
-- Next eligible tasks are selected by dependency and numeric order; P05 is the
+- Completed through **P05 — USER search path and default roles**.
+- Next eligible tasks are selected by dependency and numeric order; P06 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -56,7 +56,7 @@ task may be `IN_PROGRESS`.
 | P02 | DONE | Executable `PROFILE` statement | P01 | `feat: model profiled statement execution` |
 | P03 | DONE | USER profile and resource-pool assignments | P01 | `feat: add user workload assignments` |
 | P04 | DONE | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
-| P05 | TODO | USER search path and default roles | P03 | `feat: model user path and default roles` |
+| P05 | DONE | USER search path and default roles | P03 | `feat: model user path and default roles` |
 | P06 | TODO | Safe USER configuration/reset actions | P04, P05 | `feat: model safe user configuration actions` |
 | P07 | TODO | AUTHENTICATION create/drop core | P06 | `feat: model authentication creation and drop` |
 | P08 | TODO | AUTHENTICATION structural ALTER actions | P07 | `feat: model authentication alter actions` |
@@ -387,7 +387,7 @@ suites each passed 3042 tests, with 3.15 treating deprecations as errors. Ruff,
 formatting, strict mypy, full pre-commit, sdist/wheel build, clean force-install,
 `pip check`, and installed-wheel entry-point/round-trip smoke passed.
 
-### P05 — USER search path and default roles — `TODO`
+### P05 — USER search path and default roles — `DONE`
 
 **Outcome.** Model list-valued USER settings without confusing their commas
 with outer parameter separators.
@@ -401,7 +401,22 @@ names, qualification rules, and existing role/USER collision contracts.
 
 **Primary source.** [ALTER USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-user/).
 
-**Completion record.** Pending.
+**Completion record.** Added typed `UserSearchPath` and `UserDefaultRoles`
+children inside the ordered USER parameter model. CREATE/ALTER SEARCH_PATH now
+retains DEFAULT or a nonempty ordered schema list with at most one namespace
+qualifier; ALTER DEFAULT ROLE retains NONE, ALL, a nonempty role list, or ALL
+EXCEPT a nonempty role list and remains isolated from every other action.
+Identifier provenance, 128-byte UTF-8 limits, duplicate/cardinality checks,
+serialization, optimizer/type traversal, strict programmatic generation, and
+atomic foreign failure are covered. The 26.2 source re-audit found no material
+grammar contradiction. Schema/role existence, access or grants, session search
+precedence, and login-time role activation remain catalog/server concerns. The
+default CPython 3.12.6 gate passed 3159 tests at 93.67% branch coverage;
+isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
+3.15.0rc1 suites each passed 3159 tests, with 3.15 treating deprecations as
+errors. Ruff, formatting, strict mypy, full pre-commit, sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel entry-point/round-trip smoke
+passed.
 
 ### P06 — safe USER configuration/reset actions — `TODO`
 

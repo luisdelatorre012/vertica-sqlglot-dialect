@@ -82,7 +82,11 @@ the connection-policy lexical rules, additionally
 enforce Vertica's 128-byte UTF-8 limit, and use the active Vertica tokenizer's
 identifier-token domain rather than a frozen reserved-word list. Profile and
 pool existence, pool grants, and assignment effects remain catalog/server
-checks.
+checks. `UserSearchPath` retains either the exact DEFAULT sentinel or an ordered,
+nonempty schema list whose entries can carry one namespace qualifier;
+`UserDefaultRoles` retains NONE, ALL, an ordered role list, or ALL EXCEPT with
+an ordered role list. DEFAULT ROLE remains an isolated ALTER action, and role
+names remain unqualified.
 
 Tokenizable credential-bearing USER clauses are rejected before ordinary
 parser errors can retain or log their values, with a fixed sanitized error at
@@ -92,9 +96,9 @@ error (for example, an unterminated credential string) can include raw input.
 Callers must never submit real credentials to this dialect. Literal admission
 is clause-aware so documented USER limit strings can enter the AST while
 credential literals in `IDENTIFIED BY`, `SALT`, and `REPLACE` paths still fail
-before ordinary parser diagnostics. AUTHENTICATION, USER roles, search paths,
-and arbitrary configuration parameters stay outside the current semantic
-contract and fail closed when recognized.
+before ordinary parser diagnostics. AUTHENTICATION and arbitrary USER
+configuration parameters stay outside the current semantic contract and fail
+closed when recognized.
 
 PROFILE lifecycle uses `CreateProfile`, `AlterProfile`, and `DropProfiles`
 roots plus ordered `ProfileLimit` and `ProfileParameter` children. The values
