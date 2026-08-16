@@ -3369,6 +3369,13 @@ class VerticaParser(PostgresParser):
         if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
             raise ParseError(message)
 
+    def _raise_schema_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
     def _match_user_object(self, *, advance: bool = True) -> bool:
         matched = (
             self._curr.token_type == TokenType.VAR
@@ -5632,7 +5639,7 @@ class VerticaParser(PostgresParser):
 
     def _parse_create_schema(self, replace: bool) -> exp.Create:
         if replace:
-            self.raise_error("CREATE OR REPLACE SCHEMA is not supported by Vertica")
+            self._raise_schema_error("CREATE OR REPLACE SCHEMA is not supported by Vertica")
 
         exists = self._parse_exists(not_=True)
         schema = self._parse_table_parts(schema=True, is_db_reference=True)
@@ -5641,13 +5648,15 @@ class VerticaParser(PostgresParser):
         if self._match_text_seq("AUTHORIZATION"):
             owner = self._parse_id_var()
             if not owner:
-                self.raise_error("CREATE SCHEMA AUTHORIZATION requires a user name")
+                self._raise_schema_error("CREATE SCHEMA AUTHORIZATION requires a user name")
             properties.append(self.expression(vexp.SchemaAuthorizationProperty(this=owner)))
 
         if self._match(TokenType.DEFAULT):
             privileges = self._parse_inherited_privileges_property()
             if not privileges:
-                self.raise_error("CREATE SCHEMA DEFAULT requires INCLUDE or EXCLUDE PRIVILEGES")
+                self._raise_schema_error(
+                    "CREATE SCHEMA DEFAULT requires INCLUDE or EXCLUDE PRIVILEGES"
+                )
             assert privileges is not None
             properties.append(
                 self.expression(vexp.DefaultInheritedPrivilegesProperty(**privileges.args))
@@ -5658,7 +5667,7 @@ class VerticaParser(PostgresParser):
             properties.append(quota)
 
         if self._curr:
-            self.raise_error(
+            self._raise_schema_error(
                 f"Unexpected or out-of-order CREATE SCHEMA clause at {self._curr.text!r}"
             )
 
@@ -5803,6 +5812,146 @@ class VerticaParser(PostgresParser):
             self._advance()
         return matched
 
+    def _match_schema_keyword(self, word: str, *, advance: bool = True) -> bool:
+        token_types = {
+            "DEFAULT": TokenType.DEFAULT,
+            "DISK_QUOTA": TokenType.POLICY,
+            "EXISTS": TokenType.EXISTS,
+            "NULL": TokenType.NULL,
+            "RENAME": TokenType.RENAME,
+            "SCHEMA": TokenType.SCHEMA,
+            "SET": TokenType.SET,
+        }
+        matched = (
+            self._curr.token_type == token_types.get(word, TokenType.VAR)
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == word
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _parse_schema_name(self, statement: str) -> exp.Table:
+        first = self._parse_user_name_component(statement)
+        qualifier: exp.Identifier | None = None
+        schema = first
+        if self._match(TokenType.DOT):
+            qualifier = first
+            schema = self._parse_user_name_component(statement)
+            if self._match(TokenType.DOT, advance=False):
+                self._raise_schema_error(
+                    f"{statement} requires a schema name with at most one qualifier"
+                )
+        return self.expression(exp.Table(db=schema, catalog=qualifier))
+
+    def _parse_schema_identifier(self, statement: str) -> exp.Identifier:
+        identifier = self._parse_id_var()
+        if not isinstance(identifier, exp.Identifier):
+            self._raise_schema_error(f"{statement} requires an unqualified name")
+        assert isinstance(identifier, exp.Identifier)
+        self._validate_user_name_component(identifier, statement)
+        if self._match(TokenType.DOT, advance=False):
+            self._raise_schema_error(f"{statement} names cannot be qualified")
+        return identifier
+
+    @staticmethod
+    def _schema_qualifier_key(schema: exp.Table) -> tuple[bool, str] | None:
+        qualifier = schema.args.get("catalog")
+        if not isinstance(qualifier, exp.Identifier):
+            return None
+        name = qualifier.name if qualifier.quoted else qualifier.name.upper()
+        return bool(qualifier.quoted), name
+
+    def _parse_alter_schema(self) -> vexp.AlterSchema:
+        schemas = [self._parse_schema_name("ALTER SCHEMA")]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self._raise_schema_error("ALTER SCHEMA requires a name after each comma")
+            schemas.append(self._parse_schema_name("ALTER SCHEMA"))
+
+        if self._match_schema_keyword("DEFAULT"):
+            if len(schemas) != 1:
+                self._raise_schema_error("ALTER SCHEMA DEFAULT accepts exactly one schema")
+            if not any(
+                self._match_schema_keyword(mode, advance=False) for mode in ("INCLUDE", "EXCLUDE")
+            ):
+                self._raise_schema_error("ALTER SCHEMA DEFAULT requires INCLUDE or EXCLUDE")
+            include = self._curr.text.upper() == "INCLUDE"
+            self._advance()
+            if not self._match_schema_keyword("SCHEMA") or not self._match_schema_keyword(
+                "PRIVILEGES"
+            ):
+                self._raise_schema_error("ALTER SCHEMA DEFAULT requires SCHEMA PRIVILEGES")
+            action: exp.Expr = self.expression(vexp.SchemaPrivilegeAction(include=include))
+        elif self._match_schema_keyword("OWNER"):
+            if len(schemas) != 1:
+                self._raise_schema_error("ALTER SCHEMA OWNER accepts exactly one schema")
+            if not self._match_schema_keyword("TO"):
+                self._raise_schema_error("ALTER SCHEMA OWNER requires TO")
+            owner = self._parse_schema_identifier("ALTER SCHEMA OWNER TO")
+            action = self.expression(
+                vexp.SchemaOwnerToAction(
+                    this=owner,
+                    cascade=self._match_schema_keyword("CASCADE"),
+                )
+            )
+        elif self._match_schema_keyword("DISK_QUOTA"):
+            if len(schemas) != 1:
+                self._raise_schema_error("ALTER SCHEMA DISK_QUOTA accepts exactly one schema")
+            if self._match_schema_keyword("SET"):
+                if not self._match_schema_keyword("NULL"):
+                    self._raise_schema_error("ALTER SCHEMA DISK_QUOTA SET requires NULL")
+                quota: exp.Expr = self.expression(exp.Null())
+            else:
+                parsed_quota = self._parse_string()
+                if (
+                    not isinstance(parsed_quota, exp.Literal)
+                    or not parsed_quota.is_string
+                    or not re.fullmatch(r"\d+[KMGT]", parsed_quota.this, flags=re.IGNORECASE)
+                ):
+                    self._raise_schema_error(
+                        "ALTER SCHEMA DISK_QUOTA requires a quoted integer with K/M/G/T unit"
+                    )
+                assert isinstance(parsed_quota, exp.Literal)
+                quota = self.expression(
+                    exp.Literal.string(f"{parsed_quota.this[:-1]}{parsed_quota.this[-1].upper()}")
+                )
+            action = self.expression(vexp.SchemaDiskQuotaAction(this=quota))
+        elif self._match_schema_keyword("RENAME"):
+            if not self._match_schema_keyword("TO"):
+                self._raise_schema_error("ALTER SCHEMA RENAME requires TO")
+            targets = [self._parse_schema_name("ALTER SCHEMA RENAME TO")]
+            while self._match(TokenType.COMMA):
+                if not self._curr:
+                    self._raise_schema_error("ALTER SCHEMA RENAME requires a name after each comma")
+                targets.append(self._parse_schema_name("ALTER SCHEMA RENAME TO"))
+            if len(targets) != len(schemas):
+                self._raise_schema_error(
+                    "ALTER SCHEMA RENAME source and target lists must have equal length"
+                )
+            for source, target in zip(schemas, targets):
+                source_qualifier = self._schema_qualifier_key(source)
+                if source_qualifier is not None and source_qualifier != self._schema_qualifier_key(
+                    target
+                ):
+                    self._raise_schema_error(
+                        "ALTER SCHEMA RENAME must preserve an explicit source namespace"
+                    )
+            action = self.expression(vexp.SchemaRenameAction(expressions=targets))
+        else:
+            self._raise_schema_error("ALTER SCHEMA requires DEFAULT, OWNER, DISK_QUOTA, or RENAME")
+
+        if self._curr:
+            self._raise_schema_error(f"Unexpected ALTER SCHEMA clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.AlterSchema(
+                this=schemas[0],
+                expressions=schemas[1:] or None,
+                kind="SCHEMA",
+                actions=[action],
+            )
+        )
+
     def _parse_view_name(self, statement: str) -> exp.Table:
         name = self._parse_table_parts(schema=True)
         if not isinstance(name, exp.Table) or not isinstance(name.this, exp.Identifier):
@@ -5936,6 +6085,8 @@ class VerticaParser(PostgresParser):
             self.raise_error("ALTER ROUTING must be followed by RULE")
         if self._match(TokenType.SEQUENCE):
             return self._parse_alter_sequence()
+        if self._match(TokenType.SCHEMA):
+            return self._parse_alter_schema()
         if self._match(TokenType.VIEW):
             return self._parse_alter_view()
         if self._match(TokenType.TABLE):
@@ -6921,6 +7072,30 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_drop_schema(self, exists: bool) -> vexp.DropSchemas:
+        if exists:
+            self._raise_schema_error("DROP SCHEMA IF EXISTS must follow SCHEMA")
+        if_exists = bool(self._parse_exists())
+        schemas = [self._parse_schema_name("DROP SCHEMA")]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self._raise_schema_error("DROP SCHEMA requires a name after each comma")
+            schemas.append(self._parse_schema_name("DROP SCHEMA"))
+        cascade = self._match_schema_keyword("CASCADE")
+        restrict = not cascade and self._match_schema_keyword("RESTRICT")
+        if self._curr:
+            self._raise_schema_error(f"Unexpected DROP SCHEMA clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.DropSchemas(
+                this=schemas[0],
+                expressions=schemas[1:] or None,
+                kind="SCHEMA",
+                exists=if_exists,
+                cascade=cascade,
+                restrict=restrict,
+            )
+        )
+
     def _parse_drop_user(self, exists: bool) -> vexp.DropUsers:
         if exists:
             self._raise_user_error("DROP USER IF EXISTS must follow USER")
@@ -7106,6 +7281,8 @@ class VerticaParser(PostgresParser):
         lookahead = words[:3]
         if lookahead == ["IF", "EXISTS", "VIEW"]:
             self._raise_view_error("DROP VIEW IF EXISTS must follow VIEW")
+        if lookahead == ["IF", "EXISTS", "SCHEMA"]:
+            self._raise_schema_error("DROP SCHEMA IF EXISTS must follow SCHEMA")
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
             self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
         if lookahead[:2] == ["TEMPORARY", "DIRECTED"]:
@@ -7157,6 +7334,8 @@ class VerticaParser(PostgresParser):
             return self._parse_drop_routing_rule(exists=exists)
         if self._match_text_seq("ROUTING", advance=False):
             self.raise_error("DROP ROUTING must be followed by RULE")
+        if self._match(TokenType.SCHEMA):
+            return self._parse_drop_schema(exists=exists)
         if self._match(TokenType.VIEW):
             return self._parse_drop_view(exists=exists)
 

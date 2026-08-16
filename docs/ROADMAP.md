@@ -98,6 +98,9 @@ Implemented catalog P0:
 - complete semantic VIEW lifecycle with typed owner, schema, inherited-
   privilege, and equal-cardinality multi-rename ALTER actions plus ordered
   multi-target DROP without undocumented dependency modifiers;
+- complete semantic SCHEMA lifecycle with typed default-privilege, cascading
+  owner, quota/reset, and equal-cardinality multi-rename ALTER actions plus
+  ordered multi-target DROP with exact CASCADE/RESTRICT handling;
 - semantic `CREATE`/`DROP LIBRARY` with dependency, language, and cascade
   clauses;
 - a shared semantic factory specification for scalar, aggregate, analytic,

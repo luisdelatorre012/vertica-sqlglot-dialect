@@ -320,6 +320,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AlterProfile: lambda self, expression: self.alterprofile_sql(expression),
         vexp.AlterResourcePool: lambda self, expression: self.alterresourcepool_sql(expression),
         vexp.AlterRoutingRule: lambda self, expression: self.alterroutingrule_sql(expression),
+        vexp.AlterSchema: lambda self, expression: self.alterschema_sql(expression),
         vexp.AlterTablePartition: lambda self, expression: self.altertablepartition_sql(expression),
         vexp.AlterUser: lambda self, expression: self.alteruser_sql(expression),
         vexp.AlterView: lambda self, expression: self.alterview_sql(expression),
@@ -394,6 +395,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.DropResourcePool: lambda self, expression: self.dropresourcepool_sql(expression),
         vexp.DropRoutingRule: lambda self, expression: self.droproutingrule_sql(expression),
         vexp.DropRoles: lambda self, expression: self.droproles_sql(expression),
+        vexp.DropSchemas: lambda self, expression: self.dropschemas_sql(expression),
         vexp.DropUserDefinedExtension: lambda self, expression: self.dropuserdefinedextension_sql(
             expression
         ),
@@ -430,6 +432,14 @@ class VerticaGenerator(PostgresGenerator):
         vexp.InheritedPrivilegesProperty: lambda self, expression: (
             self.inheritedprivilegesproperty_sql(expression)
         ),
+        vexp.SchemaDiskQuotaAction: lambda self, expression: self.schemadiskquotaaction_sql(
+            expression
+        ),
+        vexp.SchemaOwnerToAction: lambda self, expression: self.schemaownertoaction_sql(expression),
+        vexp.SchemaPrivilegeAction: lambda self, expression: self.schemaprivilegeaction_sql(
+            expression
+        ),
+        vexp.SchemaRenameAction: lambda self, expression: self.schemarenameaction_sql(expression),
         vexp.ViewOwnerToAction: lambda self, expression: self.viewownertoaction_sql(expression),
         vexp.ViewPrivilegeAction: lambda self, expression: self.viewprivilegeaction_sql(expression),
         vexp.ViewRenameAction: lambda self, expression: self.viewrenameaction_sql(expression),
@@ -3943,6 +3953,185 @@ class VerticaGenerator(PostgresGenerator):
         if active_partition_count:
             sql += f" ACTIVEPARTITIONCOUNT {active_partition_count}"
         return sql
+
+    def _validate_schema_name(self, expression: object, label: str) -> bool:
+        if not isinstance(expression, exp.Table):
+            self.unsupported(f"{label} requires a qualified table-shaped name")
+            return False
+        valid = True
+        if self._has_user_extras(expression, {"this", "db", "catalog"}):
+            self.unsupported(f"{label} contains unsupported table fields")
+            valid = False
+        catalog = expression.args.get("catalog")
+        db = expression.args.get("db")
+        if expression.this is not None or not isinstance(db, exp.Identifier):
+            self.unsupported(f"{label} requires the canonical schema-reference shape")
+            valid = False
+        for part_label, part in (("namespace/database", catalog), ("schema", db)):
+            if part is not None:
+                valid = self._validate_user_identifier(part, f"{label} {part_label}") and valid
+        return valid
+
+    def _validate_schema_root(self, expression: exp.Expr, statement: str) -> bool:
+        valid = True
+        if expression.args.get("kind") != "SCHEMA":
+            self.unsupported(f"{type(expression).__name__} requires kind SCHEMA")
+            valid = False
+        allowed = {"this", "expressions", "kind", "actions"}
+        if isinstance(expression, vexp.DropSchemas):
+            allowed = {"this", "expressions", "kind", "exists", "cascade", "restrict"}
+        if self._has_user_extras(expression, allowed):
+            self.unsupported(f"{statement} contains unsupported statement fields")
+            valid = False
+        raw_secondary = expression.args.get("expressions")
+        if raw_secondary is None:
+            secondary: list[exp.Expr] = []
+        elif not isinstance(raw_secondary, list):
+            self.unsupported(f"{statement} secondary targets must be a list")
+            secondary = []
+            valid = False
+        else:
+            secondary = raw_secondary
+        targets = [expression.args.get("this"), *secondary]
+        for target in targets:
+            valid = self._validate_schema_name(target, f"{statement} target") and valid
+        return valid
+
+    def alterschema_sql(self, expression: vexp.AlterSchema) -> str:
+        valid = self._validate_schema_root(expression, "ALTER SCHEMA")
+        raw_sources = expression.args.get("expressions")
+        sources = (
+            [expression.args.get("this"), *raw_sources]
+            if isinstance(raw_sources, list)
+            else [expression.args.get("this")]
+        )
+        raw_actions = expression.args.get("actions")
+        if not isinstance(raw_actions, list) or len(raw_actions) != 1:
+            self.unsupported("ALTER SCHEMA requires exactly one typed action")
+            return ""
+        action = raw_actions[0]
+        if not isinstance(
+            action,
+            (
+                vexp.SchemaPrivilegeAction,
+                vexp.SchemaOwnerToAction,
+                vexp.SchemaDiskQuotaAction,
+                vexp.SchemaRenameAction,
+            ),
+        ):
+            self.unsupported("ALTER SCHEMA requires a supported typed action")
+            return ""
+        if isinstance(action, vexp.SchemaRenameAction):
+            targets = action.args.get("expressions")
+            if not isinstance(targets, list) or len(targets) != len(sources):
+                self.unsupported(
+                    "ALTER SCHEMA RENAME source and target lists must have equal length"
+                )
+                valid = False
+            else:
+                for source, target in zip(sources, targets):
+                    if isinstance(source, exp.Table) and isinstance(target, exp.Table):
+                        source_qualifier = source.args.get("catalog")
+                        target_qualifier = target.args.get("catalog")
+                        if source_qualifier is not None and source_qualifier != target_qualifier:
+                            self.unsupported(
+                                "ALTER SCHEMA RENAME must preserve an explicit source namespace"
+                            )
+                            valid = False
+        elif len(sources) != 1:
+            self.unsupported("Only ALTER SCHEMA RENAME accepts multiple source schemas")
+            valid = False
+        if not valid:
+            return ""
+        return (
+            f"ALTER SCHEMA {', '.join(self.sql(source) for source in sources)} {self.sql(action)}"
+        )
+
+    def dropschemas_sql(self, expression: vexp.DropSchemas) -> str:
+        valid = self._validate_schema_root(expression, "DROP SCHEMA")
+        exists = expression.args.get("exists")
+        cascade = expression.args.get("cascade")
+        restrict = expression.args.get("restrict")
+        for name, value in (("exists", exists), ("cascade", cascade), ("restrict", restrict)):
+            if value is not None and not isinstance(value, bool):
+                self.unsupported(f"DropSchemas {name} must be boolean")
+                valid = False
+        if cascade and restrict:
+            self.unsupported("DropSchemas cannot combine CASCADE and RESTRICT")
+            valid = False
+        raw_secondary = expression.args.get("expressions")
+        targets = (
+            [expression.args.get("this"), *raw_secondary]
+            if isinstance(raw_secondary, list)
+            else [expression.args.get("this")]
+        )
+        if not valid:
+            return ""
+        exists_sql = " IF EXISTS" if exists else ""
+        dependency_sql = " CASCADE" if cascade else " RESTRICT" if restrict else ""
+        return (
+            f"DROP SCHEMA{exists_sql} {', '.join(self.sql(target) for target in targets)}"
+            f"{dependency_sql}"
+        )
+
+    def schemaprivilegeaction_sql(self, expression: vexp.SchemaPrivilegeAction) -> str:
+        if self._has_user_extras(expression, {"include"}):
+            self.unsupported("SchemaPrivilegeAction contains unsupported fields")
+            return ""
+        include = expression.args.get("include")
+        if not isinstance(include, bool):
+            self.unsupported("SchemaPrivilegeAction include must be boolean")
+            return ""
+        mode = "INCLUDE" if include else "EXCLUDE"
+        return f"DEFAULT {mode} SCHEMA PRIVILEGES"
+
+    def schemaownertoaction_sql(self, expression: vexp.SchemaOwnerToAction) -> str:
+        if self._has_user_extras(expression, {"this", "cascade"}) or not (
+            self._validate_user_identifier(expression.args.get("this"), "ALTER SCHEMA OWNER TO")
+        ):
+            return ""
+        cascade = expression.args.get("cascade")
+        if cascade is not None and not isinstance(cascade, bool):
+            self.unsupported("SchemaOwnerToAction cascade must be boolean")
+            return ""
+        cascade_sql = " CASCADE" if cascade else ""
+        return f"OWNER TO {self.sql(expression, 'this')}{cascade_sql}"
+
+    def schemadiskquotaaction_sql(self, expression: vexp.SchemaDiskQuotaAction) -> str:
+        if self._has_user_extras(expression, {"this"}):
+            self.unsupported("SchemaDiskQuotaAction contains unsupported fields")
+            return ""
+        quota = expression.args.get("this")
+        if isinstance(quota, exp.Null) and not self._has_user_extras(quota, set()):
+            return "DISK_QUOTA SET NULL"
+        if (
+            not isinstance(quota, exp.Literal)
+            or not quota.is_string
+            or self._has_user_extras(quota, {"this", "is_string"})
+            or not isinstance(quota.this, str)
+            or not re.fullmatch(r"\d+[KMGT]", quota.this, flags=re.IGNORECASE)
+        ):
+            self.unsupported(
+                "SchemaDiskQuotaAction requires NULL or a quoted integer with K/M/G/T unit"
+            )
+            return ""
+        canonical = f"{quota.this[:-1]}{quota.this[-1].upper()}"
+        return f"DISK_QUOTA '{canonical}'"
+
+    def schemarenameaction_sql(self, expression: vexp.SchemaRenameAction) -> str:
+        if self._has_user_extras(expression, {"expressions"}):
+            self.unsupported("SchemaRenameAction contains unsupported fields")
+            return ""
+        targets = expression.args.get("expressions")
+        if not isinstance(targets, list) or not targets:
+            self.unsupported("SchemaRenameAction requires a nonempty target list")
+            return ""
+        valid = all(
+            self._validate_schema_name(target, "ALTER SCHEMA RENAME TO") for target in targets
+        )
+        if not valid:
+            return ""
+        return f"RENAME TO {', '.join(self.sql(target) for target in targets)}"
 
     def _validate_view_name(self, expression: object, label: str) -> bool:
         if not isinstance(expression, exp.Table):

@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P11 — VIEW lifecycle**.
-- Next eligible tasks are selected by dependency and numeric order; P12 is the
+- Completed through **P12 — SCHEMA lifecycle**.
+- Next eligible tasks are selected by dependency and numeric order; P13 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -63,7 +63,7 @@ task may be `IN_PROGRESS`.
 | P09 | DONE   | AUTHENTICATION SET security boundary          | P08                 | `feat: add safe authentication parameters`              |
 | P10 | DONE   | COMMENT ON family                             | P02                 | `feat: make Vertica comment statements semantic`        |
 | P11 | DONE   | VIEW lifecycle                                | P10                 | `feat: complete semantic view lifecycle`                |
-| P12 | TODO   | SCHEMA lifecycle                              | P11                 | `feat: complete semantic schema lifecycle`              |
+| P12 | DONE   | SCHEMA lifecycle                              | P11                 | `feat: complete semantic schema lifecycle`              |
 | P13 | TODO   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
 | P14 | TODO   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | TODO   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
@@ -353,7 +353,7 @@ tests at 93.43% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15,
 sdist/wheel build, clean force-install, `pip check`, and installed-wheel
 entry-point/ALTER VIEW round-trip smoke passed.
 
-### P12 — SCHEMA lifecycle — `TODO`
+### P12 — SCHEMA lifecycle — `DONE`
 
 **Outcome.** Complete typed ALTER/DROP SCHEMA while preserving the existing
 CREATE SCHEMA extensions.
@@ -370,7 +370,29 @@ planned; catalog namespace resolution and dependency effects stay server-side.
 **Primary sources.** [ALTER SCHEMA](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-schema/)
 and [DROP SCHEMA](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-schema/).
 
-**Completion record.** Pending.
+**Completion record.** Added atomic `AlterSchema` and `DropSchemas` roots around
+SQLGlot's canonical database-reference-shaped schema names while retaining the
+existing canonical CREATE SCHEMA tree. ALTER supports exactly one typed default
+INCLUDE/EXCLUDE SCHEMA PRIVILEGES action, owner transfer with optional object
+CASCADE, quoted disk quota or `SET NULL` reset, or equal-cardinality ordered
+multi-schema rename. The disk-quota guide pins accepted values to unsigned
+integer strings with K/M/G/T units; units normalize to uppercase, zero and
+arbitrarily large digits remain lexical, and signs, decimals, spaces, other
+units, and nonstandard literal forms fail closed. Explicit source namespaces
+must be preserved by corresponding rename targets. DROP preserves ordered
+qualified targets, prefix `IF EXISTS`, and at most one postfix `CASCADE` or
+explicit `RESTRICT`; omission retains the server's default restrictive policy.
+Compound CREATE SCHEMA bodies remain separately planned and now fail atomically
+at every error level. Namespace/database mode, current-database resolution,
+ownership, object dependencies, quota relationships, and runtime effects remain
+catalog/server checks. The re-opened 26.2 sources had no material contradiction;
+the disk-quota guide clarifies the ALTER page's broad `value` placeholder. The
+focused schema/view suite passed 442 tests. The default CPython 3.12.6 gate
+passed 4396 tests at 93.36% branch coverage; isolated CPython 3.9.25, 3.10.20,
+3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 4396 tests,
+with 3.15 treating deprecations as errors. Ruff, formatting, strict mypy,
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+entry-point/ALTER SCHEMA round-trip smoke passed.
 
 ### P13 — administrative privilege targets — `TODO`
 

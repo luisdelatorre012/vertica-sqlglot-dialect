@@ -230,6 +230,21 @@ behavior. Ownership, existence, name uniqueness, current-database resolution,
 and dependency effects remain catalog/server checks. Local temporary CREATE
 VIEW syntax and TABLE lifecycle dispatch remain separate.
 
+Schema creation likewise remains canonical because the existing `exp.Create`
+tree preserves authorization, default inherited privileges, namespace/database
+qualification, and quota properties. `AlterSchema` and `DropSchemas` are atomic
+roots around SQLGlot's database-reference-shaped schema names. ALTER owns
+exactly one typed default-privilege, owner (with optional object cascade), disk-
+quota, or ordered rename action. Quotas use the documented quoted unsigned-
+integer plus K/M/G/T grammar, normalize the unit to uppercase, and preserve
+arbitrarily large digit strings without integer conversion; `SET NULL` remains
+a distinct typed reset. Multi-schema rename lists have equal cardinality and
+retain every explicitly supplied source namespace. DROP owns an ordered
+nonempty target list, prefix `IF EXISTS`, and at most one postfix `CASCADE` or
+explicit `RESTRICT`. Compound CREATE SCHEMA bodies remain fail-closed and
+separately planned. Namespace mode, current-database resolution, ownership,
+object dependencies, and quota relationships remain catalog/server checks.
+
 Directed-query statements use atomic custom roots because SQLGlot has no
 canonical SAVE/GET/CREATE/activation lifecycle. Their input SELECTs and WHERE
 filters remain ordinary traversable query children. `DirectedConstantHint`

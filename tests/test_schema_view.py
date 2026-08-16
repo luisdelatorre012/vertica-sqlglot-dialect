@@ -187,6 +187,352 @@ def _assert_parent_links(expression: exp.Expr) -> None:
                         assert child.index == index
 
 
+def _schema(name: str, qualifier: str | None = None) -> exp.Table:
+    return exp.Table(
+        db=exp.to_identifier(name),
+        catalog=exp.to_identifier(qualifier) if qualifier else None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("sql", "canonical", "action_type"),
+    [
+        (
+            "ALTER SCHEMA analytics DEFAULT INCLUDE SCHEMA PRIVILEGES",
+            None,
+            vexp.SchemaPrivilegeAction,
+        ),
+        (
+            "ALTER SCHEMA analytics DEFAULT EXCLUDE SCHEMA PRIVILEGES",
+            None,
+            vexp.SchemaPrivilegeAction,
+        ),
+        ("ALTER SCHEMA analytics OWNER TO alice", None, vexp.SchemaOwnerToAction),
+        (
+            'ALTER SCHEMA tenant."analytics" OWNER TO "owner" CASCADE',
+            None,
+            vexp.SchemaOwnerToAction,
+        ),
+        ("ALTER SCHEMA analytics DISK_QUOTA '20G'", None, vexp.SchemaDiskQuotaAction),
+        (
+            "ALTER SCHEMA analytics DISK_QUOTA '20g'",
+            "ALTER SCHEMA analytics DISK_QUOTA '20G'",
+            vexp.SchemaDiskQuotaAction,
+        ),
+        ("ALTER SCHEMA analytics DISK_QUOTA SET NULL", None, vexp.SchemaDiskQuotaAction),
+        ("ALTER SCHEMA old RENAME TO new", None, vexp.SchemaRenameAction),
+        (
+            "ALTER SCHEMA tenant.one, tenant.two RENAME TO tenant.two, tenant.one",
+            None,
+            vexp.SchemaRenameAction,
+        ),
+    ],
+)
+def test_alter_schema_forms_are_typed_and_roundtrip(
+    sql: str, canonical: str | None, action_type: type[exp.Expr]
+) -> None:
+    expression = assert_roundtrip(sql, canonical)
+    assert isinstance(expression, vexp.AlterSchema)
+    assert expression.kind == "SCHEMA"
+    assert len(expression.args["actions"]) == 1
+    assert isinstance(expression.args["actions"][0], action_type)
+    _assert_parent_links(expression)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DROP SCHEMA analytics",
+        "DROP SCHEMA analytics RESTRICT",
+        "DROP SCHEMA analytics CASCADE",
+        "DROP SCHEMA IF EXISTS tenant.analytics",
+        'DROP SCHEMA IF EXISTS tenant.analytics, other."select" CASCADE',
+    ],
+)
+def test_drop_schema_is_ordered_typed_and_roundtrips(sql: str) -> None:
+    expression = assert_roundtrip(sql)
+    assert isinstance(expression, vexp.DropSchemas)
+    assert expression.kind == "SCHEMA"
+    _assert_parent_links(expression)
+
+
+def test_schema_quota_domain_is_lexical_and_preserves_huge_values() -> None:
+    huge = "9" * 5000
+    assert_roundtrip("ALTER SCHEMA s DISK_QUOTA '0K'")
+    expression = assert_roundtrip(f"ALTER SCHEMA s DISK_QUOTA '{huge}t'")
+    assert _strict(expression) == f"ALTER SCHEMA s DISK_QUOTA '{huge}T'"
+
+
+def test_schema_rename_preserves_order_and_explicit_namespace() -> None:
+    expression = parse_one(
+        "ALTER SCHEMA ns.a, ns.b, scratch RENAME TO ns.b, ns.a, archived",
+        read="vertica",
+    )
+    assert isinstance(expression, vexp.AlterSchema)
+    sources = [expression.this, *expression.args["expressions"]]
+    action = expression.args["actions"][0]
+    assert isinstance(action, vexp.SchemaRenameAction)
+    assert [source.db for source in sources] == ["a", "b", "scratch"]
+    assert [target.db for target in action.expressions] == ["b", "a", "archived"]
+    assert sources[0].catalog == "ns"
+    assert action.expressions[0].catalog == "ns"
+
+
+def test_schema_lifecycle_serialization_transform_optimizer_types_and_boundaries() -> None:
+    expression = parse_one("ALTER SCHEMA old RENAME TO new", read="vertica")
+    assert expression.copy() == expression
+    assert exp.Expr.load(expression.dump()) == expression
+    transformed = expression.transform(
+        lambda node: (
+            exp.to_identifier("newer")
+            if isinstance(node, exp.Identifier) and node.name == "new"
+            else node
+        )
+    )
+    assert _strict(transformed) == "ALTER SCHEMA old RENAME TO newer"
+    optimized = optimize(expression, dialect="vertica")
+    assert isinstance(optimized, vexp.AlterSchema)
+    assert parse_one(_strict(optimized), read="vertica") == optimized
+    annotated = annotate_types(expression.copy(), dialect="vertica")
+    assert annotated.args["actions"][0].type == exp.DType.UNKNOWN.into_expr()
+    assert_roundtrip("/* lead */ ALTER SCHEMA s OWNER TO u CASCADE /* tail */")
+
+    statements = parse(
+        "CREATE SCHEMA s; ALTER SCHEMA s DISK_QUOTA SET NULL; "
+        "DROP SCHEMA IF EXISTS s, old_s RESTRICT",
+        read="vertica",
+    )
+    assert [type(statement) for statement in statements] == [
+        exp.Create,
+        vexp.AlterSchema,
+        vexp.DropSchemas,
+    ]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER SCHEMA",
+        "ALTER SCHEMA s",
+        "ALTER SCHEMA db.s.extra OWNER TO u",
+        "ALTER SCHEMA s, OWNER TO u",
+        "ALTER SCHEMA s DEFAULT",
+        "ALTER SCHEMA s DEFAULT PRIVILEGES",
+        "ALTER SCHEMA s DEFAULT INCLUDE PRIVILEGES",
+        "ALTER SCHEMA s DEFAULT INCLUDE SCHEMA",
+        "ALTER SCHEMA s, t DEFAULT INCLUDE SCHEMA PRIVILEGES",
+        "ALTER SCHEMA s OWNER",
+        "ALTER SCHEMA s OWNER u",
+        "ALTER SCHEMA s OWNER TO",
+        "ALTER SCHEMA s, t OWNER TO u",
+        "ALTER SCHEMA s OWNER TO u RESTRICT",
+        "ALTER SCHEMA s DISK_QUOTA",
+        "ALTER SCHEMA s DISK_QUOTA SET",
+        "ALTER SCHEMA s DISK_QUOTA NULL",
+        "ALTER SCHEMA s DISK_QUOTA 20G",
+        "ALTER SCHEMA s DISK_QUOTA -1G",
+        "ALTER SCHEMA s DISK_QUOTA '1.5G'",
+        "ALTER SCHEMA s DISK_QUOTA '1 G'",
+        "ALTER SCHEMA s DISK_QUOTA '1P'",
+        "ALTER SCHEMA s DISK_QUOTA E'1G'",
+        "ALTER SCHEMA s, t DISK_QUOTA '1G'",
+        "ALTER SCHEMA s RENAME",
+        "ALTER SCHEMA s RENAME x",
+        "ALTER SCHEMA s RENAME TO",
+        "ALTER SCHEMA s, t RENAME TO x",
+        "ALTER SCHEMA s RENAME TO x, y",
+        "ALTER SCHEMA ns.s RENAME TO other.s",
+        "ALTER SCHEMA ns.s RENAME TO s",
+        "ALTER SCHEMA s OWNER TO u RENAME TO x",
+        "DROP SCHEMA",
+        "DROP SCHEMA s,",
+        "DROP IF EXISTS SCHEMA s",
+        "DROP SCHEMA s IF EXISTS",
+        "DROP SCHEMA db.s.extra",
+        "DROP SCHEMA s CASCADE RESTRICT",
+        "DROP SCHEMA s RESTRICT CASCADE",
+        "DROP SCHEMA s, t IF EXISTS",
+        "CREATE SCHEMA s CREATE TABLE t (x INT)",
+    ],
+)
+@pytest.mark.parametrize(
+    "error_level", [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE]
+)
+def test_recognized_invalid_schema_lifecycle_fails_closed(
+    sql: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'ALTER "SCHEMA" s OWNER TO u',
+        'ALTER SCHEMA s "DEFAULT" INCLUDE SCHEMA PRIVILEGES',
+        'ALTER SCHEMA s DEFAULT "INCLUDE" SCHEMA PRIVILEGES',
+        'ALTER SCHEMA s DEFAULT INCLUDE "SCHEMA" PRIVILEGES',
+        'ALTER SCHEMA s DEFAULT INCLUDE SCHEMA "PRIVILEGES"',
+        'ALTER SCHEMA s "OWNER" TO u',
+        'ALTER SCHEMA s OWNER "TO" u',
+        'ALTER SCHEMA s OWNER TO u "CASCADE"',
+        "ALTER SCHEMA s \"DISK_QUOTA\" '1G'",
+        'ALTER SCHEMA s DISK_QUOTA "SET" NULL',
+        'ALTER SCHEMA s DISK_QUOTA SET "NULL"',
+        'ALTER SCHEMA s "RENAME" TO x',
+        'ALTER SCHEMA s RENAME "TO" x',
+        'DROP "SCHEMA" s',
+        'DROP SCHEMA "IF" EXISTS s',
+        'DROP SCHEMA s "CASCADE"',
+    ],
+)
+def test_schema_lifecycle_keyword_provenance_and_collisions(sql: str) -> None:
+    expression: exp.Expr | None = None
+    with contextlib.suppress(ParseError):
+        expression = parse_one(sql, read="vertica")
+    assert not isinstance(expression, (vexp.AlterSchema, vexp.DropSchemas))
+
+    table = parse_one("ALTER TABLE schema RENAME TO x", read="vertica")
+    view = parse_one("ALTER VIEW schema OWNER TO u", read="vertica")
+    assert not isinstance(table, vexp.AlterSchema)
+    assert not isinstance(view, vexp.AlterSchema)
+
+
+def test_programmatic_schema_lifecycle_generates_exact_sql() -> None:
+    sources = [_schema("a", "ns"), _schema("b")]
+    targets = [_schema("x", "ns"), _schema("y")]
+    alter = vexp.AlterSchema(
+        this=sources[0],
+        expressions=sources[1:],
+        kind="SCHEMA",
+        actions=[vexp.SchemaRenameAction(expressions=targets)],
+    )
+    drop = vexp.DropSchemas(
+        this=_schema("x", "ns"),
+        expressions=[_schema("y")],
+        kind="SCHEMA",
+        exists=True,
+        restrict=True,
+    )
+    assert _strict(alter) == "ALTER SCHEMA ns.a, b RENAME TO ns.x, y"
+    assert _strict(drop) == "DROP SCHEMA IF EXISTS ns.x, y RESTRICT"
+
+
+def test_schema_lifecycle_identifiers_share_utf8_and_tokenizer_contract() -> None:
+    exact = f"a{'é' * 63}b"
+    assert len(exact.encode()) == 128
+    assert_roundtrip(f"ALTER SCHEMA {exact} RENAME TO {exact}")
+    assert_roundtrip('DROP SCHEMA "SELECT", ns."SCHEMA"')
+    with pytest.raises(ParseError):
+        parse_one(f"ALTER SCHEMA {exact}é OWNER TO u", read="vertica")
+    with pytest.raises(ParseError):
+        parse_one(f"ALTER SCHEMA s OWNER TO {exact}é", read="vertica")
+    with pytest.raises(ParseError):
+        parse_one("ALTER SCHEMA SELECT OWNER TO u", read="vertica")
+
+    surrogate = chr(0xD800)
+    with pytest.raises(UnsupportedError):
+        _strict(
+            vexp.DropSchemas(
+                this=exp.Table(this=exp.to_identifier(surrogate, quoted=True)),
+                kind="SCHEMA",
+            )
+        )
+
+
+@pytest.mark.parametrize("dialect", ["postgres", "duckdb", "mysql", "sqlite"])
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER SCHEMA s DEFAULT INCLUDE SCHEMA PRIVILEGES",
+        "ALTER SCHEMA s OWNER TO u CASCADE",
+        "ALTER SCHEMA s DISK_QUOTA '1G'",
+        "ALTER SCHEMA s DISK_QUOTA SET NULL",
+        "ALTER SCHEMA a, b RENAME TO x, y",
+        "DROP SCHEMA IF EXISTS s, old_s CASCADE",
+    ],
+)
+def test_schema_lifecycle_roots_fail_atomically_in_foreign_dialects(sql: str, dialect: str) -> None:
+    with pytest.raises((UnsupportedError, ValueError)):
+        parse_one(sql, read="vertica").sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        vexp.AlterSchema(this=_schema("s"), kind="TABLE", actions=[]),
+        vexp.AlterSchema(this=exp.to_identifier("s"), kind="SCHEMA", actions=[]),
+        vexp.AlterSchema(this=exp.to_table("db.s.extra"), kind="SCHEMA", actions=[]),
+        vexp.AlterSchema(this=_schema("s"), kind="SCHEMA", actions=[]),
+        vexp.AlterSchema(
+            this=_schema("s"),
+            kind="SCHEMA",
+            actions=vexp.SchemaOwnerToAction(this=exp.to_identifier("u")),
+        ),
+        vexp.AlterSchema(
+            this=_schema("s"),
+            expressions={},
+            kind="SCHEMA",
+            actions=[vexp.SchemaOwnerToAction(this=exp.to_identifier("u"))],
+        ),
+        vexp.AlterSchema(
+            this=_schema("s"),
+            expressions=[_schema("t")],
+            kind="SCHEMA",
+            actions=[vexp.SchemaOwnerToAction(this=exp.to_identifier("u"))],
+        ),
+        vexp.AlterSchema(
+            this=_schema("s"),
+            kind="SCHEMA",
+            actions=[vexp.SchemaRenameAction(expressions=[])],
+        ),
+        vexp.AlterSchema(
+            this=_schema("s", "ns"),
+            kind="SCHEMA",
+            actions=[vexp.SchemaRenameAction(expressions=[_schema("s", "other")])],
+        ),
+        vexp.AlterSchema(
+            this=_schema("s"),
+            kind="SCHEMA",
+            actions=[vexp.SchemaPrivilegeAction(include="yes")],
+        ),
+        vexp.AlterSchema(
+            this=_schema("s"),
+            kind="SCHEMA",
+            actions=[vexp.SchemaOwnerToAction(this=exp.to_identifier("u"), cascade="yes")],
+        ),
+        vexp.AlterSchema(
+            this=_schema("s"),
+            kind="SCHEMA",
+            actions=[vexp.SchemaDiskQuotaAction(this=exp.Literal.string("1P"))],
+        ),
+        vexp.DropSchemas(kind="SCHEMA"),
+        vexp.DropSchemas(this=exp.to_identifier("s"), kind="SCHEMA"),
+        vexp.DropSchemas(this=_schema("s"), expressions={}, kind="SCHEMA"),
+        vexp.DropSchemas(this=_schema("s"), kind="SCHEMA", exists="yes"),
+        vexp.DropSchemas(this=_schema("s"), kind="SCHEMA", cascade=True, restrict=True),
+    ],
+)
+def test_malformed_programmatic_schema_asts_fail_atomically(expression: exp.Expr) -> None:
+    with pytest.raises(UnsupportedError):
+        _strict(expression)
+
+
+def test_detached_schema_actions_fail_in_foreign_dialects() -> None:
+    leaves: tuple[exp.Expr, ...] = (
+        vexp.SchemaPrivilegeAction(include=True),
+        vexp.SchemaOwnerToAction(this=exp.to_identifier("u"), cascade=True),
+        vexp.SchemaDiskQuotaAction(this=exp.Literal.string("1G")),
+        vexp.SchemaDiskQuotaAction(this=exp.Null()),
+        vexp.SchemaRenameAction(expressions=[_schema("x")]),
+    )
+    for leaf in leaves:
+        assert _strict(leaf)
+        for dialect in ("postgres", "duckdb", "mysql", "sqlite"):
+            with pytest.raises((UnsupportedError, ValueError)):
+                leaf.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
+
+
 @pytest.mark.parametrize(
     ("sql", "action_type"),
     [

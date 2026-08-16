@@ -660,6 +660,40 @@ class DefaultInheritedPrivilegesProperty(InheritedPrivilegesProperty):
     """Default privilege inheritance policy for new objects in a schema."""
 
 
+class SchemaPrivilegeAction(exp.Expression):
+    """Change the default inherited-privilege policy for a schema."""
+
+    arg_types: t.ClassVar = {"include": True}
+
+
+class SchemaOwnerToAction(exp.Expression):
+    """Transfer schema ownership, optionally cascading to contained objects."""
+
+    arg_types: t.ClassVar = {"this": True, "cascade": False}
+
+
+class SchemaDiskQuotaAction(exp.Expression):
+    """Set or remove a schema disk quota."""
+
+    arg_types: t.ClassVar = {"this": True}
+
+
+class SchemaRenameAction(exp.Expression):
+    """Ordered target-name list for an equal-cardinality schema rename."""
+
+    arg_types: t.ClassVar = {"expressions": True}
+
+
+class AlterSchema(exp.Alter):
+    """Alter one or more Vertica schemas with exactly one typed action."""
+
+    arg_types: t.ClassVar = {**exp.Alter.arg_types, "expressions": False}
+
+
+class DropSchemas(exp.Drop):
+    """Drop one or more Vertica schemas with one dependency policy."""
+
+
 class ViewOwnerToAction(exp.Expression):
     """Transfer ownership of a view to one user."""
 
