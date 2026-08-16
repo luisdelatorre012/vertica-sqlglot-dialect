@@ -90,9 +90,14 @@ task may be `IN_PROGRESS`.
 7. Update the coverage matrix, roadmap, sources, architecture, and changelog as
    applicable. Change this task to `DONE`, update the dashboard, and add a short
    completion record with test counts and any deliberate boundary.
-8. Stage only the selected task and its plan/status updates. Commit locally with
-   the exact listed title. Stop immediately after the commit.
-9. If completion is genuinely impossible, set `BLOCKED`, document the exact
+8. Run the versioned pre-commit suite over the entire repository. If a fixer
+   changes files, inspect the diff, restage only task files, rerun affected tests
+   and the hook suite, and do not proceed until it is clean.
+9. Stage only the selected task and its plan/status updates. Commit locally with
+   the exact listed title so the installed code-quality and commit-message hooks
+   execute. Never use `--no-verify`, `SKIP`, or another hook bypass. Stop
+   immediately after the commit.
+10. If completion is genuinely impossible, set `BLOCKED`, document the exact
    repeated blocker and evidence, commit the status/docs if useful, and stop.
    Never skip ahead automatically.
 
@@ -153,6 +158,7 @@ Every feature task must complete all applicable checks:
 7. Full default-runtime suite with branch coverage at or above 90%:
 
    ```console
+   .venv/Scripts/python -m pre_commit run --all-files --show-diff-on-failure
    .venv/Scripts/python -m pytest --cov
    .venv/Scripts/python -m ruff check .
    .venv/Scripts/python -m ruff format --check .

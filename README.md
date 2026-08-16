@@ -61,11 +61,24 @@ tree = parse_one("SELECT 1", read=Vertica)
 ```console
 python -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev]"
+.venv/Scripts/python -m pre_commit install --install-hooks
+.venv/Scripts/python -m pre_commit run --all-files --show-diff-on-failure
 .venv/Scripts/python -m pytest
 .venv/Scripts/ruff check .
 .venv/Scripts/ruff format --check .
 .venv/Scripts/mypy src
 ```
+
+On POSIX systems, replace `.venv/Scripts` with `.venv/bin`. The installed hooks
+run repository hygiene and safety checks, Ruff autofixes and formatting, strict
+mypy, and [Conventional Commits](https://www.conventionalcommits.org/) message
+validation. Commit without `--no-verify`; if a hook fixes a file, review the
+change, restage it, and rerun the checks before retrying the commit.
+
+The full coverage, multi-version, build, and installed-wheel checks remain in
+the documented agent release gate and CI. Hook revisions are frozen to immutable
+commits; maintainers can update them deliberately with
+`python -m pre_commit autoupdate --freeze`.
 
 The coverage matrix distinguishes semantic support from lossless command
 preservation. “Preserved” means SQLGlot retains a statement as a command but

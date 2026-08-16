@@ -68,3 +68,6 @@ plugin interface.
 - Added a versioned coverage matrix, architecture contract, primary-source
   index, strict typing/linting, multi-version CI, coverage gates, and isolated
   wheel discovery and custom-AST smoke tests.
+- Added frozen, cross-platform pre-commit hooks for repository hygiene, syntax
+  and secret checks, Ruff, strict mypy, and Conventional Commit messages, with
+  matching Linux and Windows CI enforcement and mandatory agent policy.
