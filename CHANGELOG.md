@@ -63,6 +63,10 @@ plugin interface.
   REVOKE targets with exact privilege, target-cardinality, qualification,
   grant-option, EXTEND, cascade, identifier, and foreign-generation contracts;
   existing factory-UDx overload signatures remain typed and unchanged.
+- Added semantic CREATE/ALTER/DROP ACCESS POLICY lifecycle statements with
+  shared row/column targets, traversable policy expressions, expression/state
+  modification and COPY actions, strict qualification and identifier checks,
+  and atomic foreign-generation failure.
 - Added semantic classic and workload routing-rule lifecycle, every documented
   ALTER action, exact session workload/resource-pool assignment, SHOW workload
   controls, and canonical `ON ROUTING RULE` privilege alias handling.

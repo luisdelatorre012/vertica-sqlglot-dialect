@@ -544,6 +544,51 @@ class CommentOn(exp.Comment):
     }
 
 
+class AccessPolicyTarget(exp.Expression):
+    """A table's row policy or one column policy."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "column": False,
+        "rows": True,
+    }
+
+
+class CreateAccessPolicy(exp.Create):
+    """Create one row or column access policy with a traversable expression."""
+
+    arg_types: t.ClassVar = {
+        **exp.Create.arg_types,
+        "this": True,
+        "expression": True,
+        "grant_trusted": False,
+        "enabled": True,
+    }
+
+
+class AlterAccessPolicy(exp.Alter):
+    """Replace, change state, or copy one row or column access policy."""
+
+    arg_types: t.ClassVar = {
+        **exp.Alter.arg_types,
+        "this": True,
+        "actions": False,
+        "expression": False,
+        "grant_trusted": False,
+        "enabled": False,
+        "copy_to": False,
+    }
+
+
+class DropAccessPolicy(exp.Drop):
+    """Drop one row or column access policy."""
+
+    arg_types: t.ClassVar = {
+        **exp.Drop.arg_types,
+        "this": True,
+    }
+
+
 class ProjectionColumn(exp.Expression):
     """A column declaration in a Vertica projection definition."""
 

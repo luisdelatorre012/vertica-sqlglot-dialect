@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P13 — Administrative privilege targets**.
-- Next eligible tasks are selected by dependency and numeric order; P14 is the
+- Completed through **P14 — Access-policy lifecycle**.
+- Next eligible tasks are selected by dependency and numeric order; P15 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -65,7 +65,7 @@ task may be `IN_PROGRESS`.
 | P11 | DONE   | VIEW lifecycle                                | P10                 | `feat: complete semantic view lifecycle`                |
 | P12 | DONE   | SCHEMA lifecycle                              | P11                 | `feat: complete semantic schema lifecycle`              |
 | P13 | DONE   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
-| P14 | TODO   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
+| P14 | DONE   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | TODO   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
 | P16 | TODO   | Native flexible-table definition form         | P15                 | `feat: model native flexible table definitions`         |
 | P17 | TODO   | Flexible-table CTAS                           | P16                 | `feat: model flexible table ctas`                       |
@@ -432,7 +432,7 @@ and 3.15.0rc1 suites each passed 4493 tests, with 3.15 treating deprecations as
 errors. Ruff, formatting, strict mypy, sdist/wheel build, clean force-install,
 `pip check`, and installed-wheel entry-point/KEY GRANT round-trip smoke passed.
 
-### P14 — access-policy lifecycle — `TODO`
+### P14 — access-policy lifecycle — `DONE`
 
 **Outcome.** Add semantic CREATE/ALTER/DROP ACCESS POLICY roots with traversable
 targets and expressions.
@@ -450,7 +450,27 @@ volatility, permissions, and runtime evaluation.
 [ALTER ACCESS POLICY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-access-policy/),
 and [DROP ACCESS POLICY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-access-policy/).
 
-**Completion record.** Pending.
+**Completion record.** Added atomic `CreateAccessPolicy`, `AlterAccessPolicy`,
+and `DropAccessPolicy` roots around a shared row/column `AccessPolicyTarget`,
+with traversable policy expressions, explicit trust/state fields, a distinct
+COPY destination, exact table qualification, strict 128-byte identifier
+validation, serialization, optimizer/type traversal, and direct/nested atomic
+foreign failure. The parser prevents policy expressions from consuming
+trailing actions and rejects malformed tails, statement modifiers, quoted or
+non-ASCII compound object keywords, invalid expression shapes, and malformed
+programmatic nodes across strict parser/generator modes. Re-opened 26.2 sources
+contain two material conflicts: the ALTER prose/examples omit `GRANT TRUSTED`
+although the formal grammar requires it, and the management guide shows a
+schema-qualified COPY destination although the formal ALTER and DROP grammars
+use unqualified table targets. Per the plan's source policy, the formal grammar
+is enforced; catalog target type/existence, ownership, permissions, expression
+volatility and UDTF behavior, and runtime evaluation remain server checks. The
+focused P14 suite passed 169 tests. The default CPython 3.12.6 gate passed 4666
+tests at 93.16% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 4666 tests, with
+3.15 treating deprecations as errors. Ruff, formatting, strict mypy,
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+entry-point/CREATE ACCESS POLICY round-trip smoke passed.
 
 ### P15 — ordinary constraint conformance — `TODO`
 

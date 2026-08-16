@@ -127,6 +127,10 @@ called out in code review.
 
 ## Security assignments
 
+- [CREATE ACCESS POLICY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-access-policy/)
+- [ALTER ACCESS POLICY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-access-policy/)
+- [DROP ACCESS POLICY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-access-policy/)
+- [Managing access policies](https://docs.vertica.com/26.2.x/en/admin/db-users-and-privileges/column-access-policies/managing-access-policies/)
 - [GRANT statement family](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/)
 - [GRANT authentication](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-authentication/)
 - [GRANT data loader](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-data-loader/)

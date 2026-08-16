@@ -297,6 +297,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AccessRankColumnConstraint: lambda self, expression: (
             f"ACCESSRANK {self.sql(expression, 'this')}"
         ),
+        vexp.AccessPolicyTarget: lambda self, expression: self.accesspolicytarget_sql(expression),
         vexp.AtEpochProperty: lambda self, expression: self.atepochproperty_sql(expression),
         vexp.AuthenticationGrant: lambda self, expression: self.authenticationgrant_sql(expression),
         vexp.AuthenticationRevoke: lambda self, expression: self.authenticationrevoke_sql(
@@ -313,6 +314,7 @@ class VerticaGenerator(PostgresGenerator):
         ),
         vexp.AuthenticationSet: lambda self, expression: self.authenticationset_sql(expression),
         vexp.AlterAuthentication: lambda self, expression: self.alterauthentication_sql(expression),
+        vexp.AlterAccessPolicy: lambda self, expression: self.alteraccesspolicy_sql(expression),
         vexp.AlterLoadBalanceGroup: lambda self, expression: self.alterloadbalancegroup_sql(
             expression
         ),
@@ -325,6 +327,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AlterUser: lambda self, expression: self.alteruser_sql(expression),
         vexp.AlterView: lambda self, expression: self.alterview_sql(expression),
         vexp.CreateDirectedQuery: lambda self, expression: self.createdirectedquery_sql(expression),
+        vexp.CreateAccessPolicy: lambda self, expression: self.createaccesspolicy_sql(expression),
         vexp.CreateAuthentication: lambda self, expression: self.createauthentication_sql(
             expression
         ),
@@ -385,6 +388,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.DropExternalProcedure: lambda self, expression: self.dropexternalprocedure_sql(
             expression
         ),
+        vexp.DropAccessPolicy: lambda self, expression: self.dropaccesspolicy_sql(expression),
         vexp.DropAuthentication: lambda self, expression: self.dropauthentication_sql(expression),
         vexp.DropLibrary: lambda self, expression: self.droplibrary_sql(expression),
         vexp.DropLoadBalanceGroup: lambda self, expression: self.droploadbalancegroup_sql(
@@ -3664,6 +3668,139 @@ class VerticaGenerator(PostgresGenerator):
 
     def routinesignature_sql(self, expression: vexp.RoutineSignature) -> str:
         return f"{self.sql(expression, 'this')}({self.expressions(expression, flat=True)})"
+
+    def accesspolicytarget_sql(self, expression: vexp.AccessPolicyTarget) -> str:
+        table = self._validate_access_policy_table(
+            expression.args.get("this"), "ACCESS POLICY target", maximum_parts=3
+        )
+        if self._has_access_policy_extras(expression, {"this", "column", "rows"}):
+            self.unsupported("Vertica ACCESS POLICY targets contain unsupported fields")
+        rows = expression.args.get("rows")
+        column = expression.args.get("column")
+        if not isinstance(rows, bool):
+            self.unsupported("Vertica ACCESS POLICY target rows flag must be boolean")
+        if rows is True:
+            if column is not None:
+                self.unsupported("Vertica row ACCESS POLICY targets cannot name a column")
+            return f"{table} FOR ROWS"
+        if not isinstance(column, exp.Identifier):
+            self.unsupported("Vertica column ACCESS POLICY targets require a column")
+        else:
+            self._validate_user_identifier(column, "ACCESS POLICY column")
+        return f"{table} FOR COLUMN {self.sql(column)}"
+
+    def createaccesspolicy_sql(self, expression: vexp.CreateAccessPolicy) -> str:
+        if self._has_access_policy_extras(
+            expression, {"this", "expression", "kind", "grant_trusted", "enabled"}
+        ):
+            self.unsupported("CREATE ACCESS POLICY contains unsupported CREATE fields")
+        self._validate_access_policy_kind(expression)
+        target = expression.args.get("this")
+        if not isinstance(target, vexp.AccessPolicyTarget):
+            self.unsupported("CREATE ACCESS POLICY requires a structured target")
+        target_sql = self.sql(target)
+        policy = expression.args.get("expression")
+        policy_sql = self._access_policy_expression_sql(policy, "CREATE ACCESS POLICY")
+        trusted = expression.args.get("grant_trusted")
+        if not isinstance(trusted, bool):
+            self.unsupported("CREATE ACCESS POLICY GRANT TRUSTED flag must be boolean")
+        enabled = expression.args.get("enabled")
+        if not isinstance(enabled, bool):
+            self.unsupported("CREATE ACCESS POLICY state must be ENABLE or DISABLE")
+        rows = isinstance(target, vexp.AccessPolicyTarget) and target.args.get("rows") is True
+        expression_clause = f"WHERE {policy_sql}" if rows else policy_sql
+        clauses = [f"CREATE ACCESS POLICY ON {target_sql}", expression_clause]
+        if trusted is True:
+            clauses.append("GRANT TRUSTED")
+        clauses.append("ENABLE" if enabled is True else "DISABLE")
+        return self.sep().join(clauses)
+
+    def alteraccesspolicy_sql(self, expression: vexp.AlterAccessPolicy) -> str:
+        if self._has_access_policy_extras(
+            expression,
+            {"this", "expression", "kind", "grant_trusted", "enabled", "copy_to"},
+        ):
+            self.unsupported("ALTER ACCESS POLICY contains unsupported ALTER fields")
+        self._validate_access_policy_kind(expression)
+        target = expression.args.get("this")
+        if not isinstance(target, vexp.AccessPolicyTarget):
+            self.unsupported("ALTER ACCESS POLICY requires a structured target")
+        target_sql = self.sql(target)
+
+        copy_to = expression.args.get("copy_to")
+        policy = expression.args.get("expression")
+        trusted = expression.args.get("grant_trusted")
+        enabled = expression.args.get("enabled")
+        if copy_to is not None:
+            if (
+                policy is not None
+                or not (trusted is None or trusted is False)
+                or enabled is not None
+            ):
+                self.unsupported("ALTER ACCESS POLICY COPY cannot include modification fields")
+            destination = self._validate_access_policy_table(
+                copy_to, "ALTER ACCESS POLICY COPY destination", maximum_parts=1
+            )
+            return f"ALTER ACCESS POLICY ON {target_sql} COPY TO TABLE {destination}"
+
+        if trusted is not True:
+            self.unsupported("ALTER ACCESS POLICY modification requires GRANT TRUSTED")
+        if not isinstance(enabled, bool):
+            self.unsupported("ALTER ACCESS POLICY state must be ENABLE or DISABLE")
+        clauses = [f"ALTER ACCESS POLICY ON {target_sql}"]
+        if policy is not None:
+            policy_sql = self._access_policy_expression_sql(policy, "ALTER ACCESS POLICY")
+            rows = isinstance(target, vexp.AccessPolicyTarget) and target.args.get("rows") is True
+            clauses.append(f"WHERE {policy_sql}" if rows else policy_sql)
+        clauses.extend(("GRANT TRUSTED", "ENABLE" if enabled is True else "DISABLE"))
+        return self.sep().join(clauses)
+
+    def dropaccesspolicy_sql(self, expression: vexp.DropAccessPolicy) -> str:
+        if self._has_access_policy_extras(expression, {"this", "kind"}):
+            self.unsupported("DROP ACCESS POLICY does not support DROP modifiers")
+        self._validate_access_policy_kind(expression)
+        target = expression.args.get("this")
+        if not isinstance(target, vexp.AccessPolicyTarget):
+            self.unsupported("DROP ACCESS POLICY requires a structured target")
+        else:
+            self._validate_access_policy_table(
+                target.args.get("this"), "DROP ACCESS POLICY target", maximum_parts=1
+            )
+        return f"DROP ACCESS POLICY ON {self.sql(target)}"
+
+    def _validate_access_policy_kind(
+        self, expression: vexp.CreateAccessPolicy | vexp.AlterAccessPolicy | vexp.DropAccessPolicy
+    ) -> None:
+        if expression.args.get("kind") != "ACCESS POLICY":
+            self.unsupported("Vertica access-policy roots require kind ACCESS POLICY")
+
+    def _validate_access_policy_table(
+        self, value: object, label: str, *, maximum_parts: int
+    ) -> str:
+        if not isinstance(value, exp.Table) or not 1 <= len(value.parts) <= maximum_parts:
+            self.unsupported(f"{label} has invalid table qualification")
+            return self.sql(value) if isinstance(value, exp.Expr) else ""
+        if self._has_access_policy_extras(value, {"this", "db", "catalog"}):
+            self.unsupported(f"{label} cannot use aliases or table modifiers")
+        for part in value.parts:
+            self._validate_user_identifier(part, label)
+        return self.sql(value)
+
+    @staticmethod
+    def _has_access_policy_extras(expression: exp.Expr, allowed: set[str]) -> bool:
+        return any(key not in allowed for key in expression.args)
+
+    def _access_policy_expression_sql(self, value: object, label: str) -> str:
+        if not isinstance(value, exp.Expr) or isinstance(value, exp.Query):
+            self.unsupported(f"{label} requires a scalar policy expression")
+            return self.sql(value) if isinstance(value, exp.Expr) else ""
+        if any(node.error_messages() for node in value.walk()):
+            self.unsupported(f"{label} has a malformed policy expression")
+        if any(value.find(kind) for kind in (exp.Select, exp.Subquery, exp.AggFunc, exp.Window)):
+            self.unsupported(
+                f"{label} expressions do not support subqueries, aggregates, or analytics"
+            )
+        return self.sql(value)
 
     def commentconstrainttarget_sql(self, expression: vexp.CommentConstraintTarget) -> str:
         constraint = expression.args.get("this")

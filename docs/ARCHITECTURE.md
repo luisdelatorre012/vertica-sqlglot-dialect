@@ -196,6 +196,19 @@ a named principal is a user or role remain server checks. Existing typed UDx
 routine signatures and their empty, named, and typed argument forms are
 unchanged.
 
+Access-policy lifecycle statements use atomic `CreateAccessPolicy`,
+`AlterAccessPolicy`, and `DropAccessPolicy` roots around a shared
+`AccessPolicyTarget`. The target preserves the table plus the exclusive row or
+column selector, while CREATE and expression-replacing ALTER actions retain the
+policy expression as a traversable child. ALTER also distinguishes policy
+modification from `COPY TO TABLE`, and each root validates exact qualification,
+state, `GRANT TRUSTED`, and modifier contracts during parsing and generation.
+The formal 26.2 ALTER grammar is authoritative where its prose examples omit
+`GRANT TRUSTED`; likewise, the formal COPY and DROP productions restrict their
+destination or source table to one part. Policy target existence and type,
+expression volatility and user-defined transform behavior, ownership,
+permissions, and runtime evaluation remain catalog or server concerns.
+
 Load-balance-group roots follow the same atomic statement policy. A
 `LoadBalanceGroupSpec` keeps its ADDRESS, FAULT GROUP, or SUBCLUSTER members,
 optional policy, and required branch-specific filter traversable; a separate

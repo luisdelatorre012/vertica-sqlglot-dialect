@@ -81,6 +81,7 @@ Status meanings:
 | Role and authentication `GRANT` / `REVOKE` | Semantic | Compound role/grantee lists, admin-option revocation, cascade, and authentication associations use dedicated AST nodes |
 | Role lifecycle | Semantic | Canonical `CREATE`, rename, and single-target `DROP`; atomic custom AST for comma-separated drops; exact unqualified-name and option validation |
 | User, profile, and authentication lifecycle | Partial | The non-secret USER core is semantic, including ordered CREATE/ALTER `PROFILE`, global/subcluster `RESOURCE POOL`, grace/idle/runtime intervals, scoped connection limits, memory/temp-space caps, CREATE/ALTER `SEARCH_PATH`, ALTER-only `SECURITY_ALGORITHM`, isolated `DEFAULT ROLE`, `TOTPSECRET RESET`, value-free configuration CLEAR, and a five-parameter depot-only SET allowlist; PROFILE CREATE/ALTER/DROP is semantic with all 15 ordered policy settings, numeric/`UNLIMITED` values, ALTER-only `DEFAULT` resets and rename, and ordered dependency drops. AUTHENTICATION CREATE/ALTER/DROP is semantic for finite methods, LOCAL/HOST TLS matching, enable/disable, rename, lexical nonnegative priority, Boolean MFA state, fallthrough state, single-target dependency drops, and the closed non-secret `validate_type`/`jit_enabled` SET domains; all other SET values remain sanitized |
+| Access-policy lifecycle | Semantic | CREATE, expression/state ALTER, COPY, and DROP use atomic roots with a shared row/column target and traversable policy expressions; exact qualification, `GRANT TRUSTED`, state, modifier, identifier, and foreign-generation contracts are enforced |
 | Resource-pool lifecycle | Semantic | Ordered typed parameters, `DEFAULT`/`NONE`/`AUTO`/`HOLD` sentinels, named/current subcluster selectors, and CREATE/ALTER/DROP restrictions use dedicated AST roots |
 | Load-balance-group lifecycle | Semantic | Address, fault-group, and subcluster member specifications, mandatory filters, selection policies, every ALTER action, and dependency-cascading DROP use typed ASTs with atomic foreign failure |
 | Network-address lifecycle | Semantic | Fixed-order node/address/port/state creation, rename/endpoint/state ALTER actions, and postfix `IF EXISTS`/`CASCADE` DROP use typed ASTs; NETWORK INTERFACE remains intentionally opaque and distinct |
@@ -163,6 +164,11 @@ Some rules require information that a syntax-only dialect does not have:
   provenance, and activation effects require the Vertica catalog. The dialect
   validates statement grammar, target cardinality, nonempty query structure,
   and constant-annotation placement only.
+- Access-policy target existence and object type, ownership, permissions,
+  expression volatility, user-defined transform behavior, and runtime policy
+  evaluation require catalog or server state. The dialect enforces the formal
+  26.2 statement grammar, deterministic expression restrictions, qualification,
+  and identifier shape only.
 
 These boundaries are tested either with explicit syntax-negative fixtures or a
 documented server-negative corpus. The parser does not pretend to perform

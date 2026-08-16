@@ -180,6 +180,23 @@ class VerticaParser(PostgresParser):
         "TLS CONFIGURATION",
         "WORKLOAD",
     }
+    ACCESS_POLICY_KEYWORD_TOKEN_TYPES: t.ClassVar = {
+        "ACCESS": TokenType.VAR,
+        "COLUMN": TokenType.COLUMN,
+        "COPY": TokenType.COPY,
+        "DISABLE": TokenType.VAR,
+        "ENABLE": TokenType.VAR,
+        "FOR": TokenType.FOR,
+        "GRANT": TokenType.GRANT,
+        "IF": TokenType.VAR,
+        "ON": TokenType.ON,
+        "POLICY": TokenType.VAR,
+        "ROWS": TokenType.ROWS,
+        "TABLE": TokenType.TABLE,
+        "TO": TokenType.VAR,
+        "TRUSTED": TokenType.VAR,
+        "WHERE": TokenType.WHERE,
+    }
     ROUTING_RULE_OBJECT_BOUNDARIES: t.ClassVar = {
         "DATABASE",
         "DIRECTED",
@@ -3524,6 +3541,7 @@ class VerticaParser(PostgresParser):
         self._reject_prefixed_profile("CREATE", words)
         self._reject_prefixed_user("CREATE", words)
         self._reject_prefixed_authentication("CREATE", words)
+        self._reject_prefixed_access_policy("CREATE", words)
         unsupported_directed_prefixes = (
             ("IF", "NOT", "EXISTS", "DIRECTED", "QUERY"),
             ("TEMPORARY", "DIRECTED", "QUERY"),
@@ -3536,6 +3554,13 @@ class VerticaParser(PostgresParser):
 
         index = self._index
         replace = self._match_pair(TokenType.OR, TokenType.REPLACE)
+
+        if self._match_access_policy_object():
+            if replace:
+                self._raise_access_policy_error("CREATE ACCESS POLICY does not support OR REPLACE")
+            return self._parse_create_access_policy()
+        if self._curr.text.upper() == "ACCESS":
+            self._raise_access_policy_error("CREATE ACCESS must be followed by POLICY")
 
         if self._match_text_seq("DIRECTED"):
             if not self._match_text_seq("QUERY"):
@@ -3646,6 +3671,146 @@ class VerticaParser(PostgresParser):
             self.raise_error("CREATE OR REPLACE TABLE is not supported by Vertica")
 
         return self._parse_create_table(temporary=temporary, scope=scope)
+
+    def _reject_prefixed_access_policy(self, statement: str, words: list[str]) -> None:
+        prefixes = {
+            "CREATE": (
+                (),
+                ("OR", "REPLACE"),
+                ("IF", "NOT", "EXISTS"),
+                ("TEMPORARY",),
+                ("GLOBAL", "TEMPORARY"),
+                ("LOCAL", "TEMPORARY"),
+                ("MATERIALIZED",),
+            ),
+            "ALTER": ((),),
+            "DROP": ((), ("IF", "EXISTS"), ("TEMPORARY",)),
+        }[statement]
+        for prefix in prefixes:
+            expected = [*prefix, "ACCESS", "POLICY"]
+            if words[: len(expected)] != expected:
+                continue
+            access_index = self._index + len(prefix)
+            access, policy = self._tokens[access_index : access_index + 2]
+            if any(
+                token.token_type != TokenType.VAR or not token.text.isascii()
+                for token in (access, policy)
+            ):
+                self._raise_access_policy_error(
+                    f"{statement} ACCESS POLICY requires unquoted ASCII object keywords"
+                )
+            if prefix:
+                self._raise_access_policy_error(
+                    f"{statement} ACCESS POLICY does not support statement modifiers"
+                )
+            return
+
+    def _match_access_policy_object(self, *, advance: bool = True) -> bool:
+        return self._match_access_policy_keywords("ACCESS", "POLICY", advance=advance)
+
+    def _match_access_policy_keywords(self, *words: str, advance: bool = True) -> bool:
+        tokens = self._tokens[self._index : self._index + len(words)]
+        matched = len(tokens) == len(words) and all(
+            token.token_type == self.ACCESS_POLICY_KEYWORD_TOKEN_TYPES[word]
+            and token.text.isascii()
+            and token.text.upper() == word
+            for token, word in zip(tokens, words)
+        )
+        if matched and advance:
+            for _ in words:
+                self._advance()
+        return matched
+
+    def _parse_create_access_policy(self) -> vexp.CreateAccessPolicy:
+        if not self._match_access_policy_keywords("ON"):
+            self._raise_access_policy_error("CREATE ACCESS POLICY requires ON")
+        target = self._parse_access_policy_target("CREATE ACCESS POLICY", maximum_parts=3)
+
+        if target.args.get("rows") and not self._match_access_policy_keywords("WHERE"):
+            self._raise_access_policy_error("CREATE row ACCESS POLICY requires WHERE")
+        policy = self._parse_access_policy_expression("CREATE ACCESS POLICY")
+
+        grant_trusted = False
+        if self._match_access_policy_keywords("GRANT"):
+            if not self._match_access_policy_keywords("TRUSTED"):
+                self._raise_access_policy_error("ACCESS POLICY GRANT requires TRUSTED")
+            grant_trusted = True
+        enabled = self._parse_access_policy_state("CREATE ACCESS POLICY")
+        if self._curr:
+            self._raise_access_policy_error(
+                f"Unexpected CREATE ACCESS POLICY clause at {self._curr.text!r}"
+            )
+        return self.expression(
+            vexp.CreateAccessPolicy(
+                this=target,
+                expression=policy,
+                kind="ACCESS POLICY",
+                grant_trusted=grant_trusted,
+                enabled=enabled,
+            )
+        )
+
+    def _parse_access_policy_target(
+        self, statement: str, *, maximum_parts: int
+    ) -> vexp.AccessPolicyTarget:
+        table = self._parse_access_policy_table(statement, maximum_parts=maximum_parts)
+        if not self._match_access_policy_keywords("FOR"):
+            self._raise_access_policy_error(f"{statement} requires FOR COLUMN or FOR ROWS")
+        column = None
+        rows = False
+        if self._match_access_policy_keywords("COLUMN"):
+            column = self._parse_user_name_component(f"{statement} FOR COLUMN")
+        elif self._match_access_policy_keywords("ROWS"):
+            rows = True
+        else:
+            self._raise_access_policy_error(f"{statement} requires COLUMN or ROWS after FOR")
+        return self.expression(vexp.AccessPolicyTarget(this=table, column=column, rows=rows))
+
+    def _parse_access_policy_table(self, statement: str, *, maximum_parts: int) -> exp.Table:
+        table = self._parse_table_parts(schema=True)
+        if not isinstance(table, exp.Table) or not 1 <= len(table.parts) <= maximum_parts:
+            self._raise_access_policy_error(f"{statement} has invalid table qualification")
+        assert isinstance(table, exp.Table)
+        for part in table.parts:
+            if not isinstance(part, exp.Identifier):
+                self._raise_access_policy_error(f"{statement} has an invalid table name")
+            assert isinstance(part, exp.Identifier)
+            self._validate_user_name_component(part, f"{statement} table")
+        return table
+
+    def _parse_access_policy_expression(self, statement: str) -> exp.Expr:
+        error_count = len(self.errors)
+        policy = self._parse_disjunction()
+        if len(self.errors) != error_count:
+            self._raise_access_policy_error(f"{statement} has a malformed policy expression")
+        if policy is None:
+            self._raise_access_policy_error(f"{statement} requires a policy expression")
+        assert isinstance(policy, exp.Expr)
+        self._validate_access_policy_expression(policy, statement)
+        return policy
+
+    def _validate_access_policy_expression(self, policy: exp.Expr, statement: str) -> None:
+        if any(node.error_messages() for node in policy.walk()):
+            self._raise_access_policy_error(f"{statement} has a malformed policy expression")
+        if any(policy.find(kind) for kind in (exp.Select, exp.Subquery, exp.AggFunc, exp.Window)):
+            self._raise_access_policy_error(
+                f"{statement} expressions do not support subqueries, aggregates, or analytics"
+            )
+
+    def _parse_access_policy_state(self, statement: str) -> bool:
+        if self._match_access_policy_keywords("ENABLE"):
+            return True
+        if self._match_access_policy_keywords("DISABLE"):
+            return False
+        self._raise_access_policy_error(f"{statement} requires ENABLE or DISABLE")
+        return False
+
+    def _raise_access_policy_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
 
     def _parse_create_directed_query(self) -> vexp.CreateDirectedQuery:
         if not self._match_texts(("OPT", "OPTIMIZER", "CUSTOM")):
@@ -6121,10 +6286,15 @@ class VerticaParser(PostgresParser):
         self._reject_prefixed_profile("ALTER", words)
         self._reject_prefixed_user("ALTER", words)
         self._reject_prefixed_authentication("ALTER", words)
+        self._reject_prefixed_access_policy("ALTER", words)
         if self._curr.token_type == TokenType.TABLE and self._has_mixed_reorganize_action():
             self.raise_error(
                 "Mixed ALTER TABLE REORGANIZE action lists are not yet represented semantically"
             )
+        if self._match_access_policy_object():
+            return self._parse_alter_access_policy()
+        if self._curr.text.upper() == "ACCESS":
+            self._raise_access_policy_error("ALTER ACCESS must be followed by POLICY")
         if self._match_text_seq("ROLE"):
             return self._parse_alter_role()
         if self._match(TokenType.LOAD):
@@ -6175,6 +6345,55 @@ class VerticaParser(PostgresParser):
                 return self._parse_alter_table_partitioning(table)
         self._retreat(index)
         return super()._parse_alter()
+
+    def _parse_alter_access_policy(self) -> vexp.AlterAccessPolicy:
+        if not self._match_access_policy_keywords("ON"):
+            self._raise_access_policy_error("ALTER ACCESS POLICY requires ON")
+        target = self._parse_access_policy_target("ALTER ACCESS POLICY", maximum_parts=3)
+
+        if self._match_access_policy_keywords("COPY"):
+            if not self._match_access_policy_keywords("TO", "TABLE"):
+                self._raise_access_policy_error("ALTER ACCESS POLICY COPY requires TO TABLE")
+            copy_to = self._parse_access_policy_table(
+                "ALTER ACCESS POLICY COPY TO TABLE", maximum_parts=1
+            )
+            if self._curr:
+                self._raise_access_policy_error(
+                    f"Unexpected ALTER ACCESS POLICY COPY clause at {self._curr.text!r}"
+                )
+            return self.expression(
+                vexp.AlterAccessPolicy(
+                    this=target,
+                    kind="ACCESS POLICY",
+                    copy_to=copy_to,
+                )
+            )
+
+        policy = None
+        if target.args.get("rows"):
+            if self._match_access_policy_keywords("WHERE"):
+                policy = self._parse_access_policy_expression("ALTER ACCESS POLICY")
+        elif not self._match_access_policy_keywords("GRANT", advance=False):
+            policy = self._parse_access_policy_expression("ALTER ACCESS POLICY")
+
+        if not self._match_access_policy_keywords("GRANT", "TRUSTED"):
+            self._raise_access_policy_error(
+                "ALTER ACCESS POLICY modification requires GRANT TRUSTED"
+            )
+        enabled = self._parse_access_policy_state("ALTER ACCESS POLICY")
+        if self._curr:
+            self._raise_access_policy_error(
+                f"Unexpected ALTER ACCESS POLICY clause at {self._curr.text!r}"
+            )
+        return self.expression(
+            vexp.AlterAccessPolicy(
+                this=target,
+                expression=policy,
+                kind="ACCESS POLICY",
+                grant_trusted=True,
+                enabled=enabled,
+            )
+        )
 
     def _parse_alter_authentication(self) -> vexp.AlterAuthentication:
         target = self._parse_user_identifier("ALTER AUTHENTICATION")
@@ -7340,6 +7559,23 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_drop_access_policy(self, exists: bool) -> vexp.DropAccessPolicy:
+        if exists or self._match_access_policy_keywords("IF", advance=False):
+            self._raise_access_policy_error("DROP ACCESS POLICY does not support IF EXISTS")
+        if not self._match_access_policy_keywords("ON"):
+            self._raise_access_policy_error("DROP ACCESS POLICY requires ON")
+        target = self._parse_access_policy_target("DROP ACCESS POLICY", maximum_parts=1)
+        if self._curr:
+            self._raise_access_policy_error(
+                f"Unexpected DROP ACCESS POLICY clause at {self._curr.text!r}"
+            )
+        return self.expression(
+            vexp.DropAccessPolicy(
+                this=target,
+                kind="ACCESS POLICY",
+            )
+        )
+
     def _parse_drop(  # type: ignore[override]
         self, exists: bool = False
     ) -> exp.Drop | vexp.DirectedQueryAction | exp.Command:
@@ -7352,6 +7588,7 @@ class VerticaParser(PostgresParser):
         self._reject_prefixed_profile("DROP", words)
         self._reject_prefixed_user("DROP", words)
         self._reject_prefixed_authentication("DROP", words)
+        self._reject_prefixed_access_policy("DROP", words)
         lookahead = words[:3]
         if lookahead == ["IF", "EXISTS", "VIEW"]:
             self._raise_view_error("DROP VIEW IF EXISTS must follow VIEW")
@@ -7368,6 +7605,11 @@ class VerticaParser(PostgresParser):
             if exists or self._match_text_seq("IF", advance=False):
                 self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
             return self._parse_directed_query_action("DROP")
+
+        if self._match_access_policy_object():
+            return self._parse_drop_access_policy(exists=exists)
+        if self._curr.text.upper() == "ACCESS":
+            self._raise_access_policy_error("DROP ACCESS must be followed by POLICY")
 
         udx_kind = self._parse_user_defined_extension_kind("DROP")
         if udx_kind:

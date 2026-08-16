@@ -88,7 +88,10 @@ P1:
   AST, while credentials, arbitrary strings, and unknown values fail sanitized;
 - complete structured KEY, LIBRARY, DATA LOADER, and TLS CONFIGURATION GRANT/
   REVOKE targets with exact privilege, cardinality, qualification, option, and
-  cascade domains while retaining typed UDx overload signatures.
+  cascade domains while retaining typed UDx overload signatures;
+- add semantic CREATE/ALTER/DROP ACCESS POLICY lifecycle statements with
+  shared row/column targets, traversable expressions, exact state/trust and
+  copy/drop qualification rules, and atomic foreign failure.
 
 ## Phase 4 — maintenance and administration
 
