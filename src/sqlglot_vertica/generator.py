@@ -241,6 +241,7 @@ class VerticaGenerator(PostgresGenerator):
             expression
         ),
         vexp.AlterResourcePool: lambda self, expression: self.alterresourcepool_sql(expression),
+        vexp.AlterRoutingRule: lambda self, expression: self.alterroutingrule_sql(expression),
         vexp.AlterTablePartition: lambda self, expression: self.altertablepartition_sql(expression),
         vexp.CreateDirectedQuery: lambda self, expression: self.createdirectedquery_sql(expression),
         vexp.CreateExternalProcedure: lambda self, expression: self.createexternalprocedure_sql(
@@ -256,6 +257,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.CreateLibrary: lambda self, expression: self.createlibrary_sql(expression),
         vexp.CreateProjection: lambda self, expression: self.createprojection_sql(expression),
         vexp.CreateResourcePool: lambda self, expression: self.createresourcepool_sql(expression),
+        vexp.CreateRoutingRule: lambda self, expression: self.createroutingrule_sql(expression),
         vexp.CreateUserDefinedExtension: lambda self, expression: (
             self.createuserdefinedextension_sql(expression)
         ),
@@ -289,6 +291,7 @@ class VerticaGenerator(PostgresGenerator):
         ),
         vexp.DropLibrary: lambda self, expression: self.droplibrary_sql(expression),
         vexp.DropResourcePool: lambda self, expression: self.dropresourcepool_sql(expression),
+        vexp.DropRoutingRule: lambda self, expression: self.droproutingrule_sql(expression),
         vexp.DropRoles: lambda self, expression: self.droproles_sql(expression),
         vexp.DropUserDefinedExtension: lambda self, expression: self.dropuserdefinedextension_sql(
             expression
@@ -338,6 +341,9 @@ class VerticaGenerator(PostgresGenerator):
         ),
         vexp.RoleGrant: lambda self, expression: self.rolegrant_sql(expression),
         vexp.RoleRevoke: lambda self, expression: self.rolerevoke_sql(expression),
+        vexp.RoutingRuleAction: lambda self, expression: self.routingruleaction_sql(expression),
+        vexp.RoutingRuleSpec: lambda self, expression: self.routingrulespec_sql(expression),
+        vexp.RoutingRuleTarget: lambda self, expression: self.routingruletarget_sql(expression),
         vexp.RowAlias: lambda self, expression: self.rowalias_sql(expression),
         vexp.RoutineSignature: lambda self, expression: self.routinesignature_sql(expression),
         vexp.ResourcePoolKeyword: lambda self, expression: self.resourcepoolkeyword_sql(expression),
@@ -359,6 +365,8 @@ class VerticaGenerator(PostgresGenerator):
             f"SET SCHEMA {self.sql(expression, 'this')}"
         ),
         vexp.SetLiteral: lambda self, expression: f"SET[{self.expressions(expression, flat=True)}]",
+        vexp.SetSessionRouting: lambda self, expression: self.setsessionrouting_sql(expression),
+        vexp.ShowWorkload: lambda self, expression: self.showworkload_sql(expression),
         vexp.StatementTimestamp: lambda self, expression: "GETDATE()",
         vexp.StringUnit: lambda self, expression: self.stringunit_sql(expression),
         vexp.TableOptimizerHint: lambda self, expression: (
@@ -1151,6 +1159,259 @@ class VerticaGenerator(PostgresGenerator):
         subcluster = self.sql(expression, "subcluster")
         return f"{sql} {subcluster}" if subcluster else sql
 
+    def createroutingrule_sql(self, expression: vexp.CreateRoutingRule) -> str:
+        if expression.kind != "ROUTING RULE":
+            self.unsupported("CreateRoutingRule requires kind ROUTING RULE")
+        if self._has_statement_extras(expression, {"this", "kind", "route"}):
+            self.unsupported("CREATE ROUTING RULE does not support additional CREATE clauses")
+
+        name = expression.args.get("this")
+        if name is not None:
+            self._validate_routing_identifier(name, "CREATE ROUTING RULE name")
+        route = expression.args.get("route")
+        if not isinstance(route, vexp.RoutingRuleSpec):
+            self.unsupported("CREATE ROUTING RULE requires a structured route specification")
+            route_sql = self.sql(route)
+        else:
+            mode = self._routing_rule_mode(route)
+            if mode == "ADDRESS" and not isinstance(name, exp.Identifier):
+                self.unsupported("Classic CREATE ROUTING RULE requires a rule name")
+            route_sql = self.sql(route)
+
+        name_sql = f" {self.sql(name)}" if name is not None else ""
+        return f"CREATE ROUTING RULE{name_sql} {route_sql}"
+
+    def alterroutingrule_sql(self, expression: vexp.AlterRoutingRule) -> str:
+        if expression.kind != "ROUTING RULE":
+            self.unsupported("AlterRoutingRule requires kind ROUTING RULE")
+        if self._has_statement_extras(expression, {"this", "kind", "actions"}):
+            self.unsupported("ALTER ROUTING RULE does not support additional ALTER clauses")
+
+        target = expression.args.get("this")
+        if not isinstance(target, vexp.RoutingRuleTarget):
+            self.unsupported("ALTER ROUTING RULE requires a structured target")
+        actions = expression.actions
+        if len(actions) != 1:
+            self.unsupported("ALTER ROUTING RULE requires exactly one action")
+            action: exp.Expr | None = actions[0] if actions else None
+        else:
+            action = actions[0]
+
+        if isinstance(action, exp.AlterRename):
+            rename_target = action.args.get("this")
+            if self._has_statement_extras(action, {"this"}):
+                self.unsupported("ALTER ROUTING RULE RENAME requires one unqualified name")
+            self._validate_routing_identifier(rename_target, "ALTER ROUTING RULE RENAME")
+        elif not isinstance(action, vexp.RoutingRuleAction):
+            self.unsupported("ALTER ROUTING RULE requires a structured action")
+
+        action_sql = (
+            self.sql(action)
+            if isinstance(action, (exp.AlterRename, vexp.RoutingRuleAction))
+            else ""
+        )
+        return f"ALTER ROUTING RULE {self.sql(target)} {action_sql}"
+
+    def droproutingrule_sql(self, expression: vexp.DropRoutingRule) -> str:
+        if expression.kind != "ROUTING RULE":
+            self.unsupported("DropRoutingRule requires kind ROUTING RULE")
+        if self._has_statement_extras(expression, {"this", "kind", "exists"}):
+            self.unsupported("DROP ROUTING RULE does not support additional DROP clauses")
+
+        target = expression.args.get("this")
+        if not isinstance(target, vexp.RoutingRuleTarget):
+            self.unsupported("DROP ROUTING RULE requires one structured target")
+        exists_value = expression.args.get("exists")
+        if exists_value is not None and not isinstance(exists_value, bool):
+            self.unsupported("DropRoutingRule exists must be boolean")
+        exists = " IF EXISTS" if exists_value else ""
+        return f"DROP ROUTING RULE{exists} {self.sql(target)}"
+
+    def routingrulespec_sql(self, expression: vexp.RoutingRuleSpec) -> str:
+        if self._has_statement_extras(expression, {"mode", "this", "expressions", "priority"}):
+            self.unsupported("RoutingRuleSpec contains unsupported fields")
+        mode = self._routing_rule_mode(expression)
+        source = expression.args.get("this")
+        destinations = expression.expressions
+        priority = expression.args.get("priority")
+
+        if mode == "ADDRESS":
+            if not isinstance(source, exp.Literal) or not source.is_string:
+                self.unsupported("Classic routing rules require a quoted address range")
+            if len(destinations) != 1:
+                self.unsupported("Classic routing rules require exactly one unqualified group")
+            if priority is not None:
+                self.unsupported("Classic routing rules do not support PRIORITY")
+            destination = destinations[0] if destinations else None
+            self._validate_routing_identifier(destination, "Classic routing-rule group")
+            return f"ROUTE {self.sql(source)} TO {self.sql(destination)}"
+
+        if mode == "WORKLOAD":
+            self._validate_routing_identifier(source, "Workload routing-rule workload")
+            if not destinations:
+                self.unsupported("Workload routing rules require one or more subclusters")
+            for destination in destinations:
+                self._validate_routing_identifier(destination, "Workload routing-rule subcluster")
+            priority_sql = ""
+            if priority is not None:
+                self._validate_routing_rule_priority(priority)
+                priority_sql = f" PRIORITY {self.sql(priority)}"
+            return (
+                f"ROUTE WORKLOAD {self.sql(source)} TO SUBCLUSTER "
+                f"{self.expressions(expression, flat=True)}{priority_sql}"
+            )
+
+        self.unsupported("RoutingRuleSpec mode must be ADDRESS or WORKLOAD")
+        return f"ROUTE {self.sql(source)}"
+
+    def routingruletarget_sql(self, expression: vexp.RoutingRuleTarget) -> str:
+        if self._has_statement_extras(expression, {"this", "workload"}):
+            self.unsupported("RoutingRuleTarget contains unsupported fields")
+        target = expression.args.get("this")
+        self._validate_routing_identifier(target, "Routing-rule target")
+        workload = expression.args.get("workload")
+        if workload is not None and not isinstance(workload, bool):
+            self.unsupported("RoutingRuleTarget workload must be boolean")
+        prefix = "FOR WORKLOAD " if workload else ""
+        return f"{prefix}{self.sql(target)}"
+
+    def routingruleaction_sql(self, expression: vexp.RoutingRuleAction) -> str:
+        if self._has_statement_extras(expression, {"this", "expression", "expressions"}):
+            self.unsupported("RoutingRuleAction contains unsupported fields")
+        marker = expression.args.get("this")
+        if not isinstance(marker, exp.Var):
+            self.unsupported("RoutingRuleAction requires a typed action marker")
+            action = ""
+        else:
+            action = marker.name.upper()
+
+        scalar = expression.args.get("expression")
+        values = expression.expressions
+        scalar_actions = {"SET GROUP", "SET PRIORITY", "SET ROUTE", "SET WORKLOAD"}
+        list_actions = {"ADD SUBCLUSTER", "REMOVE SUBCLUSTER", "SET SUBCLUSTER"}
+        if action in scalar_actions:
+            if scalar is None or values:
+                self.unsupported(f"{action} requires exactly one value")
+            if action == "SET ROUTE":
+                if not isinstance(scalar, exp.Literal) or not scalar.is_string:
+                    self.unsupported("SET ROUTE requires a quoted address range")
+            elif action == "SET PRIORITY":
+                self._validate_routing_rule_priority(scalar)
+            else:
+                self._validate_routing_identifier(scalar, action)
+            return f"{action} TO {self.sql(scalar)}"
+
+        if action in list_actions:
+            if scalar is not None or not values:
+                self.unsupported(f"{action} requires one or more unqualified subclusters")
+            for value in values:
+                self._validate_routing_identifier(value, action)
+            separator = " TO " if action == "SET SUBCLUSTER" else " "
+            return f"{action}{separator}{self.expressions(expression, flat=True)}"
+
+        self.unsupported(f"Unsupported ALTER ROUTING RULE action: {action}")
+        return action
+
+    def setsessionrouting_sql(self, expression: vexp.SetSessionRouting) -> str:
+        if self._has_statement_extras(expression, {"expressions", "unset", "tag"}):
+            self.unsupported("SetSessionRouting contains unsupported SET fields")
+        for flag in ("unset", "tag"):
+            flag_value = expression.args.get(flag)
+            if flag_value is not None and not isinstance(flag_value, bool):
+                self.unsupported(f"SET SESSION routing {flag} must be boolean")
+            if flag_value:
+                self.unsupported("SET SESSION routing does not support UNSET or TAG")
+        if len(expression.expressions) != 1:
+            self.unsupported("SET SESSION routing requires exactly one assignment")
+        item = expression.expressions[0] if expression.expressions else None
+        if not isinstance(item, exp.SetItem) or item.args.get("kind") != "SESSION":
+            self.unsupported("SET SESSION routing requires one SESSION SetItem")
+            assignment = None
+        else:
+            if self._has_statement_extras(item, {"this", "kind"}):
+                self.unsupported("SET SESSION routing SetItem contains unsupported fields")
+            assignment = item.args.get("this")
+        if not isinstance(assignment, exp.EQ):
+            self.unsupported("SET SESSION routing requires a structured assignment")
+            left = None
+            value = None
+        else:
+            if self._has_statement_extras(assignment, {"this", "expression"}):
+                self.unsupported("SET SESSION routing assignment contains unsupported fields")
+            left = assignment.args.get("this")
+            value = assignment.args.get("expression")
+
+        if (
+            not isinstance(left, exp.Column)
+            or not isinstance(left.args.get("this"), exp.Identifier)
+            or len(left.parts) != 1
+        ):
+            self.unsupported("SET SESSION routing requires WORKLOAD or RESOURCE_POOL")
+            name = ""
+        else:
+            name = left.name.upper()
+
+        if isinstance(value, exp.Identifier):
+            self._validate_routing_identifier(value, f"SET SESSION {name} value")
+            if not value.quoted and value.name.upper() in {"DEFAULT", "NONE"}:
+                self.unsupported("SET SESSION routing sentinels require typed keyword nodes")
+            value_sql = self.sql(value)
+        elif isinstance(value, exp.Var) and value.name.upper() in {"DEFAULT", "NONE"}:
+            value_sql = value.name.upper()
+        else:
+            self.unsupported("SET SESSION routing values must be names, DEFAULT, or NONE")
+            value_sql = self.sql(value)
+
+        if name == "WORKLOAD":
+            return f"SET SESSION WORKLOAD TO {value_sql}"
+        if name == "RESOURCE_POOL":
+            if isinstance(value, exp.Var) and value.name.upper() == "NONE":
+                self.unsupported("SET SESSION RESOURCE_POOL does not support NONE")
+            return f"SET SESSION RESOURCE_POOL = {value_sql}"
+        self.unsupported("SET SESSION routing requires WORKLOAD or RESOURCE_POOL")
+        return f"SET SESSION {name} = {value_sql}"
+
+    def showworkload_sql(self, expression: vexp.ShowWorkload) -> str:
+        if self._has_statement_extras(expression, {"this", "available"}):
+            self.unsupported("SHOW WORKLOAD does not support additional SHOW clauses")
+        target = expression.args.get("this")
+        if not isinstance(target, exp.Var) or target.name.upper() != "WORKLOAD":
+            self.unsupported("ShowWorkload requires the WORKLOAD target")
+        available = expression.args.get("available")
+        if available is not None and not isinstance(available, bool):
+            self.unsupported("ShowWorkload available must be boolean")
+        return "SHOW AVAILABLE WORKLOADS" if available else "SHOW WORKLOAD"
+
+    @staticmethod
+    def _routing_rule_mode(expression: vexp.RoutingRuleSpec) -> str:
+        mode = expression.args.get("mode")
+        return mode.name.upper() if isinstance(mode, exp.Var) else ""
+
+    def _validate_routing_rule_priority(self, value: exp.Expr | None) -> None:
+        if not isinstance(value, exp.Literal) or not value.is_int or int(value.this) < 0:
+            self.unsupported("ROUTING RULE PRIORITY must be a nonnegative integer")
+
+    def _validate_routing_identifier(self, expression: object, label: str) -> None:
+        if not isinstance(expression, exp.Identifier) or not isinstance(expression.this, str):
+            self.unsupported(f"{label} requires an unqualified identifier")
+            return
+        if not expression.this:
+            self.unsupported(f"{label} requires a nonempty identifier")
+        elif not expression.quoted and not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_$]*", expression.this
+        ):
+            self.unsupported(f"{label} requires a safely quoted identifier")
+
+    @staticmethod
+    def _has_statement_extras(expression: exp.Expr, allowed: set[str]) -> bool:
+        for key, value in expression.args.items():
+            if key in allowed or value is None or value is False:
+                continue
+            if isinstance(value, (list, dict)) and not value:
+                continue
+            return True
+        return False
+
     def resourcepoolsubcluster_sql(self, expression: vexp.ResourcePoolSubcluster) -> str:
         name = expression.args.get("this")
         current = expression.args.get("current")
@@ -1445,10 +1706,19 @@ class VerticaGenerator(PostgresGenerator):
     ) -> None:
         kind = target.args.get("kind")
         privileges = expression.args.get("privileges") or []
-        if kind == "WORKLOAD" and (
-            expression.args.get("grant_option") or expression.args.get("cascade")
-        ):
-            self.unsupported("Vertica WORKLOAD privileges do not support grant options or CASCADE")
+        if isinstance(kind, str):
+            workload_kind = kind.strip().upper()
+        elif isinstance(kind, exp.Expr):
+            workload_kind = kind.name.strip().upper()
+            self.unsupported("Vertica privilege target kind must be a string")
+        else:
+            workload_kind = ""
+            if kind is not None:
+                self.unsupported("Vertica privilege target kind must be a string")
+        if workload_kind in {"ROUTING RULE", "WORKLOAD"}:
+            if kind != "WORKLOAD":
+                self.unsupported("Vertica workload privilege targets require canonical WORKLOAD")
+            self._validate_workload_security_generation(expression, target, grant)
 
         if (
             grant
@@ -1474,6 +1744,64 @@ class VerticaGenerator(PostgresGenerator):
         ):
             self.unsupported(f"Vertica {kind} privileges do not support EXTEND")
 
+    def _validate_workload_security_generation(
+        self,
+        expression: exp.Grant | exp.Revoke,
+        target: vexp.VerticaPrivilegeTarget,
+        grant: bool,
+    ) -> None:
+        allowed_root_args = {
+            "privileges",
+            "kind",
+            "securable",
+            "principals",
+            "grant_option",
+        }
+        if not grant:
+            allowed_root_args.add("cascade")
+        if self._has_statement_extras(expression, allowed_root_args):
+            self.unsupported("Vertica WORKLOAD privileges contain unsupported statement fields")
+        if expression.args.get("kind") is not None:
+            self.unsupported("Vertica WORKLOAD privileges do not accept an outer object kind")
+        grant_option = expression.args.get("grant_option")
+        if grant_option is not None and grant_option is not False:
+            self.unsupported("Vertica WORKLOAD privileges do not support grant options")
+        if not grant and expression.args.get("cascade") is not None:
+            self.unsupported("Vertica WORKLOAD REVOKE does not support CASCADE")
+
+        privileges = expression.args.get("privileges") or []
+        if len(privileges) != 1 or not isinstance(privileges[0], exp.GrantPrivilege):
+            self.unsupported("Vertica WORKLOAD privileges require exactly one USAGE privilege")
+        else:
+            privilege = privileges[0]
+            marker = privilege.args.get("this")
+            if (
+                self._has_statement_extras(privilege, {"this"})
+                or not isinstance(marker, exp.Var)
+                or marker.name.upper() != "USAGE"
+            ):
+                self.unsupported("Vertica WORKLOAD privileges require argument-free USAGE")
+
+        if self._has_statement_extras(target, {"kind", "expressions"}):
+            self.unsupported("Vertica WORKLOAD targets do not support qualifiers")
+        targets = target.expressions
+        if len(targets) != 1 or not isinstance(targets[0], exp.Table):
+            self.unsupported("Vertica WORKLOAD privileges require exactly one workload target")
+        else:
+            workload = targets[0]
+            if self._has_statement_extras(workload, {"this"}):
+                self.unsupported("Vertica WORKLOAD targets must be unqualified and unaliased")
+            self._validate_routing_identifier(workload.args.get("this"), "WORKLOAD target")
+
+        principals = expression.args.get("principals") or []
+        if len(principals) != 1 or not isinstance(principals[0], exp.GrantPrincipal):
+            self.unsupported("Vertica WORKLOAD privileges require exactly one principal")
+        else:
+            principal = principals[0]
+            if self._has_statement_extras(principal, {"this"}):
+                self.unsupported("Vertica WORKLOAD principals cannot use qualifiers")
+            self._validate_routing_identifier(principal.args.get("this"), "WORKLOAD principal")
+
     def extendedgrantprivilege_sql(self, expression: vexp.ExtendedGrantPrivilege) -> str:
         if not expression.args.get("extend") or expression.name.upper() != "ALL":
             self.unsupported("Vertica ExtendedGrantPrivilege requires ALL ... EXTEND")
@@ -1481,7 +1809,12 @@ class VerticaGenerator(PostgresGenerator):
         return f"ALL{privileges} EXTEND"
 
     def verticaprivilegetarget_sql(self, expression: vexp.VerticaPrivilegeTarget) -> str:
-        kind = expression.args.get("kind") or ""
+        kind_value = expression.args.get("kind")
+        if kind_value is not None and not isinstance(kind_value, str):
+            self.unsupported("Vertica privilege target kind must be a string")
+            kind = ""
+        else:
+            kind = kind_value or ""
         targets = self.expressions(expression, flat=True)
         target_count = len(expression.expressions)
         all_in_schema = expression.args.get("all_in_schema")

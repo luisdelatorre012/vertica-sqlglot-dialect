@@ -734,6 +734,67 @@ class DropResourcePool(exp.Drop):
     }
 
 
+class RoutingRuleSpec(exp.Expression):
+    """The source and destinations of one classic or workload routing rule."""
+
+    arg_types: t.ClassVar = {
+        "mode": True,
+        "this": True,
+        "expressions": True,
+        "priority": False,
+    }
+
+
+class RoutingRuleTarget(exp.Expression):
+    """A routing-rule name or a ``FOR WORKLOAD`` target."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "workload": False,
+    }
+
+
+class RoutingRuleAction(exp.Expression):
+    """A typed non-rename action in ``ALTER ROUTING RULE``."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": False,
+        "expressions": False,
+    }
+
+
+class CreateRoutingRule(exp.Create):
+    """Create a classic CIDR or workload-to-subcluster routing rule."""
+
+    arg_types: t.ClassVar = {
+        **exp.Create.arg_types,
+        "this": False,
+        "route": True,
+    }
+
+
+class AlterRoutingRule(exp.Alter):
+    """Apply exactly one typed change to a routing rule."""
+
+
+class DropRoutingRule(exp.Drop):
+    """Drop one named or workload routing rule."""
+
+
+class SetSessionRouting(exp.Set):
+    """Set the current session's workload or resource pool exactly."""
+
+
+class ShowWorkload(exp.Show):
+    """Show the current or available session workloads."""
+
+    arg_types: t.ClassVar = {
+        **exp.Show.arg_types,
+        "available": False,
+    }
+
+
 class ExtendedGrantPrivilege(exp.GrantPrivilege):
     """Vertica ``ALL [PRIVILEGES] EXTEND`` privilege semantics."""
 

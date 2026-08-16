@@ -54,11 +54,13 @@ Implemented P0:
   root for multi-role drops;
 - add ordered typed CREATE/ALTER/DROP RESOURCE POOL parameters, keyword
   sentinels, subcluster selectors, and syntax-level conflict validation.
+- add typed classic and workload routing-rule lifecycle statements, exact
+  session workload/resource-pool controls, SHOW workload commands, and the
+  documented `ON ROUTING RULE` grant alias.
 
 P1:
 
 - add USER, PROFILE, and AUTHENTICATION lifecycle statements;
-- add routing rules and canonical `SET SESSION WORKLOAD` generation;
 - expand privilege targets for UDx, data loaders, keys, libraries, and TLS
   configurations.
 

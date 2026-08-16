@@ -163,6 +163,27 @@ class VerticaParser(PostgresParser):
         "RESOURCE POOL",
         "WORKLOAD",
     }
+    ROUTING_RULE_OBJECT_BOUNDARIES: t.ClassVar = {
+        "DATABASE",
+        "DIRECTED",
+        "EXTERNAL",
+        "FLEX",
+        "FLEXIBLE",
+        "FUNCTION",
+        "INDEX",
+        "LIBRARY",
+        "MODEL",
+        "PROCEDURE",
+        "PROJECTION",
+        "RESOURCE",
+        "ROLE",
+        "SCHEMA",
+        "SEQUENCE",
+        "TABLE",
+        "TYPE",
+        "USER",
+        "VIEW",
+    }
 
     USER_DEFINED_EXTENSION_KINDS: t.ClassVar = (
         "AGGREGATE FUNCTION",
@@ -466,6 +487,129 @@ class VerticaParser(PostgresParser):
                 )
         return expression
 
+    def _parse_command(  # type: ignore[override]
+        self,
+    ) -> exp.Command | vexp.ShowWorkload:
+        if self._prev.token_type == TokenType.SHOW and self._curr.token_type == TokenType.STRING:
+            payload = self._curr.text
+            parsed_payload = self._show_workload_payload(payload)
+            if parsed_payload is not None:
+                normalized, payload_comments, leading_payload_comments = parsed_payload
+                if normalized in {"WORKLOAD", "AVAILABLE WORKLOADS"}:
+                    previous_comments = list(self._prev_comments or [])
+                    retained_previous = (
+                        previous_comments[:-leading_payload_comments]
+                        if leading_payload_comments
+                        else previous_comments
+                    )
+                    comments = [*retained_previous, *payload_comments]
+                    self._advance()
+                    return self.expression(
+                        vexp.ShowWorkload(
+                            this=exp.var("WORKLOAD"),
+                            available=normalized == "AVAILABLE WORKLOADS",
+                        ),
+                        comments=comments,
+                    )
+                malformed_prefix = next(
+                    (
+                        prefix
+                        for prefix in ("AVAILABLE WORKLOADS", "AVAILABLE WORKLOAD", "WORKLOAD")
+                        if normalized.startswith(prefix)
+                        and len(normalized) > len(prefix)
+                        and normalized[len(prefix)] not in "_$"
+                        and not normalized[len(prefix)].isalnum()
+                    ),
+                    None,
+                )
+                if normalized == "AVAILABLE WORKLOAD" or malformed_prefix:
+                    self.raise_error(f"Unsupported SHOW workload syntax: {payload}")
+            elif payload.upper().startswith(("WORKLOAD", "AVAILABLE WORKLOAD")):
+                self.raise_error(f"Unsupported SHOW workload syntax: {payload}")
+        return super()._parse_command()
+
+    @staticmethod
+    def _show_workload_payload(text: str) -> tuple[str, list[str], int] | None:
+        comments: list[str] = []
+        sql: list[str] = []
+        position = 0
+        leading_comments = 0
+        seen_sql = False
+        while position < len(text):
+            if text.startswith("/*", position):
+                end = text.find("*/", position + 2)
+                if end < 0:
+                    return None
+                comments.append(text[position + 2 : end])
+                if not seen_sql:
+                    leading_comments += 1
+                sql.append(" ")
+                position = end + 2
+                continue
+            if text.startswith("--", position):
+                end = text.find("\n", position + 2)
+                if end < 0:
+                    comments.append(text[position + 2 :])
+                    if not seen_sql:
+                        leading_comments += 1
+                    sql.append(" ")
+                    position = len(text)
+                    continue
+                comments.append(text[position + 2 : end].rstrip("\r"))
+                if not seen_sql:
+                    leading_comments += 1
+                sql.append(" ")
+                position = end + 1
+                continue
+            sql.append(text[position])
+            seen_sql = seen_sql or not text[position].isspace()
+            position += 1
+        return " ".join("".join(sql).upper().split()), comments, leading_comments
+
+    def _parse_set(self, unset: bool = False, tag: bool = False) -> exp.Set | exp.Command:
+        if unset or tag:
+            return super()._parse_set(unset=unset, tag=tag)
+
+        if self._match_text_seq("SESSION", "WORKLOAD"):
+            return self._parse_set_session_routing("WORKLOAD")
+        if self._match_text_seq("SESSION", "RESOURCE_POOL"):
+            return self._parse_set_session_routing("RESOURCE_POOL")
+        return super()._parse_set(unset=unset, tag=tag)
+
+    def _parse_set_session_routing(self, name: str) -> vexp.SetSessionRouting:
+        if name == "WORKLOAD":
+            if self._match(TokenType.EQ):
+                self.raise_error("SET SESSION WORKLOAD requires TO or direct value syntax, not =")
+            self._match_text_seq("TO")
+            allowed_keywords = {"DEFAULT", "NONE"}
+        else:
+            if self._match_text_seq("TO", advance=False):
+                self.raise_error("SET SESSION RESOURCE_POOL requires =")
+            if not self._match(TokenType.EQ):
+                self.raise_error("SET SESSION RESOURCE_POOL requires =")
+            allowed_keywords = {"DEFAULT"}
+
+        if self._match_texts(allowed_keywords):
+            value: exp.Expr = self.expression(exp.var(self._prev.text.upper()))
+        elif name == "RESOURCE_POOL" and self._match_text_seq("NONE", advance=False):
+            self.raise_error("SET SESSION RESOURCE_POOL does not support NONE")
+        else:
+            if self._curr.token_type == TokenType.STRING:
+                self.raise_error(f"SET SESSION {name} requires an identifier, not a string")
+            value = self._parse_routing_identifier(f"SET SESSION {name}")
+
+        if self._curr:
+            self.raise_error(f"Unexpected SET SESSION {name} clause at {self._curr.text!r}")
+
+        assignment = self.expression(
+            exp.EQ(
+                this=exp.Column(this=exp.to_identifier(name)),
+                expression=value,
+            )
+        )
+        item = self.expression(exp.SetItem(this=assignment, kind="SESSION"))
+        return self.expression(vexp.SetSessionRouting(expressions=[item], unset=False, tag=False))
+
     def _parse_saved_or_get_directed_query(self, save: bool) -> exp.Expr:
         statement = "SAVE QUERY" if save else "GET DIRECTED QUERY"
         query = self._parse_directed_query_input(statement)
@@ -516,7 +660,7 @@ class VerticaParser(PostgresParser):
         if not self._curr:
             self.raise_error(f"{action} DIRECTED QUERY requires one target")
 
-        name = None
+        name: exp.Expr | None = None
         query = None
         where = None
         if self._match(TokenType.WHERE, advance=False):
@@ -1265,10 +1409,15 @@ class VerticaParser(PostgresParser):
                 )
             )
 
-        if self._match_text_seq("WORKLOAD"):
-            workloads = self._parse_security_named_targets("workload", multiple=False)
+        if self._match_text_seq("ROUTING", "RULE") or self._match_text_seq("WORKLOAD"):
+            workload = self._parse_security_identifier("workload")
+            if self._match(TokenType.DOT, advance=False):
+                self.raise_error("WORKLOAD privilege names cannot be schema-qualified")
             return self.expression(
-                vexp.VerticaPrivilegeTarget(kind="WORKLOAD", expressions=workloads)
+                vexp.VerticaPrivilegeTarget(
+                    kind="WORKLOAD",
+                    expressions=[self.expression(exp.Table(this=workload))],
+                )
             )
 
         routine_kind = self._parse_security_routine_kind()
@@ -1374,6 +1523,8 @@ class VerticaParser(PostgresParser):
         allowed = self.SECURITY_EXACT_PRIVILEGES.get(kind)
         if allowed is None:
             return
+        if kind == "WORKLOAD" and len(privileges) != 1:
+            self.raise_error("WORKLOAD requires exactly one USAGE privilege")
         for privilege in privileges:
             if privilege.name.upper() not in allowed or privilege.expressions:
                 self.raise_error(f"Invalid {kind} privilege: {privilege.name}")
@@ -2569,10 +2720,20 @@ class VerticaParser(PostgresParser):
             with_collation=with_collation,
         )
 
+    def _reject_prefixed_routing_rule(self, statement: str, words: list[str]) -> None:
+        for index, word in enumerate(words[:-1]):
+            if word == "ROUTING" and words[index + 1] == "RULE":
+                if index:
+                    self.raise_error(f"{statement} ROUTING RULE does not support modifiers")
+                return
+            if word in self.ROUTING_RULE_OBJECT_BOUNDARIES:
+                return
+
     def _parse_create(  # type: ignore[override]
         self,
     ) -> exp.Create | vexp.CreateDirectedQuery | exp.Command:
         words = [token.text.upper() for token in self._tokens[self._index :]]
+        self._reject_prefixed_routing_rule("CREATE", words)
         unsupported_directed_prefixes = (
             ("IF", "NOT", "EXISTS", "DIRECTED", "QUERY"),
             ("TEMPORARY", "DIRECTED", "QUERY"),
@@ -2606,6 +2767,10 @@ class VerticaParser(PostgresParser):
             return self._parse_create_role(replace=replace)
         if self._match_text_seq("RESOURCE", "POOL"):
             return self._parse_create_resource_pool(replace=replace)
+        if self._match_text_seq("ROUTING", "RULE"):
+            return self._parse_create_routing_rule(replace=replace)
+        if self._match_text_seq("ROUTING", advance=False):
+            self.raise_error("CREATE ROUTING must be followed by RULE")
 
         if self._match_texts(("FLEX", "FLEXIBLE")):
             if not self._match_text_seq("EXTERNAL"):
@@ -3329,6 +3494,176 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_create_routing_rule(self, replace: bool) -> vexp.CreateRoutingRule:
+        if replace:
+            self.raise_error("CREATE OR REPLACE ROUTING RULE is not supported by Vertica")
+        if self._match_text_seq("IF", "NOT", "EXISTS", advance=False):
+            self.raise_error("CREATE ROUTING RULE does not support IF NOT EXISTS")
+
+        name: exp.Identifier | None = None
+        unnamed_workload = self._match_text_seq("ROUTE", "WORKLOAD", advance=False)
+        if unnamed_workload:
+            self._match_text_seq("ROUTE")
+        else:
+            name = self._parse_routing_identifier("CREATE ROUTING RULE")
+            if not self._match_text_seq("ROUTE"):
+                self.raise_error("CREATE ROUTING RULE requires ROUTE")
+
+        source: exp.Expr | None
+        if self._match_text_seq("WORKLOAD"):
+            source = self._parse_routing_identifier("CREATE ROUTING RULE ROUTE WORKLOAD")
+            if not self._match_text_seq("TO", "SUBCLUSTER"):
+                self.raise_error("Workload routing rules require TO SUBCLUSTER")
+            destinations = self._parse_routing_rule_identifiers("routing subcluster")
+            priority = None
+            if self._match_text_seq("PRIORITY"):
+                priority = self._parse_routing_rule_priority()
+            mode = "WORKLOAD"
+        else:
+            if name is None:
+                self.raise_error("Classic routing rules require a rule name")
+            source = self._parse_string()
+            if not isinstance(source, exp.Literal) or not source.is_string:
+                self.raise_error("Classic routing rules require a quoted address range")
+            if not self._match_text_seq("TO"):
+                self.raise_error("Classic routing rules require TO")
+            destinations = [self._parse_routing_identifier("classic routing rule group")]
+            priority = None
+            mode = "ADDRESS"
+
+        if self._curr:
+            self.raise_error(f"Unexpected CREATE ROUTING RULE clause at {self._curr.text!r}")
+
+        route = self.expression(
+            vexp.RoutingRuleSpec(
+                mode=exp.var(mode),
+                this=source,
+                expressions=destinations,
+                priority=priority,
+            )
+        )
+        return self.expression(vexp.CreateRoutingRule(this=name, kind="ROUTING RULE", route=route))
+
+    def _parse_routing_rule_identifiers(self, label: str) -> list[exp.Identifier]:
+        identifiers = [self._parse_routing_identifier(label)]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self.raise_error(f"Expected {label} after each comma")
+            identifiers.append(self._parse_routing_identifier(label))
+        return identifiers
+
+    def _parse_routing_identifier(self, statement: str) -> exp.Identifier:
+        if self._curr.token_type not in self.ID_VAR_TOKENS or self._curr.token_type in {
+            TokenType.DEFAULT,
+            TokenType.FALSE,
+            TokenType.NULL,
+            TokenType.TRUE,
+        }:
+            self.raise_error(f"{statement} requires an identifier")
+        identifier = self._parse_id_var(any_token=False)
+        if not isinstance(identifier, exp.Identifier):
+            self.raise_error(f"{statement} requires an identifier")
+        assert isinstance(identifier, exp.Identifier)
+        if self._match(TokenType.DOT, advance=False):
+            self.raise_error(f"{statement} names cannot be schema-qualified")
+        return identifier
+
+    def _parse_routing_rule_priority(self) -> exp.Literal:
+        if self._match(TokenType.DASH, advance=False):
+            self.raise_error("ROUTING RULE PRIORITY must be a nonnegative integer")
+        self._match(TokenType.PLUS)
+        priority = self._parse_number()
+        if not priority or not priority.is_int:
+            self.raise_error("ROUTING RULE PRIORITY must be a nonnegative integer")
+        assert isinstance(priority, exp.Literal)
+        return priority
+
+    def _parse_routing_rule_target(self, statement: str) -> vexp.RoutingRuleTarget:
+        workload = self._match_text_seq("FOR", "WORKLOAD")
+        if not workload and self._match(TokenType.FOR, advance=False):
+            self.raise_error(f"{statement} FOR must be followed by WORKLOAD")
+        target = self._parse_routing_identifier(statement)
+        return self.expression(vexp.RoutingRuleTarget(this=target, workload=workload))
+
+    def _parse_alter_routing_rule(self) -> vexp.AlterRoutingRule:
+        target = self._parse_routing_rule_target("ALTER ROUTING RULE")
+
+        if self._match_text_seq("RENAME"):
+            if not self._match_text_seq("TO"):
+                self.raise_error("ALTER ROUTING RULE RENAME requires TO")
+            action: exp.Expr = self.expression(
+                exp.AlterRename(this=self._parse_routing_identifier("ALTER ROUTING RULE RENAME"))
+            )
+        elif self._match_text_seq("SET"):
+            action = self._parse_set_routing_rule_action()
+        elif self._match_texts(("ADD", "REMOVE")):
+            verb = self._prev.text.upper()
+            if not self._match_text_seq("SUBCLUSTER"):
+                self.raise_error(f"ALTER ROUTING RULE {verb} requires SUBCLUSTER")
+            action = self.expression(
+                vexp.RoutingRuleAction(
+                    this=exp.var(f"{verb} SUBCLUSTER"),
+                    expressions=self._parse_routing_rule_identifiers("routing subcluster"),
+                )
+            )
+        else:
+            self.raise_error("ALTER ROUTING RULE requires a supported action")
+
+        if self._curr:
+            self.raise_error(f"Unexpected ALTER ROUTING RULE clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.AlterRoutingRule(this=target, kind="ROUTING RULE", actions=[action])
+        )
+
+    def _parse_set_routing_rule_action(self) -> vexp.RoutingRuleAction:
+        if not self._match_texts(("ROUTE", "GROUP", "WORKLOAD", "SUBCLUSTER", "PRIORITY")):
+            self.raise_error("ALTER ROUTING RULE SET requires a supported property")
+        property_name = self._prev.text.upper()
+        if not self._match_text_seq("TO"):
+            self.raise_error(f"ALTER ROUTING RULE SET {property_name} requires TO")
+
+        if property_name == "ROUTE":
+            value = self._parse_string()
+            if not isinstance(value, exp.Literal) or not value.is_string:
+                self.raise_error("ALTER ROUTING RULE SET ROUTE requires a quoted address range")
+            return self.expression(
+                vexp.RoutingRuleAction(this=exp.var("SET ROUTE"), expression=value)
+            )
+        if property_name == "SUBCLUSTER":
+            return self.expression(
+                vexp.RoutingRuleAction(
+                    this=exp.var("SET SUBCLUSTER"),
+                    expressions=self._parse_routing_rule_identifiers("routing subcluster"),
+                )
+            )
+        if property_name == "PRIORITY":
+            return self.expression(
+                vexp.RoutingRuleAction(
+                    this=exp.var("SET PRIORITY"),
+                    expression=self._parse_routing_rule_priority(),
+                )
+            )
+
+        value = self._parse_routing_identifier(f"ALTER ROUTING RULE SET {property_name}")
+        return self.expression(
+            vexp.RoutingRuleAction(this=exp.var(f"SET {property_name}"), expression=value)
+        )
+
+    def _parse_drop_routing_rule(self, exists: bool) -> vexp.DropRoutingRule:
+        if exists:
+            self.raise_error("DROP ROUTING RULE IF EXISTS must follow ROUTING RULE")
+        if_exists = bool(self._parse_exists())
+        target = self._parse_routing_rule_target("DROP ROUTING RULE")
+        if self._match(TokenType.COMMA, advance=False):
+            self.raise_error("DROP ROUTING RULE accepts exactly one target")
+        if self._match_texts(("CASCADE", "RESTRICT"), advance=False):
+            self.raise_error("DROP ROUTING RULE does not support CASCADE or RESTRICT")
+        if self._curr:
+            self.raise_error(f"Unexpected DROP ROUTING RULE clause at {self._curr.text!r}")
+        return self.expression(
+            vexp.DropRoutingRule(this=target, kind="ROUTING RULE", exists=if_exists)
+        )
+
     def _parse_alter_role(self) -> exp.Alter:
         role = self._parse_lifecycle_identifier("ALTER ROLE")
         if not self._match_text_seq("RENAME"):
@@ -3749,6 +4084,8 @@ class VerticaParser(PostgresParser):
 
     def _parse_alter(self) -> exp.Alter | exp.Command:
         index = self._index
+        words = [token.text.upper() for token in self._tokens[self._index :]]
+        self._reject_prefixed_routing_rule("ALTER", words)
         if self._curr.token_type == TokenType.TABLE and self._has_mixed_reorganize_action():
             self.raise_error(
                 "Mixed ALTER TABLE REORGANIZE action lists are not yet represented semantically"
@@ -3757,6 +4094,10 @@ class VerticaParser(PostgresParser):
             return self._parse_alter_role()
         if self._match_text_seq("RESOURCE", "POOL"):
             return self._parse_alter_resource_pool()
+        if self._match_text_seq("ROUTING", "RULE"):
+            return self._parse_alter_routing_rule()
+        if self._match_text_seq("ROUTING", advance=False):
+            self.raise_error("ALTER ROUTING must be followed by RULE")
         if self._match(TokenType.SEQUENCE):
             return self._parse_alter_sequence()
         if self._match(TokenType.TABLE):
@@ -4654,7 +4995,9 @@ class VerticaParser(PostgresParser):
     def _parse_drop(  # type: ignore[override]
         self, exists: bool = False
     ) -> exp.Drop | vexp.DirectedQueryAction | exp.Command:
-        lookahead = [token.text.upper() for token in self._tokens[self._index : self._index + 3]]
+        words = [token.text.upper() for token in self._tokens[self._index :]]
+        self._reject_prefixed_routing_rule("DROP", words)
+        lookahead = words[:3]
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
             self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
         if lookahead[:2] == ["TEMPORARY", "DIRECTED"]:
@@ -4677,6 +5020,10 @@ class VerticaParser(PostgresParser):
             return self._parse_drop_role(exists=exists)
         if self._match_text_seq("RESOURCE", "POOL"):
             return self._parse_drop_resource_pool(exists=exists)
+        if self._match_text_seq("ROUTING", "RULE"):
+            return self._parse_drop_routing_rule(exists=exists)
+        if self._match_text_seq("ROUTING", advance=False):
+            self.raise_error("DROP ROUTING must be followed by RULE")
 
         if self._match(TokenType.PROCEDURE):
             if_exists = exists or self._parse_exists()

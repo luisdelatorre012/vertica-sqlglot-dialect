@@ -28,6 +28,9 @@ plugin interface.
   CREATE VIEW extensions with ordered and conflicting-clause validation.
 - Added semantic role lifecycle DDL and typed CREATE/ALTER/DROP RESOURCE POOL
   statements with subcluster selectors and parameter-domain validation.
+- Added semantic classic and workload routing-rule lifecycle, every documented
+  ALTER action, exact session workload/resource-pool assignment, SHOW workload
+  controls, and canonical `ON ROUTING RULE` privilege alias handling.
 - Added semantic CREATE/DROP LIBRARY and shared factory-backed scalar,
   aggregate, analytic, transform, filter, parser, and source UDx catalog DDL,
   including language/fence validation and explicit typed drop signatures.

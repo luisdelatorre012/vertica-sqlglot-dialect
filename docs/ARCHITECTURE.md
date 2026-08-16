@@ -65,6 +65,18 @@ subclass their corresponding canonical statement classes, but retain explicit
 Vertica transforms because ordered typed parameters and subcluster selectors
 have no lossless canonical property representation.
 
+Workload-routing lifecycle roots likewise subclass canonical CREATE, ALTER,
+and DROP nodes while keeping their route specification, name/workload target,
+and single ALTER action explicit. Session controls retain a canonical
+`SetItem(EQ(Column, value))` child inside `SetSessionRouting`; this keeps the
+assignment traversable while preserving Vertica's distinct `WORKLOAD TO` and
+`RESOURCE_POOL =` operators. The optimizer may quote the internal left-hand
+marker, so generation validates its one-part semantic name rather than its
+quoting metadata. `ShowWorkload` is atomic because SQLGlot 30.13 tokenizes SHOW
+payloads as opaque command text. Workload privilege targets remain canonical
+GRANT/REVOKE roots, but `ON ROUTING RULE` normalizes to the documented
+`ON WORKLOAD` target and receives exact USAGE/target/principal validation.
+
 Factory-backed UDxs use a shared `CreateUserDefinedExtension` root and
 `UDxFactorySpec`: the catalog name remains canonical, while language, factory,
 library, and fenced mode remain an ordered atomic unit that cannot leak as a
