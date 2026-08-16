@@ -1088,8 +1088,25 @@ class AuthenticationAction(exp.Expression):
     }
 
 
+class AuthenticationParameter(exp.Expression):
+    """One reviewed non-secret ``ALTER AUTHENTICATION SET`` parameter."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": True,
+    }
+
+
+class AuthenticationSet(exp.Expression):
+    """An ordered nonempty list of reviewed authentication parameters."""
+
+    arg_types: t.ClassVar = {
+        "expressions": True,
+    }
+
+
 class AlterAuthentication(exp.Alter):
-    """Apply exactly one structural change to an authentication record."""
+    """Apply exactly one reviewed change to an authentication record."""
 
 
 class DropAuthentication(exp.Drop):

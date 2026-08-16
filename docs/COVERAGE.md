@@ -79,7 +79,7 @@ Status meanings:
 | Object `GRANT` / `REVOKE` | Semantic | Canonical single-target grants, multi-object and all-in-schema targets, `EXTEND`, routine signatures, locations, resource-pool subclusters, grant options, and cascade semantics |
 | Role and authentication `GRANT` / `REVOKE` | Semantic | Compound role/grantee lists, admin-option revocation, cascade, and authentication associations use dedicated AST nodes |
 | Role lifecycle | Semantic | Canonical `CREATE`, rename, and single-target `DROP`; atomic custom AST for comma-separated drops; exact unqualified-name and option validation |
-| User, profile, and authentication lifecycle | Partial | The non-secret USER core is semantic, including ordered CREATE/ALTER `PROFILE`, global/subcluster `RESOURCE POOL`, grace/idle/runtime intervals, scoped connection limits, memory/temp-space caps, CREATE/ALTER `SEARCH_PATH`, ALTER-only `SECURITY_ALGORITHM`, isolated `DEFAULT ROLE`, `TOTPSECRET RESET`, value-free configuration CLEAR, and a five-parameter depot-only SET allowlist; PROFILE CREATE/ALTER/DROP is semantic with all 15 ordered policy settings, numeric/`UNLIMITED` values, ALTER-only `DEFAULT` resets and rename, and ordered dependency drops. AUTHENTICATION CREATE/ALTER/DROP is semantic for finite methods, LOCAL/HOST TLS matching, enable/disable, rename, lexical nonnegative priority, Boolean MFA state, fallthrough state, and single-target dependency drops; ALTER SET remains sanitized and planned |
+| User, profile, and authentication lifecycle | Partial | The non-secret USER core is semantic, including ordered CREATE/ALTER `PROFILE`, global/subcluster `RESOURCE POOL`, grace/idle/runtime intervals, scoped connection limits, memory/temp-space caps, CREATE/ALTER `SEARCH_PATH`, ALTER-only `SECURITY_ALGORITHM`, isolated `DEFAULT ROLE`, `TOTPSECRET RESET`, value-free configuration CLEAR, and a five-parameter depot-only SET allowlist; PROFILE CREATE/ALTER/DROP is semantic with all 15 ordered policy settings, numeric/`UNLIMITED` values, ALTER-only `DEFAULT` resets and rename, and ordered dependency drops. AUTHENTICATION CREATE/ALTER/DROP is semantic for finite methods, LOCAL/HOST TLS matching, enable/disable, rename, lexical nonnegative priority, Boolean MFA state, fallthrough state, single-target dependency drops, and the closed non-secret `validate_type`/`jit_enabled` SET domains; all other SET values remain sanitized |
 | Resource-pool lifecycle | Semantic | Ordered typed parameters, `DEFAULT`/`NONE`/`AUTO`/`HOLD` sentinels, named/current subcluster selectors, and CREATE/ALTER/DROP restrictions use dedicated AST roots |
 | Load-balance-group lifecycle | Semantic | Address, fault-group, and subcluster member specifications, mandatory filters, selection policies, every ALTER action, and dependency-cascading DROP use typed ASTs with atomic foreign failure |
 | Network-address lifecycle | Semantic | Fixed-order node/address/port/state creation, rename/endpoint/state ALTER actions, and postfix `IF EXISTS`/`CASCADE` DROP use typed ASTs; NETWORK INTERFACE remains intentionally opaque and distinct |
@@ -144,12 +144,13 @@ Some rules require information that a syntax-only dialect does not have:
   same-statement numeric maximum conflicts are validated locally.
 - AUTHENTICATION address validity, record existence, grants, priority effects,
   access matching, current-method compatibility, and runtime authentication
-  effects remain server concerns. CREATE and structural ALTER validate only
+  effects remain server concerns. CREATE and ALTER validate only
   their finite method/access/state grammar, action exclusivity, and lexical
   nonnegative priority; CREATE also enforces documented fallthrough exclusions.
-  ALTER SET remains outside the AST security boundary;
-  all such values are rejected through a fixed sanitizer until P09 completes a
-  parameter-by-parameter audit.
+  ALTER SET accepts only standard-string `validate_type` (`IDP`/`JWT`) and
+  `jit_enabled` (`yes`/`no`) values. Explicit secrets, arbitrary-string LDAP,
+  Ident, Kerberos, and OAuth parameters, incompletely pinned Boolean values,
+  and unknown names remain outside the AST and fail through a fixed sanitizer.
 - Directed-query name existence, query compatibility, optimizer-version/date
   provenance, and activation effects require the Vertica catalog. The dialect
   validates statement grammar, target cardinality, nonempty query structure,

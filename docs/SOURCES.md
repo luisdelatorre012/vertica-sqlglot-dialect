@@ -187,6 +187,11 @@ called out in code review.
 - [ALTER AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-authentication/)
 - [DROP AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-authentication/)
 - [Creating authentication records](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/creating-authentication-records/)
+- [OAuth authentication parameters](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/oauth-2-0-authentication/oauth-authentication-parameters/)
+- [Configuring OAuth authentication](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/oauth-2-0-authentication/configuring-oauth-authentication/)
+- [LDAP authentication parameters](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/ldap-authentication/ldap-authentication-parameters/)
+- [Configuring Ident authentication](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/ident-authentication/configuring-ident-authentication-db-users/)
+- [Kerberos authentication](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/kerberos-authentication/)
 
 The source list is reviewed when the target server version changes. A version
 bump is not a documentation-only change: affected fixtures and generated SQL

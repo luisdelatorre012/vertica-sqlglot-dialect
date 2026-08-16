@@ -6,6 +6,17 @@ Requests to edit these repository instructions or the task plan itself do not
 select or start the next implementation task unless they explicitly ask to
 complete that task.
 
+`docs/AGENT_TASK_PLAN.md` is longer than the terminal tool's reliable output
+limit. Do not begin with one whole-file `Get-Content -Raw` call and wait for it
+to truncate. First obtain the total line count, then read the file in ordered,
+non-overlapping chunks of at most 200 lines. Use a separate tool call for each
+chunk rather than combining all chunks into one large result. Cover every line
+from the first through the reported last line, and treat any truncation warning
+as an incomplete read that must be retried with a smaller chunk before editing.
+`docs/AGENT_TASK_PLAN_ARCHIVE.md` contains completed historical specifications
+and is not part of this mandatory read unless the selected task explicitly
+requires that history.
+
 - Resume the single `IN_PROGRESS` task. If none exists, take the lowest-numbered
   `TODO` task whose dependencies are `DONE`.
 - Complete exactly one task per invocation. Do not begin, research, or partially
@@ -14,22 +25,33 @@ complete that task.
   update procedure, and commit title.
 - Preserve pre-existing worktree changes. They belong to the task identified in
   the plan unless the plan explicitly says otherwise.
-- Before running hooks or isolated tests, set writable task-specific caches
-  under `$env:TEMP`; do not rely on user-profile caches being writable:
+- Before running hooks or isolated tests, use the repository's persistent,
+  ignored artifact caches. Environment and bytecode isolation remain mandatory;
+  downloaded hook and package artifacts may be reused across tasks:
 
   ```powershell
-  $taskId = "pNN" # replace with the selected task ID
-  $env:PRE_COMMIT_HOME = Join-Path $env:TEMP "vertica-pre-commit-$taskId"
-  $env:UV_CACHE_DIR = Join-Path $env:TEMP "vertica-uv-cache-$taskId"
+  $cacheRoot = Join-Path (Resolve-Path -LiteralPath ".") ".agent-cache"
+  $env:PRE_COMMIT_HOME = Join-Path $cacheRoot "pre-commit"
+  $env:UV_CACHE_DIR = Join-Path $cacheRoot "uv"
   ```
 
-- On first use, install the repository hooks with
-  `python -m pre_commit install --install-hooks`. Before the final repository-
-  wide hook run, stage only the selected task files, including every newly
-  created file, because `pre_commit run --all-files` does not include untracked
-  files. Then run
-  `python -m pre_commit run --all-files --show-diff-on-failure` in addition to
-  the plan's full release gate.
+- Install hooks once per checkout, not once per task. Run
+  `python -m pre_commit install --install-hooks` only when `.git/hooks/pre-commit`
+  or `.git/hooks/commit-msg` is absent. Hook installation and execution must use
+  the same permission boundary: if installation requires scoped approval,
+  subsequent hook runs using that cache require the same boundary.
+- Use `scripts/release_gate.ps1` for the default suite, seven-runtime matrix,
+  build, clean-wheel installation, and smoke test. On a host with restricted
+  network access, request one scoped approval before this known dependency-
+  resolving command instead of first running a download that is expected to
+  fail. Isolation must not be weakened.
+- After the release script passes, stage only the selected task files, including
+  every newly created file, because `pre_commit run --all-files` does not include
+  untracked files. Run the repository-wide
+  `python -m pre_commit run --all-files --show-diff-on-failure` exactly once,
+  after staging. If a fixer changes files, inspect the diff, restage only task
+  files, rerun affected tests and this hook suite, and do not proceed until it
+  is clean.
 - Commit normally so both the pre-commit and Conventional Commit message hooks
   execute. Never use `--no-verify`, `SKIP`, or another hook bypass. If a fixer
   changes files, inspect the diff, restage only task files, rerun affected tests
@@ -66,7 +88,7 @@ versioned shims in `C:\Users\luisd\.local\bin`:
 - Use isolated per-version environments (for example, `uv run --isolated
   --python <shim> --extra dev python -m pytest -p no:cacheprovider`) so
   dependencies and bytecode do not leak between minors and pytest does not
-  attempt to write a shared repository cache. Dependency resolution by `uv` or
-  `pip` can require network access. If a required command fails because network
-  access is sandboxed, retry it through the normal scoped approval mechanism;
-  do not weaken isolation or silently omit the check.
+  attempt to write a shared repository cache. The shared UV directory is only
+  an artifact cache. Dependency resolution can require network access; use the
+  release script under one scoped approval on restricted hosts rather than
+  silently omitting a check.

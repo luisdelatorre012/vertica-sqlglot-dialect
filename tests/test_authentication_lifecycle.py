@@ -148,6 +148,95 @@ def test_programmatic_alter_authentication_generation() -> None:
     assert _strict(alter) == "ALTER AUTHENTICATION a ENFORCEMFA FALSE"
     alter.set("actions", [_access("HOST", "::/0", tls=True)])
     assert _strict(alter) == "ALTER AUTHENTICATION a HOST TLS '::/0'"
+    alter.set(
+        "actions",
+        [
+            vexp.AuthenticationSet(
+                expressions=[
+                    vexp.AuthenticationParameter(
+                        this=exp.var("validate_type"), expression=exp.Literal.string("JWT")
+                    ),
+                    vexp.AuthenticationParameter(
+                        this=exp.var("jit_enabled"), expression=exp.Literal.string("no")
+                    ),
+                ]
+            )
+        ],
+    )
+    assert _strict(alter) == (
+        "ALTER AUTHENTICATION a SET validate_type = 'JWT', jit_enabled = 'no'"
+    )
+
+
+@pytest.mark.parametrize(
+    ("sql", "name", "value", "canonical"),
+    [
+        ("ALTER AUTHENTICATION a SET validate_type = 'IDP'", "validate_type", "IDP", "IDP"),
+        ("ALTER AUTHENTICATION a SET VALIDATE_TYPE='jwt'", "validate_type", "JWT", "JWT"),
+        ("ALTER AUTHENTICATION a SET jit_enabled = 'yes'", "jit_enabled", "yes", "yes"),
+        ("ALTER AUTHENTICATION a SET JIT_ENABLED='NO'", "jit_enabled", "no", "no"),
+    ],
+)
+def test_safe_authentication_parameters_are_typed(
+    sql: str, name: str, value: str, canonical: str
+) -> None:
+    expression = assert_roundtrip(sql)
+    assert isinstance(expression, vexp.AlterAuthentication)
+    action = expression.actions[0]
+    assert isinstance(action, vexp.AuthenticationSet)
+    parameter = action.expressions[0]
+    assert isinstance(parameter, vexp.AuthenticationParameter)
+    assert parameter.args["this"] == exp.var(name)
+    assert parameter.args["expression"] == exp.Literal.string(value)
+    assert f"{name} = '{canonical}'" in _strict(expression)
+
+
+def test_authentication_set_order_serialization_transform_optimizer_and_batches() -> None:
+    expression = assert_roundtrip(
+        "/* lead */ ALTER AUTHENTICATION a SET jit_enabled='yes', validate_type='jwt' /* tail */"
+    )
+    action = expression.actions[0]
+    assert isinstance(action, vexp.AuthenticationSet)
+    assert [parameter.args["this"].this for parameter in action.expressions] == [
+        "jit_enabled",
+        "validate_type",
+    ]
+    assert expression.copy() == expression
+    assert exp.Expr.load(expression.dump()) == expression
+    transformed = expression.transform(
+        lambda node: (
+            exp.Literal.string("no")
+            if isinstance(node, exp.Literal) and node.this == "yes"
+            else node
+        )
+    )
+    assert "jit_enabled = 'no'" in _strict(transformed)
+    optimized = optimize(expression, dialect="vertica")
+    assert isinstance(optimized, vexp.AlterAuthentication)
+    assert parse_one(_strict(optimized), read="vertica") == optimized
+    annotated = annotate_types(expression.copy(), dialect="vertica")
+    assert annotated.find(vexp.AuthenticationSet).type == exp.DType.UNKNOWN.into_expr()
+    statements = parse(
+        "ALTER AUTHENTICATION a SET validate_type='IDP'; SELECT 1; "
+        "ALTER AUTHENTICATION a SET jit_enabled='no'",
+        read="vertica",
+    )
+    assert [type(statement) for statement in statements] == [
+        vexp.AlterAuthentication,
+        exp.Select,
+        vexp.AlterAuthentication,
+    ]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER AUTHENTICATION set ENABLE",
+        "ALTER AUTHENTICATION \"SET\" SET validate_type = 'JWT'",
+    ],
+)
+def test_authentication_target_named_set_does_not_confuse_the_secret_firewall(sql: str) -> None:
+    assert isinstance(assert_roundtrip(sql), vexp.AlterAuthentication)
 
 
 def test_alter_authentication_serialization_transform_optimizer_comments_and_batches() -> None:
@@ -307,6 +396,12 @@ def test_confusable_authentication_kind_does_not_dispatch() -> None:
         "ALTER AUTHENTICATION a FALLTHROUGH PRIORITY 1",
         "ALTER IF EXISTS AUTHENTICATION a ENABLE",
         "ALTER AUTHENTICATION a SET safe = 1",
+        "ALTER AUTHENTICATION a SET",
+        "ALTER AUTHENTICATION a SET validate_type",
+        "ALTER AUTHENTICATION a SET validate_type 'JWT'",
+        "ALTER AUTHENTICATION a SET validate_type = 'JWT',",
+        "ALTER AUTHENTICATION a SET validate_type = 'JWT', validate_type = 'IDP'",
+        "ALTER AUTHENTICATION a SET validate_type = 'JWT' ENABLE",
     ],
 )
 @pytest.mark.parametrize(
@@ -367,29 +462,59 @@ def test_authentication_identifier_contract_and_dispatch_collisions() -> None:
 
 
 @pytest.mark.parametrize(
-    "sql",
+    "name",
+    ["bind_password", "client_secret", "UnknownParameter", "validate_type"],
+)
+@pytest.mark.parametrize(
+    "value",
     [
-        "ALTER AUTHENTICATION a SET bind_password = 'S3CR3T_DO_NOT_LEAK'",
-        "ALTER AUTHENTICATION a SET client_secret = E'S3CR3T_DO_NOT_LEAK'",
-        "ALTER AUTHENTICATION a SET client_secret = U&'S3CR3T_DO_NOT_LEAK'",
-        "ALTER AUTHENTICATION a SET client_secret = N'S3CR3T_DO_NOT_LEAK'",
-        "ALTER AUTHENTICATION a SET client_secret = $$S3CR3T_DO_NOT_LEAK$$",
-        "ALTER AUTHENTICATION a SET client_secret = B'0101'",
-        "ALTER AUTHENTICATION a SET client_secret = X'DEAD'",
-        "CREATE AUTHENTICATION a METHOD 'ldap' LOCAL SET bind_password = 'S3CR3T_DO_NOT_LEAK'",
+        "'S3CR3T_DO_NOT_LEAK'",
+        "E'S3CR3T_DO_NOT_LEAK'",
+        "U&'S3CR3T_DO_NOT_LEAK'",
+        "N'S3CR3T_DO_NOT_LEAK'",
+        "$$S3CR3T_DO_NOT_LEAK$$",
+        "B'01010011'",
+        "X'533343523354'",
+        "R'S3CR3T_DO_NOT_LEAK'",
     ],
 )
 @pytest.mark.parametrize(
     "error_level", [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE]
 )
 def test_excluded_authentication_set_values_are_sanitized(
-    sql: str, error_level: ErrorLevel, caplog: pytest.LogCaptureFixture
+    name: str,
+    value: str,
+    error_level: ErrorLevel,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    sql = f"ALTER AUTHENTICATION a SET {name} = {value}"
     caplog.clear()
     with caplog.at_level(logging.DEBUG), pytest.raises(ParseError) as caught:
         parse_one(sql, read="vertica", error_level=error_level)
-    observed = " ".join((str(caught.value), repr(caught.value.errors), caplog.text))
+    captured = capsys.readouterr()
+    observed = " ".join(
+        (str(caught.value), repr(caught.value.errors), caplog.text, captured.out, captured.err)
+    )
     assert "S3CR3T_DO_NOT_LEAK" not in observed
+    assert str(caught.value) == "Unsupported secret-bearing AUTHENTICATION clause"
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE AUTHENTICATION a METHOD 'ldap' LOCAL SET bind_password = 'S3CR3T_DO_NOT_LEAK'",
+        "ALTER AUTHENTICATION a SET validate_type = IDP",
+        "ALTER AUTHENTICATION a SET validate_type = 'OIDC'",
+        "ALTER AUTHENTICATION a SET jit_enabled = 'true'",
+        "ALTER AUTHENTICATION a SET validate_hostname = 'true'",
+        "ALTER AUTHENTICATION a SET \"validate_type\" = 'JWT'",
+        "ALTER AUTHENTICATION a SET validate_type = 'JWT', client_secret = 'secret'",
+    ],
+)
+def test_unreviewed_authentication_parameters_fail_through_sanitizer(sql: str) -> None:
+    with pytest.raises(ParseError) as caught:
+        parse_one(sql, read="vertica")
     assert str(caught.value) == "Unsupported secret-bearing AUTHENTICATION clause"
 
 
@@ -401,6 +526,7 @@ def test_excluded_authentication_set_values_are_sanitized(
         "CREATE AUTHENTICATION a METHOD 'ldap' HOST TLS 'address' ENFORCEMFA FALLTHROUGH",
         "ALTER AUTHENTICATION a HOST NO TLS 'address'",
         "ALTER AUTHENTICATION a ENFORCEMFA FALSE",
+        "ALTER AUTHENTICATION a SET validate_type = 'JWT'",
         "DROP AUTHENTICATION IF EXISTS a CASCADE",
     ],
 )
@@ -499,6 +625,44 @@ def test_authentication_roots_fail_atomically_in_foreign_dialects(sql: str, dial
             ],
         ),
         vexp.AuthenticationAction(this=exp.var("BOGUS")),
+        vexp.AuthenticationSet(),
+        vexp.AuthenticationSet(expressions=[]),
+        vexp.AuthenticationSet(expressions={}),
+        vexp.AuthenticationSet(expressions=[exp.var("validate_type")]),
+        vexp.AuthenticationSet(
+            expressions=[
+                vexp.AuthenticationParameter(
+                    this=exp.var("validate_type"), expression=exp.Literal.string("JWT")
+                ),
+                vexp.AuthenticationParameter(
+                    this=exp.var("validate_type"), expression=exp.Literal.string("IDP")
+                ),
+            ]
+        ),
+        vexp.AuthenticationParameter(
+            this=exp.var("client_secret"), expression=exp.Literal.string("secret")
+        ),
+        vexp.AuthenticationParameter(
+            this=exp.var("VALIDATE_TYPE"), expression=exp.Literal.string("JWT")
+        ),
+        vexp.AuthenticationParameter(
+            this=_identifier("validate_type", quoted=True), expression=exp.Literal.string("JWT")
+        ),
+        vexp.AuthenticationParameter(this=exp.var("validate_type")),
+        vexp.AuthenticationParameter(this=exp.var("validate_type"), expression=exp.var("JWT")),
+        vexp.AuthenticationParameter(
+            this=exp.var("validate_type"), expression=exp.Literal.string("OIDC")
+        ),
+        vexp.AuthenticationParameter(
+            this=exp.var("jit_enabled"), expression=exp.Literal.string("true")
+        ),
+        _set_arg(
+            vexp.AuthenticationParameter(
+                this=exp.var("validate_type"), expression=exp.Literal.string("JWT")
+            ),
+            "bogus",
+            True,
+        ),
         _set_arg(_access("LOCAL"), "bogus", True),
     ],
 )
@@ -519,3 +683,11 @@ def test_authentication_access_leaf_fails_in_foreign_dialects() -> None:
             vexp.AuthenticationAction(this=exp.var("ENABLE")).sql(
                 dialect=dialect, unsupported_level=ErrorLevel.RAISE
             )
+        with pytest.raises((UnsupportedError, ValueError)):
+            vexp.AuthenticationSet(
+                expressions=[
+                    vexp.AuthenticationParameter(
+                        this=exp.var("validate_type"), expression=exp.Literal.string("JWT")
+                    )
+                ]
+            ).sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)

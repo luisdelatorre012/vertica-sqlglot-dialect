@@ -62,11 +62,11 @@ tree = parse_one("SELECT 1", read=Vertica)
 python -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev]"
 .venv/Scripts/python -m pre_commit install --install-hooks
-.venv/Scripts/python -m pre_commit run --all-files --show-diff-on-failure
 .venv/Scripts/python -m pytest
 .venv/Scripts/ruff check .
 .venv/Scripts/ruff format --check .
 .venv/Scripts/mypy src
+.venv/Scripts/python -m pre_commit run --all-files --show-diff-on-failure
 ```
 
 On POSIX systems, replace `.venv/Scripts` with `.venv/bin`. The installed hooks
@@ -75,9 +75,11 @@ mypy, and [Conventional Commits](https://www.conventionalcommits.org/) message
 validation. Commit without `--no-verify`; if a hook fixes a file, review the
 change, restage it, and rerun the checks before retrying the commit.
 
-The full coverage, multi-version, build, and installed-wheel checks remain in
-the documented agent release gate and CI. Hook revisions are frozen to immutable
-commits; maintainers can update them deliberately with
+The full coverage, multi-version, build, and installed-wheel checks are
+available through `scripts/release_gate.ps1` and remain required by the agent
+release gate and CI. The script reuses ignored download caches while retaining
+isolated runtime and clean-wheel environments. Hook revisions are frozen to
+immutable commits; maintainers can update them deliberately with
 `python -m pre_commit autoupdate --freeze`.
 
 The coverage matrix distinguishes semantic support from lossless command
@@ -97,6 +99,11 @@ selection. ALTER additionally models TOTP-secret reset, value-free configuration
 clears, and a five-parameter depot-only SET allowlist with finite values.
 Credential clauses and unreviewed SET values remain outside the AST and fail
 with sanitized errors.
+
+AUTHENTICATION lifecycle is semantic for its non-secret core. ALTER SET admits
+only the closed `validate_type` (`IDP`/`JWT`) and `jit_enabled` (`yes`/`no`)
+domains; credentials, arbitrary strings, and unknown parameters are rejected
+by the sanitizer before they can enter an AST.
 
 Executable `PROFILE statement` is also semantic: the wrapper retains a
 traversable SELECT, INSERT, UPDATE, DELETE, COPY, or MERGE child so analysis and

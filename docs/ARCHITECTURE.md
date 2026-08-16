@@ -106,9 +106,8 @@ enum can enter the AST while credential literals in `IDENTIFIED BY`, `SALT`,
 diagnostics. For the reviewed boundary, `UseDepotForReads=0` and
 `DepotOperationsForQuery='Fetches'` are accepted and the latter emits
 `DepotOperationsForQuery = FETCHES`; Boolean `2`, unknown parameter names, and
-unknown/string values are rejected. AUTHENTICATION and arbitrary value-bearing
-USER configuration parameters stay outside the semantic contract and fail
-closed when recognized.
+unknown/string values are rejected. Arbitrary value-bearing USER configuration
+parameters stay outside the semantic contract and fail closed when recognized.
 
 PROFILE lifecycle uses `CreateProfile`, `AlterProfile`, and `DropProfiles`
 roots plus ordered `ProfileLimit` and `ProfileParameter` children. The values
@@ -130,10 +129,33 @@ remains a standard string literal. The parser rejects CREATE method/fallthrough
 combinations that the primary source declares incompatible; ALTER compatibility
 depends on the record's catalog method and remains server-side. Address
 validity, grants, priority effects, and runtime matching also remain server
-concerns. No ALTER SET value has an AST slot: recognized
-AUTHENTICATION SET input raises a fixed sanitized error before ordinary parser
-diagnostics can retain a credential, bind password, OAuth secret, key, URL, or
-unknown parameter value.
+concerns. `AuthenticationSet` owns an ordered nonempty list of typed
+`AuthenticationParameter` children, but its static allowlist contains only two
+OAuth settings whose complete values are closed by the 26.2 sources:
+`validate_type` accepts standard strings `IDP` or `JWT`, and `jit_enabled`
+accepts standard strings `yes` or `no`. Input casing normalizes to those exact
+spellings; quoted alternatives outside the finite sets, unquoted values,
+duplicates, unknown names, and nonstandard literal tokens are rejected.
+
+The parameter audit classifies `bind_password` and `client_secret` as explicit
+secrets. LDAP/Ident/Kerberos parameters (`host`, `ldap_continue`, `starttls`,
+`binddn_prefix`, `binddn_suffix`, `domain_prefix`, `email_suffix`, `basedn`,
+`binddn`, `search_attribute`, `system_users`, and `realm`) and the remaining
+OAuth parameters (`groups_claim_name`, `oauth2_jit_authorized_roles`,
+`role_group_suffix`, `roles_claim_name`, `client_id`, `discovery_url`,
+`introspect_url`, `auth_url`, `token_url`, `scope`, `validate_hostname`,
+`jwt_rsa_public_key`, `jwt_ec_public_key`, `jwt_jwks_url`, `jwt_issuer`,
+`jwt_user_mapping`, `jwt_accepted_audience_list`, and
+`jwt_accepted_scope_list`) accept arbitrary or incompletely documented strings;
+they are therefore catalog/unknown for this AST security boundary even when
+their intended content is not itself secret. Unknown future names receive the
+same classification. A fixed pre-AST sanitizer rejects every excluded name and
+every out-of-domain allowlisted value before ordinary parser diagnostics can
+retain the payload. For example, `validate_type='JWT'` and
+`jit_enabled='no'` are accepted and canonical; `validate_type='OIDC'`,
+`validate_hostname='true'`, `client_secret='sentinel'`, and any unknown name
+fail with the same sanitized error. This remains defense in depth: callers must
+never submit real credentials because tokenization precedes parser hooks.
 
 Executable `PROFILE` uses a separate atomic `ProfileStatement` wrapper whose
 required `this` child is the complete profiled statement. SELECT/set-operation

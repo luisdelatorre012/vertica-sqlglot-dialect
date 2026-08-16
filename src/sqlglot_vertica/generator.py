@@ -308,6 +308,10 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AuthenticationAction: lambda self, expression: self.authenticationaction_sql(
             expression
         ),
+        vexp.AuthenticationParameter: lambda self, expression: self.authenticationparameter_sql(
+            expression
+        ),
+        vexp.AuthenticationSet: lambda self, expression: self.authenticationset_sql(expression),
         vexp.AlterAuthentication: lambda self, expression: self.alterauthentication_sql(expression),
         vexp.AlterLoadBalanceGroup: lambda self, expression: self.alterloadbalancegroup_sql(
             expression
@@ -1324,8 +1328,10 @@ class VerticaGenerator(PostgresGenerator):
                 action.args.get("this"), "ALTER AUTHENTICATION RENAME TO name"
             ):
                 valid = False
-        elif not isinstance(action, (vexp.AuthenticationAccess, vexp.AuthenticationAction)):
-            self.unsupported("ALTER AUTHENTICATION requires a typed structural action")
+        elif not isinstance(
+            action, (vexp.AuthenticationAccess, vexp.AuthenticationAction, vexp.AuthenticationSet)
+        ):
+            self.unsupported("ALTER AUTHENTICATION requires a typed reviewed action")
             valid = False
         if not valid or action is None:
             return ""
@@ -1386,6 +1392,55 @@ class VerticaGenerator(PostgresGenerator):
             return f"ENFORCEMFA {'TRUE' if value.this else 'FALSE'}"
         self.unsupported("Unsupported ALTER AUTHENTICATION action")
         return ""
+
+    def authenticationset_sql(self, expression: vexp.AuthenticationSet) -> str:
+        if self._has_user_extras(expression, {"expressions"}):
+            self.unsupported("AuthenticationSet contains unsupported fields")
+            return ""
+        parameters = expression.args.get("expressions")
+        if not isinstance(parameters, list) or not parameters:
+            self.unsupported("AuthenticationSet requires a nonempty parameter list")
+            return ""
+        if not all(isinstance(parameter, vexp.AuthenticationParameter) for parameter in parameters):
+            self.unsupported("AuthenticationSet requires typed parameter children")
+            return ""
+        names = [self._validate_authentication_parameter(parameter) for parameter in parameters]
+        if any(not name for name in names):
+            return ""
+        if len(set(names)) != len(names):
+            self.unsupported("AuthenticationSet does not allow duplicate parameters")
+            return ""
+        return f"SET {', '.join(self.sql(parameter) for parameter in parameters)}"
+
+    def authenticationparameter_sql(self, expression: vexp.AuthenticationParameter) -> str:
+        name = self._validate_authentication_parameter(expression)
+        return f"{name} = {self.sql(expression, 'expression')}" if name else ""
+
+    def _validate_authentication_parameter(self, expression: vexp.AuthenticationParameter) -> str:
+        if self._has_user_extras(expression, {"this", "expression"}):
+            self.unsupported("AuthenticationParameter contains unsupported fields")
+            return ""
+        name_node = expression.args.get("this")
+        if (
+            not isinstance(name_node, exp.Var)
+            or not isinstance(name_node.this, str)
+            or name_node.this not in {"jit_enabled", "validate_type"}
+            or self._has_user_extras(name_node, {"this"})
+        ):
+            self.unsupported("AuthenticationParameter requires a reviewed typed parameter name")
+            return ""
+        name = name_node.this
+        value = expression.args.get("expression")
+        allowed_values = {"yes", "no"} if name == "jit_enabled" else {"IDP", "JWT"}
+        if (
+            not isinstance(value, exp.Literal)
+            or not value.is_string
+            or value.this not in allowed_values
+            or self._has_user_extras(value, {"this", "is_string"})
+        ):
+            self.unsupported(f"{name} requires a reviewed standard string value")
+            return ""
+        return name
 
     def dropauthentication_sql(self, expression: vexp.DropAuthentication) -> str:
         valid = True

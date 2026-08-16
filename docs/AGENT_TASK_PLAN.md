@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P08 — AUTHENTICATION structural ALTER actions**.
-- Next eligible tasks are selected by dependency and numeric order; P09 is the
+- Completed through **P09 — AUTHENTICATION SET security boundary**.
+- Next eligible tasks are selected by dependency and numeric order; P10 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -27,15 +27,15 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 The Windows development host has every supported CPython minor installed and
 testable through versioned shims in `C:\Users\luisd\.local\bin`:
 
-| Minor | Installed release | Executable |
-| --- | --- | --- |
-| 3.9 | 3.9.25 | `python3.9.exe` |
-| 3.10 | 3.10.20 | `python3.10.exe` |
-| 3.11 | 3.11.15 | `python3.11.exe` |
-| 3.12 | 3.12.13 | `python3.12.exe` |
-| 3.13 | 3.13.15 | `python3.13.exe` |
-| 3.14 | 3.14.7 | `python3.14.exe` |
-| 3.15 | 3.15.0rc1 | `python3.15.exe` |
+| Minor | Installed release | Executable       |
+| ----- | ----------------- | ---------------- |
+| 3.9   | 3.9.25            | `python3.9.exe`  |
+| 3.10  | 3.10.20           | `python3.10.exe` |
+| 3.11  | 3.11.15           | `python3.11.exe` |
+| 3.12  | 3.12.13           | `python3.12.exe` |
+| 3.13  | 3.13.15           | `python3.13.exe` |
+| 3.14  | 3.14.7            | `python3.14.exe` |
+| 3.15  | 3.15.0rc1         | `python3.15.exe` |
 
 These interpreters are managed outside the Windows Python launcher registry,
 so `py -0p` is not an authoritative inventory and can show only the older
@@ -50,43 +50,43 @@ checks are authoritative for new tasks.
 Allowed states are `TODO`, `IN_PROGRESS`, `DONE`, and `BLOCKED`. At most one
 task may be `IN_PROGRESS`.
 
-| ID | Status | Task | Required dependency | Commit title |
-| --- | --- | --- | --- | --- |
-| P01 | DONE | PROFILE lifecycle | `6ca2a0d` | `feat: model profile lifecycle` |
-| P02 | DONE | Executable `PROFILE` statement | P01 | `feat: model profiled statement execution` |
-| P03 | DONE | USER profile and resource-pool assignments | P01 | `feat: add user workload assignments` |
-| P04 | DONE | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
-| P05 | DONE | USER search path and default roles | P03 | `feat: model user path and default roles` |
-| P06 | DONE | Safe USER configuration/reset actions | P04, P05 | `feat: model safe user configuration actions` |
-| P07 | DONE | AUTHENTICATION create/drop core | P06 | `feat: model authentication creation and drop` |
-| P08 | DONE | AUTHENTICATION structural ALTER actions | P07 | `feat: model authentication alter actions` |
-| P09 | TODO | AUTHENTICATION SET security boundary | P08 | `feat: add safe authentication parameters` |
-| P10 | TODO | COMMENT ON family | P02 | `feat: make Vertica comment statements semantic` |
-| P11 | TODO | VIEW lifecycle | P10 | `feat: complete semantic view lifecycle` |
-| P12 | TODO | SCHEMA lifecycle | P11 | `feat: complete semantic schema lifecycle` |
-| P13 | TODO | Administrative privilege targets | P09 | `feat: complete administrative privilege targets` |
-| P14 | TODO | Access-policy lifecycle | P13 | `feat: model access policy lifecycle` |
-| P15 | TODO | Ordinary constraint conformance | P12 | `feat: enforce Vertica constraint grammar` |
-| P16 | TODO | Native flexible-table definition form | P15 | `feat: model native flexible table definitions` |
-| P17 | TODO | Flexible-table CTAS | P16 | `feat: model flexible table ctas` |
-| P18 | TODO | Flex map transform core | P16 | `feat: model flex map transforms` |
-| P19 | TODO | ALTER LIBRARY | P10 | `feat: model library alterations` |
-| P20 | TODO | Common factory-backed UDx metadata ALTER | P19 | `feat: model factory udx alterations` |
-| P21 | TODO | Partition-maintenance completion | P12 | `feat: complete partition maintenance actions` |
-| P22 | TODO | Routine-body parsing foundation | P20 | `feat: add routine body parsing foundation` |
-| P23 | TODO | Stored-procedure CREATE shell | P22 | `feat: model stored procedure creation shells` |
-| P24 | TODO | Stored/external procedure DROP discrimination | P23 | `feat: distinguish stored and external procedure drops` |
-| P25 | TODO | Fault-group lifecycle | P14 | `feat: model fault group lifecycle` |
-| P26 | TODO | Node administration | P25 | `feat: model node alterations` |
-| P27 | TODO | Standard namespace lifecycle | P16 | `feat: model namespace lifecycle` |
-| P28 | TODO | Eon subnet lifecycle | P27 | `feat: model subnet lifecycle` |
-| P29 | TODO | Eon subcluster alterations | P28 | `feat: model subcluster alterations` |
-| P30 | TODO | Storage-location administration | P29 | `feat: model storage location administration` |
-| P31 | TODO | Archive lifecycle | P30 | `feat: model archive lifecycle` |
-| P32 | TODO | TLS-configuration lifecycle | P13 | `feat: model tls configuration lifecycle` |
-| P33 | TODO | Non-secret cryptographic-object core | P32 | `feat: add non-secret cryptographic object core` |
-| P34 | TODO | SQL-expression function lifecycle | P22, P24 | `feat: model sql function lifecycle` |
-| P35 | TODO | Coverage audit and queue refresh | P01–P34 | `docs: refresh remaining sql coverage backlog` |
+| ID  | Status | Task                                          | Required dependency | Commit title                                            |
+| --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
+| P01 | DONE   | PROFILE lifecycle                             | `6ca2a0d`           | `feat: model profile lifecycle`                         |
+| P02 | DONE   | Executable `PROFILE` statement                | P01                 | `feat: model profiled statement execution`              |
+| P03 | DONE   | USER profile and resource-pool assignments    | P01                 | `feat: add user workload assignments`                   |
+| P04 | DONE   | USER time and capacity limits                 | P03                 | `feat: model non-secret user limits`                    |
+| P05 | DONE   | USER search path and default roles            | P03                 | `feat: model user path and default roles`               |
+| P06 | DONE   | Safe USER configuration/reset actions         | P04, P05            | `feat: model safe user configuration actions`           |
+| P07 | DONE   | AUTHENTICATION create/drop core               | P06                 | `feat: model authentication creation and drop`          |
+| P08 | DONE   | AUTHENTICATION structural ALTER actions       | P07                 | `feat: model authentication alter actions`              |
+| P09 | DONE   | AUTHENTICATION SET security boundary          | P08                 | `feat: add safe authentication parameters`              |
+| P10 | TODO   | COMMENT ON family                             | P02                 | `feat: make Vertica comment statements semantic`        |
+| P11 | TODO   | VIEW lifecycle                                | P10                 | `feat: complete semantic view lifecycle`                |
+| P12 | TODO   | SCHEMA lifecycle                              | P11                 | `feat: complete semantic schema lifecycle`              |
+| P13 | TODO   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
+| P14 | TODO   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
+| P15 | TODO   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
+| P16 | TODO   | Native flexible-table definition form         | P15                 | `feat: model native flexible table definitions`         |
+| P17 | TODO   | Flexible-table CTAS                           | P16                 | `feat: model flexible table ctas`                       |
+| P18 | TODO   | Flex map transform core                       | P16                 | `feat: model flex map transforms`                       |
+| P19 | TODO   | ALTER LIBRARY                                 | P10                 | `feat: model library alterations`                       |
+| P20 | TODO   | Common factory-backed UDx metadata ALTER      | P19                 | `feat: model factory udx alterations`                   |
+| P21 | TODO   | Partition-maintenance completion              | P12                 | `feat: complete partition maintenance actions`          |
+| P22 | TODO   | Routine-body parsing foundation               | P20                 | `feat: add routine body parsing foundation`             |
+| P23 | TODO   | Stored-procedure CREATE shell                 | P22                 | `feat: model stored procedure creation shells`          |
+| P24 | TODO   | Stored/external procedure DROP discrimination | P23                 | `feat: distinguish stored and external procedure drops` |
+| P25 | TODO   | Fault-group lifecycle                         | P14                 | `feat: model fault group lifecycle`                     |
+| P26 | TODO   | Node administration                           | P25                 | `feat: model node alterations`                          |
+| P27 | TODO   | Standard namespace lifecycle                  | P16                 | `feat: model namespace lifecycle`                       |
+| P28 | TODO   | Eon subnet lifecycle                          | P27                 | `feat: model subnet lifecycle`                          |
+| P29 | TODO   | Eon subcluster alterations                    | P28                 | `feat: model subcluster alterations`                    |
+| P30 | TODO   | Storage-location administration               | P29                 | `feat: model storage location administration`           |
+| P31 | TODO   | Archive lifecycle                             | P30                 | `feat: model archive lifecycle`                         |
+| P32 | TODO   | TLS-configuration lifecycle                   | P13                 | `feat: model tls configuration lifecycle`               |
+| P33 | TODO   | Non-secret cryptographic-object core          | P32                 | `feat: add non-secret cryptographic object core`        |
+| P34 | TODO   | SQL-expression function lifecycle             | P22, P24            | `feat: model sql function lifecycle`                    |
+| P35 | TODO   | Coverage audit and queue refresh              | P01–P34             | `docs: refresh remaining sql coverage backlog`          |
 
 ## Task-selection and status protocol
 
@@ -114,7 +114,7 @@ task may be `IN_PROGRESS`.
    applicable. Change this task to `DONE`, update the dashboard, and add a short
    completion record with test counts and any deliberate boundary.
 8. Stage only the selected task and its plan/status updates, including all newly
-   created files, before the final versioned pre-commit run. This ensures
+   created files, before the single versioned pre-commit run. This ensures
    `pre_commit run --all-files` covers files that were previously untracked. If
    a fixer changes files, inspect the diff, restage only task files, rerun
    affected tests and the hook suite, and do not proceed until it is clean.
@@ -164,6 +164,29 @@ These rules apply to every implementation task:
 - Do not change the SQLGlot dependency line, project version, Python range, or
   public compatibility policy unless a task explicitly authorizes it.
 
+## Release environment and permissions
+
+Release environments and bytecode remain isolated, but downloaded artifacts
+are intentionally shared across tasks. Use the ignored repository-local cache:
+
+```powershell
+$cacheRoot = Join-Path (Resolve-Path -LiteralPath ".") ".agent-cache"
+$env:PRE_COMMIT_HOME = Join-Path $cacheRoot "pre-commit"
+$env:UV_CACHE_DIR = Join-Path $cacheRoot "uv"
+```
+
+Install pre-commit and commit-message hooks once per checkout, and only when
+either `.git/hooks/pre-commit` or `.git/hooks/commit-msg` is absent. Do not
+reinstall hooks for each task. Hook installation and execution must use the
+same permission boundary; a cache created by an approved outside-sandbox
+installation must not subsequently be invoked from a boundary that cannot read
+it. The repository-local cache avoids that mismatch on the current host.
+
+Dependency-resolving release commands are predictably network-capable. On a
+restricted host, request one scoped approval for the checked-in release driver
+before running it; do not first perform a download that is already expected to
+fail. This approval changes access, not test isolation or required coverage.
+
 ## Common release gate
 
 Every feature task must complete all applicable checks:
@@ -181,345 +204,44 @@ Every feature task must complete all applicable checks:
 6. Identifier provenance, quoted payload, Unicode/confusable, reserved-token,
    127/128/129-byte, invalid UTF-8, huge-number, prefix-modifier, and neighboring
    statement collision cases where applicable.
-7. Full default-runtime suite with branch coverage at or above 90%:
+7. Full default-runtime suite with branch coverage at or above 90%, plus Ruff
+   lint and formatting, strict mypy, and `git diff --check`. The release driver
+   in step 8 runs all of these checks; do not repeat them separately unless
+   diagnosing a failure.
+
+8. Full tests on every installed supported runtime, CPython 3.9 through 3.15,
+   plus the sdist/wheel build and clean installed-wheel smoke. Use the checked-in
+   release driver, supplying one distinctive statement and expected root class:
 
    ```powershell
-   $taskId = "pNN" # replace with the selected task ID
-   $env:PRE_COMMIT_HOME = Join-Path $env:TEMP "vertica-pre-commit-$taskId"
-   $env:UV_CACHE_DIR = Join-Path $env:TEMP "vertica-uv-cache-$taskId"
-   .venv/Scripts/python -m pre_commit run --all-files --show-diff-on-failure
-   .venv/Scripts/python -m pytest --cov
-   .venv/Scripts/python -m ruff check .
-   .venv/Scripts/python -m ruff format --check .
-   .venv/Scripts/python -m mypy src
-   git diff --check
+   ./scripts/release_gate.ps1 -TaskId pNN `
+       -SmokeSql "TASK-DISTINCTIVE SQL" `
+       -ExpectedClass "ExpectedExpressionClass"
    ```
 
-8. Full tests on every installed supported runtime, CPython 3.9 through 3.15.
-   Use the exact shims documented in **Installed local Python runtimes**; do not
-   infer availability from `py -0p`. Run 3.15 with
-   `-W error::DeprecationWarning`. Use isolated per-version environments so
-   dependencies and bytecode cannot leak between minors. A suitable PowerShell
-   pattern is:
-
-   ```powershell
-   $env:UV_CACHE_DIR = Join-Path $env:TEMP "vertica-uv-cache"
-   foreach ($minor in @("3.9", "3.10", "3.11", "3.12", "3.13", "3.14")) {
-       $python = Join-Path $env:USERPROFILE ".local\bin\python$minor.exe"
-       & $python --version
-       uv run --isolated --python $python --extra dev `
-           python -m pytest -p no:cacheprovider
-   }
-   $python315 = Join-Path $env:USERPROFILE ".local\bin\python3.15.exe"
-   & $python315 --version
-   uv run --isolated --python $python315 --extra dev `
-       python -W error::DeprecationWarning -m pytest -p no:cacheprovider
-   ```
-
-   If a shim is missing or fails to run, diagnose the local installation and
-   restore it with `uv python install <minor> --upgrade`; do not silently skip
-   the runtime or claim that it is unavailable. Isolated dependency resolution
-   can require PyPI access; if sandboxed networking blocks a required `uv` or
-   `pip` command, retry through the normal scoped approval mechanism rather than
-   weakening isolation or skipping the check.
-9. Build sdist/wheel without isolation when the sandbox cannot download build
-   dependencies. Use task-specific build and installation paths rather than
-   deleting or reusing `.wheel-venv`; for example, build to a task-specific
-   output directory and create a uniquely named environment under `$env:TEMP`
-   with `[guid]::NewGuid()`. Force-install the exact new wheel there, run
-   `pip check`, and use `python -I` to verify entry-point discovery plus one
-   distinctive AST/round-trip smoke from this task. Remove only generated build
-   directories created by the current task after verifying their resolved paths
-   are inside the workspace.
+   The script uses persistent ignored PRE_COMMIT/UV artifact caches, but creates
+   isolated per-version environments and a unique clean wheel environment. It
+   invokes every documented versioned shim directly, treats Python 3.15
+   deprecations as errors, builds without isolation, force-installs the exact
+   wheel with `uv pip install`, runs `pip check`, performs the `python -I`
+   entry-point smoke, and guards cleanup paths. A missing shim remains an
+   environment regression to diagnose with `uv python install <minor>
+   --upgrade`; never skip it.
+9. On hosts with restricted network access, request one scoped approval before
+   the release driver because dependency resolution is predictably network-
+   capable. Do not deliberately run a known-failing sandbox download first.
+   After all implementation and documentation files are staged, run
+   `pre_commit run --all-files --show-diff-on-failure` exactly once using the
+   same permission boundary as hook installation. Commit hooks still run
+   normally and must never be bypassed.
 
 ## Detailed tasks
 
-### P01 — PROFILE lifecycle — `DONE`
+Completed task specifications and completion records for P01–P08 are archived
+in [AGENT_TASK_PLAN_ARCHIVE.md](AGENT_TASK_PLAN_ARCHIVE.md). They are historical
+context and are not part of the mandatory active-plan read.
 
-**Outcome.** Finish the already-started semantic CREATE/ALTER/DROP PROFILE
-family. No unrelated slice may land first because the current dispatch calls
-undefined methods.
-
-**Required work.**
-
-- Preserve and complete `ProfileParameter`, `ProfileLimit`, `CreateProfile`,
-  `AlterProfile`, and `DropProfiles`.
-- Implement exactly:
-  - `CREATE PROFILE name LIMIT parameter value [parameter value ...]`
-  - `ALTER PROFILE name LIMIT parameter value [parameter value ...]`
-  - `ALTER PROFILE name RENAME TO new_name`
-  - `DROP PROFILE [IF EXISTS] name[, ...] [CASCADE]`
-- Support all 15 names already listed in `VerticaParser.PROFILE_PARAMETERS`.
-  Preserve order, require a nonempty list, and reject case-insensitive duplicates.
-- Support numeric values and `UNLIMITED` for CREATE/ALTER. Support explicit
-  `DEFAULT` only as an ALTER reset; reject explicit CREATE defaults.
-- Enforce documented per-setting domains lexically, including
-  `PASSWORD_MAX_LENGTH` 8–512 and the positive/nonnegative groups. Reject only
-  decidable minimum-setting values above an explicit numeric max in the same
-  list; inherited/catalog relationships remain server checks.
-- `ALTER PROFILE DEFAULT LIMIT ...` is valid. Reject quoted or unquoted DEFAULT
-  as CREATE name, DROP target, or rename source/destination.
-- Reuse the USER-era unqualified identifier, tokenizer-parity, 128-byte UTF-8,
-  surrogate, huge-number, and strict-generation policies.
-- Add generator methods/transforms with mirrored invariants. Rendering must stop
-  after `unsupported()`; never render a known-invalid child.
-- Add `tests/test_profiles.py` covering every parameter/value class, rename,
-  multi-drop, DEFAULT rules, duplicates, commas, empty/unknown/signed/decimal/
-  string/out-of-range values, explicit-max conflicts, modifiers, keyword
-  provenance, identifiers, malformed ASTs, serialization, optimizer/type
-  stability, foreign failure, comments, and all error levels.
-- Update all five project docs and the changelog. State that PROFILE settings are
-  policy metadata, not passwords; assignments, inheritance effects, ownership,
-  and current-password effects are catalog/server concerns.
-
-**Explicit exclusions.** USER `PROFILE` assignment and executable top-level
-`PROFILE` are P03 and P02. Do not implement either here.
-
-**Primary sources.** [CREATE PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-profile/),
-[ALTER PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-profile/),
-[ALTER PROFILE RENAME](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-profile-rename/),
-[DROP PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-profile/),
-and the [Profiles guide](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/hash-authentication/passwords/profiles/).
-
-**Completion record.** Added typed CREATE/ALTER/DROP PROFILE roots and ordered
-limit/parameter children for all 15 policy settings, including lexical value
-domains, ALTER-only DEFAULT resets, rename, multi-drop, identifier parity,
-serialization/optimizer/type stability, and atomic foreign failure. The 26.2
-source re-audit found no material grammar contradiction. PROFILE values are
-policy metadata, not passwords; USER assignment, ownership, inheritance and
-current-password effects remain catalog/server concerns, and executable
-top-level PROFILE remains P02. The default CPython 3.12.6 gate passed 2633 tests
-at 93.76% branch coverage; Ruff, formatting, strict mypy, full pre-commit,
-sdist/wheel build, clean force-install, `pip check`, and isolated installed-wheel
-smoke passed. CPython 3.14 and 3.15 were not available locally (`py -0p` exposed
-only 3.12), so those runtime suites were not claimed.
-
-### P02 — executable `PROFILE` statement — `DONE`
-
-**Outcome.** Add one custom wrapper with a traversable statement child for
-`PROFILE {sql-statement}`.
-
-**Required work.** Accept the documented SELECT and DML/COPY/MERGE statement
-families, retain hints/comments and semicolon ownership, reject empty bodies,
-DDL, transaction control, and nested PROFILE, and keep lifecycle PROFILE
-dispatch collision-free. Test every accepted root, multi-statements,
-serialization/optimizer traversal, and atomic foreign failure.
-
-**Primary source.** [PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/profile/).
-
-**Completion record.** Added an atomic `ProfileStatement` wrapper around one
-traversable SELECT/set-operation, INSERT, UPDATE, DELETE, Vertica COPY, or MERGE
-child. Hints/comments, serialization, optimizer/type traversal, parent links,
-and batch/semicolon ownership are preserved; empty, VALUES-only, malformed,
-DDL, transaction-control, and nested PROFILE bodies fail closed at every error
-level, and foreign generation is atomic. The 26.2 source re-audit found no
-material contradiction; execution output and catalog writes remain Vertica
-runtime effects. The default CPython 3.12.6 gate passed 2769 tests at 93.82%
-branch coverage; Ruff, formatting, strict mypy, full pre-commit, sdist/wheel
-build, clean force-install, `pip check`, and isolated installed-wheel smoke
-passed. CPython 3.14 and 3.15 were not available locally (`py -0p` exposed only
-3.12), so those runtime suites were not claimed.
-
-### P03 — USER profile and resource-pool assignments — `DONE`
-
-**Outcome.** Extend the non-secret USER AST from a singular action into an
-ordered parameter representation without losing compatibility with P01.
-
-**Required work.** Support typed `PROFILE {DEFAULT|name}` and `RESOURCE POOL
-name [FOR SUBCLUSTER name]` on documented CREATE/ALTER branches, legal ordering,
-duplicate/conflict checks, and serialization of existing USER actions. Preserve
-the credential firewall unchanged and treat profile/pool existence and grants
-as server checks.
-
-**Explicit exclusions.** No `IDENTIFIED BY`, `SALT`, `REPLACE`, capacity limits,
-roles, search path, or arbitrary configuration values.
-
-**Primary sources.** [CREATE USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-user/)
-and [ALTER USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-user/).
-
-**Completion record.** Added ordered typed USER parameter lists for profile
-`DEFAULT`/named assignments and global or subcluster-specific resource-pool
-assignments on CREATE and ALTER, while preserving existing account-state,
-password-expiry, rename, serialization, and credential-sanitization contracts.
-Duplicate/conflicting scopes, malformed ordering, identifiers, programmatic
-ASTs, and foreign generation fail atomically; profile/pool existence, grants,
-LDAP restrictions, and runtime effects remain catalog/server checks. The 26.2
-source re-audit found no material grammar contradiction. The default CPython
-3.12.6 gate passed 2871 tests at 93.86% coverage; Ruff, formatting, strict mypy,
-full pre-commit, sdist/wheel build, clean force-install, `pip check`, and
-isolated installed-wheel smoke passed. CPython 3.14 and 3.15 were not available
-locally (`py -0p` exposed only 3.12), so those runtime suites were not claimed.
-
-### P04 — USER time and capacity limits — `DONE`
-
-**Outcome.** Add the remaining deterministic non-secret capacity/time policy
-parameters to the ordered USER representation.
-
-**Required work.** Implement `GRACEPERIOD`, `IDLESESSIONTIMEOUT`,
-`MAXCONNECTIONS` including `ON DATABASE|NODE`, `MEMORYCAP`, `RUNTIMECAP`,
-`TEMPSPACECAP`, and `SECURITY_ALGORITHM`. Pin accepted sentinel/value forms and
-validate sizes/intervals lexically. Make literal rejection clause-aware because
-legitimate limits use strings, while proving that `IDENTIFIED BY`, `SALT`, and
-`REPLACE` still fail without disclosure.
-
-**Explicit exclusions.** Password material, search paths, roles, and arbitrary
-SET/CLEAR configuration.
-
-**Primary sources.** The 26.2 CREATE/ALTER USER pages linked in P03.
-
-**Completion record.** Added ordered typed USER parameters for grace, idle
-session, and runtime intervals; database/node-scoped connection counts;
-memory/temporary-space caps; and ALTER-only security-algorithm selection.
-Documented sentinels, percentage/unit shapes, interval ceilings, duplicates,
-programmatic ASTs, serialization/optimizer/type traversal, comments, and
-foreign generation are validated atomically. Literal admission is clause-aware,
-so legitimate limit strings are retained while `IDENTIFIED BY`, `SALT`, and
-`REPLACE` credential values still fail with fixed sanitized errors. The 26.2
-ALTER example places `SECURITY_ALGORITHM` immediately before excluded
-`IDENTIFIED BY` without the comma required by the page's general account-
-parameter grammar; this implementation follows the explicit comma-delimited
-grammar for the supported non-secret subset and does not infer credential
-behavior. Privileges, LDAP compatibility, effective limit interactions, and
-runtime password-expiration effects remain catalog/server concerns. The
-default CPython 3.12.6 gate passed 3042 tests at 93.82% coverage; isolated
-CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1
-suites each passed 3042 tests, with 3.15 treating deprecations as errors. Ruff,
-formatting, strict mypy, full pre-commit, sdist/wheel build, clean force-install,
-`pip check`, and installed-wheel entry-point/round-trip smoke passed.
-
-### P05 — USER search path and default roles — `DONE`
-
-**Outcome.** Model list-valued USER settings without confusing their commas
-with outer parameter separators.
-
-**Required work.** Support `SEARCH_PATH {DEFAULT|schema-list}` on documented
-CREATE/ALTER forms and exclusive ALTER `DEFAULT ROLE {NONE|ALL|role-list|ALL
-EXCEPT role-list}`. Enforce DEFAULT ROLE isolation, list cardinality, ordered
-names, qualification rules, and existing role/USER collision contracts.
-
-**Explicit exclusions.** Catalog grant/existence validation and credentials.
-
-**Primary source.** [ALTER USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-user/).
-
-**Completion record.** Added typed `UserSearchPath` and `UserDefaultRoles`
-children inside the ordered USER parameter model. CREATE/ALTER SEARCH_PATH now
-retains DEFAULT or a nonempty ordered schema list with at most one namespace
-qualifier; ALTER DEFAULT ROLE retains NONE, ALL, a nonempty role list, or ALL
-EXCEPT a nonempty role list and remains isolated from every other action.
-Identifier provenance, 128-byte UTF-8 limits, duplicate/cardinality checks,
-serialization, optimizer/type traversal, strict programmatic generation, and
-atomic foreign failure are covered. The 26.2 source re-audit found no material
-grammar contradiction. Schema/role existence, access or grants, session search
-precedence, and login-time role activation remain catalog/server concerns. The
-default CPython 3.12.6 gate passed 3159 tests at 93.67% branch coverage;
-isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
-3.15.0rc1 suites each passed 3159 tests, with 3.15 treating deprecations as
-errors. Ruff, formatting, strict mypy, full pre-commit, sdist/wheel build, clean
-force-install, `pip check`, and installed-wheel entry-point/round-trip smoke
-passed.
-
-### P06 — safe USER configuration/reset actions — `DONE`
-
-**Outcome.** Close the deterministic, non-secret remainder of ALTER USER while
-leaving unknown configuration values fail-closed.
-
-**Required work.** Add `TOTPSECRET RESET`, `CLEAR [PARAMETER] name-list`, and
-only a primary-source-audited, static non-secret allowlist for `SET [PARAMETER]
-name=value`. Unknown or string-valued parameters that could carry secrets must
-raise through the sanitizer and never enter an AST. Extend the credential
-sentinel harness across all literal token forms and error/log channels.
-
-**Primary source.** The 26.2 ALTER USER page linked in P05.
-
-**Completion record.** Added typed isolated `TOTPSECRET RESET`, ordered
-value-free `CLEAR [PARAMETER]` names, and a static five-parameter depot SET
-allowlist. The four reviewed Boolean controls accept only numeric 0/1;
-`DepotOperationsForQuery` accepts quoted or unquoted ALL/FETCHES/NONE and
-normalizes to an unquoted enum. Unknown names and unsafe/string values fail
-through the fixed pre-AST credential sanitizer across every supported literal
-token form and error/log channel. The 26.2 source re-audit found no material
-grammar contradiction: ALTER USER shows the five USER-level depot parameters,
-while the Eon parameter and depot guides define their finite values and show
-both quoted and unquoted enum usage. Parameter level eligibility, privileges,
-session propagation, TOTP enrollment, Eon mode, and runtime effects remain
-catalog/server concerns. The default CPython 3.12.6 gate passed 3326 tests at
-93.69% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
-3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 3326 tests, with 3.15 treating
-deprecations as errors. Ruff, formatting, strict mypy, full pre-commit,
-sdist/wheel build, clean force-install, `pip check`, and installed-wheel
-entry-point/round-trip smoke passed.
-
-### P07 — AUTHENTICATION create/drop core — `DONE`
-
-**Outcome.** Add a non-secret semantic core for CREATE/DROP AUTHENTICATION.
-
-**Required work.** Audit and implement a typed name, finite `METHOD`,
-`LOCAL|HOST [TLS|NO TLS] 'address'`, documented MFA/fallthrough flags, and
-single-target `DROP AUTHENTICATION [IF EXISTS] name [CASCADE]`. Keep network
-addresses opaque strings and catalog validation server-side. Add exact dispatch
-collision tests with USER, PROFILE, grants, quoted/confusable object kinds, and
-unsupported SET tails.
-
-**Explicit exclusions.** OAuth/LDAP bind credentials and all ALTER SET
-parameters. Recognized excluded tails must fail closed and be sanitized.
-
-**Primary sources.** [CREATE AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-authentication/)
-and [DROP AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-authentication/).
-
-**Completion record.** Added atomic typed CREATE/DROP AUTHENTICATION roots and
-a structured LOCAL/HOST access child for all eight formal 26.2 methods,
-omitted/TLS/NO TLS host matching, ENFORCEMFA, compatible FALLTHROUGH, and
-single-target IF EXISTS/CASCADE drops. Addresses remain opaque strings;
-existence, grants, priority, address validity, and runtime matching remain
-catalog/server concerns. All ALTER SET and unexpected CREATE SET values fail
-through a fixed pre-AST sanitizer, so bind passwords, OAuth secrets, keys,
-URLs, and unknown parameter values cannot enter an AST or parser diagnostics.
-The 26.2 source re-audit found two material documentation contradictions: the
-formal CREATE syntax block omits ENFORCEMFA even though its parameter table and
-creation guide place it after access, while that guide also contains stale
-TYPE LDAP and METHOD password examples absent from the formal METHOD grammar.
-This implementation accepts ENFORCEMFA but follows the formal METHOD keyword
-and eight-value table rather than those examples. The default CPython 3.12.6
-gate passed 3511 tests at 93.57% branch coverage; isolated CPython 3.9.25,
-3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed
-3511 tests, with 3.15 treating deprecations as errors. Ruff, formatting,
-strict mypy, full pre-commit, sdist/wheel build, clean force-install, package
-compatibility check, and installed-wheel entry-point/round-trip smoke passed.
-
-### P08 — AUTHENTICATION structural ALTER actions — `DONE`
-
-**Outcome.** Add one-action typed ALTER roots without opening parameter/secret
-syntax.
-
-**Required work.** After re-auditing the exact 26.2 matrix, support enable/
-disable, LOCAL/HOST access, rename, method, nonnegative priority, documented MFA
-state, and `[NO] FALLTHROUGH`. Enforce action exclusivity, exact host/TLS order,
-lexical huge-number handling, and generator symmetry.
-
-**Explicit exclusions.** ALTER SET and catalog method compatibility.
-
-**Primary source.** [ALTER AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-authentication/).
-
-**Completion record.** Added atomic one-action `AlterAuthentication` roots with
-typed enable/disable, LOCAL/HOST TLS access, rename, all eight finite methods,
-lexically nonnegative priority, Boolean MFA state, and `[NO] FALLTHROUGH`
-actions. Action exclusivity, exact clause order, huge priorities, identifiers,
-serialization/optimizer/type traversal, strict programmatic ASTs, and foreign
-atomicity are covered; ALTER SET remains behind the fixed pre-AST sanitizer.
-The 26.2 source re-audit found one material contradiction: the formal syntax
-omits ENFORCEMFA while the parameter table documents dynamic enable/disable and
-explicit true/false state. This implementation follows the parameter table's
-finite `ENFORCEMFA TRUE|FALSE` form and records the boundary rather than
-admitting other spellings. Current-method compatibility, address validity,
-priority effects, privileges, and runtime behavior remain catalog/server
-concerns. The default CPython 3.12.6 gate passed 3679 tests at 93.51% branch
-coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15,
-3.14.7, and 3.15.0rc1 suites each passed 3679 tests, with 3.15 treating
-deprecations as errors. Ruff, formatting, strict mypy, full pre-commit,
-sdist/wheel build, clean force-install, `pip check`, and installed-wheel
-entry-point/ALTER round-trip smoke passed.
-
-### P09 — AUTHENTICATION SET security boundary — `TODO`
+### P09 — AUTHENTICATION SET security boundary — `DONE`
 
 **Outcome.** Implement only a proved-safe non-secret parameter allowlist behind
 a generalized secret firewall.
@@ -538,7 +260,30 @@ partial permissive parser.
 **Primary sources.** [ALTER AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-authentication/)
 and [OAuth configuration](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/oauth-2-0-authentication/configuring-oauth-authentication/).
 
-**Completion record.** Pending.
+**Completion record.** Audited the documented LDAP, Ident, Kerberos, and OAuth
+parameter surfaces and added ordered typed SET support only for the two
+non-secret parameters with closed 26.2 value domains: standard-string
+`validate_type` (`IDP`/`JWT`) and `jit_enabled` (`yes`/`no`). Explicit
+`bind_password`/`client_secret` values, every arbitrary or incompletely pinned
+documented parameter, unknown future names, out-of-domain allowlisted values,
+and standard, escape, Unicode, national, dollar, bit, hex, and raw-fallback
+literal payloads fail through the fixed pre-AST sanitizer at every error level.
+Serialization, copying, transformation, optimizer/type traversal, comments,
+multi-statement boundaries, strict programmatic mutation, and direct/nested
+foreign generation are covered. The source audit found one material scope
+contradiction: ALTER AUTHENTICATION says SET is required for LDAP, Ident, and
+OAuth, while the 26.2 Kerberos guide documents `SET REALM`; REALM remains
+fail-closed because its arbitrary string domain can carry unreviewed payloads.
+The OAuth parameter page labels `validate_hostname` Boolean without pinning
+accepted SET spellings, so it also remains fail-closed rather than guessed.
+Method compatibility, parameter combinations, record state, endpoints,
+identities, roles/claims, and runtime authentication effects remain catalog or
+server concerns. The default CPython 3.12.6 gate passed 3832 tests at 93.51%
+branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15,
+3.14.7, and 3.15.0rc1 suites each passed 3832 tests, with 3.15 treating
+deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel entry-point/SET round-trip smoke
+passed.
 
 ### P10 — COMMENT ON family — `TODO`
 

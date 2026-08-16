@@ -51,7 +51,11 @@ plugin interface.
   values before they enter an AST.
 - Added one-action semantic ALTER AUTHENTICATION for enable/disable, LOCAL/HOST
   TLS access, rename, finite methods, lexical nonnegative priority, Boolean MFA
-  state, and fallthrough state while retaining the ALTER SET secret firewall.
+  state, and fallthrough state.
+- Added ordered typed ALTER AUTHENTICATION SET for the audited finite
+  `validate_type` and `jit_enabled` domains. Explicit secrets, arbitrary-string
+  parameters, unknown names, and nonstandard literal forms remain behind the
+  fixed pre-AST sanitizer.
 - Added semantic classic and workload routing-rule lifecycle, every documented
   ALTER action, exact session workload/resource-pool assignment, SHOW workload
   controls, and canonical `ON ROUTING RULE` privilege alias handling.

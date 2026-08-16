@@ -83,8 +83,9 @@ P1:
 
 - add the non-secret AUTHENTICATION CREATE/ALTER/DROP core with finite methods,
   structured LOCAL/HOST access, one-action enable/disable, rename, lexical
-  priority, MFA/fallthrough state, and sanitized rejection of every ALTER SET
-  value; the separately audited safe parameter boundary remains queued;
+  priority, MFA/fallthrough state, and a parameter-by-parameter ALTER SET audit;
+  only the closed non-secret `validate_type` and `jit_enabled` domains enter the
+  AST, while credentials, arbitrary strings, and unknown values fail sanitized;
 - expand privilege targets for UDx, data loaders, keys, libraries, and TLS
   configurations.
 

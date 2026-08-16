@@ -401,6 +401,14 @@ class VerticaParser(PostgresParser):
         "REJECT",
         "TRUST",
     }
+    AUTHENTICATION_SET_PARAMETERS: t.ClassVar[dict[str, str]] = {
+        "JIT_ENABLED": "jit_enabled",
+        "VALIDATE_TYPE": "validate_type",
+    }
+    AUTHENTICATION_SET_VALUES: t.ClassVar[dict[str, dict[str, str]]] = {
+        "jit_enabled": {"NO": "no", "YES": "yes"},
+        "validate_type": {"IDP": "IDP", "JWT": "JWT"},
+    }
 
     USER_DEFINED_EXTENSION_KINDS: t.ClassVar = (
         "AGGREGATE FUNCTION",
@@ -3121,10 +3129,50 @@ class VerticaParser(PostgresParser):
         token = self._tokens[self._index + index]
         if token.token_type != TokenType.VAR or not token.text.isascii():
             return
-        if statement == "ALTER" and any(word == "SET" for word in words[index + 1 :]):
+        after_authentication = self._tokens[self._index + index + 1 :]
+        if statement == "CREATE" and any(
+            token.text.isascii() and token.text.upper() == "SET" for token in after_authentication
+        ):
             raise ParseError("Unsupported secret-bearing AUTHENTICATION clause")
-        if statement == "CREATE" and any(word == "SET" for word in words[index + 1 :]):
+        if statement == "ALTER":
+            self._reject_unsafe_authentication_configuration(after_authentication)
+
+    def _reject_unsafe_authentication_configuration(self, tokens: list[Token]) -> None:
+        set_position = next(
+            (
+                position
+                for position, token in enumerate(tokens[1:], start=1)
+                if token.text.isascii() and token.text.upper() == "SET"
+            ),
+            None,
+        )
+        if set_position is None:
+            return
+        set_token = tokens[set_position]
+        if set_token.token_type != TokenType.SET or set_position != 1:
             raise ParseError("Unsupported secret-bearing AUTHENTICATION clause")
+
+        position = set_position + 1
+        while position < len(tokens):
+            name_token = tokens[position]
+            normalized = name_token.text.upper() if name_token.text.isascii() else ""
+            canonical = self.AUTHENTICATION_SET_PARAMETERS.get(normalized)
+            if name_token.token_type != TokenType.VAR or canonical is None:
+                raise ParseError("Unsupported secret-bearing AUTHENTICATION clause")
+            if position + 2 >= len(tokens) or tokens[position + 1].token_type != TokenType.EQ:
+                return
+            value = tokens[position + 2]
+            allowed_values = self.AUTHENTICATION_SET_VALUES[canonical]
+            if (
+                value.token_type != TokenType.STRING
+                or not value.text.isascii()
+                or value.text.upper() not in allowed_values
+            ):
+                raise ParseError("Unsupported secret-bearing AUTHENTICATION clause")
+            position += 3
+            if position >= len(tokens) or tokens[position].token_type != TokenType.COMMA:
+                return
+            position += 1
 
     def _reject_unsafe_user_configuration(self, statement: str, after_user: list[Token]) -> None:
         if statement != "ALTER" or len(after_user) < 2:
@@ -5742,6 +5790,56 @@ class VerticaParser(PostgresParser):
             action = self.expression(
                 vexp.AuthenticationAction(this=exp.var("METHOD"), expression=method)
             )
+        elif self._match(TokenType.SET):
+            parameters: list[exp.Expr] = []
+            seen: set[str] = set()
+            while True:
+                name_token = self._curr
+                normalized = name_token.text.upper() if name_token.text.isascii() else ""
+                canonical = self.AUTHENTICATION_SET_PARAMETERS.get(normalized)
+                if name_token.token_type != TokenType.VAR or canonical is None:
+                    self._raise_authentication_error(
+                        "ALTER AUTHENTICATION SET parameter is not in the reviewed allowlist"
+                    )
+                assert canonical is not None
+                if canonical in seen:
+                    self._raise_authentication_error(
+                        "ALTER AUTHENTICATION SET does not allow duplicate parameters"
+                    )
+                seen.add(canonical)
+                self._advance()
+                if not self._match(TokenType.EQ):
+                    self._raise_authentication_error(
+                        "ALTER AUTHENTICATION SET parameter requires ="
+                    )
+                value = self._parse_string()
+                allowed_values = self.AUTHENTICATION_SET_VALUES[canonical]
+                value_name = (
+                    value.this.upper()
+                    if isinstance(value, exp.Literal)
+                    and value.is_string
+                    and isinstance(value.this, str)
+                    and value.this.isascii()
+                    else ""
+                )
+                if value_name not in allowed_values:
+                    self._raise_authentication_error(
+                        f"ALTER AUTHENTICATION SET {canonical} requires one of "
+                        + ", ".join(allowed_values.values())
+                    )
+                assert isinstance(value, exp.Literal)
+                value.set("this", allowed_values[value_name])
+                parameters.append(
+                    self.expression(
+                        vexp.AuthenticationParameter(
+                            this=exp.var(canonical),
+                            expression=value,
+                        )
+                    )
+                )
+                if not self._match(TokenType.COMMA):
+                    break
+            action = self.expression(vexp.AuthenticationSet(expressions=parameters))
         elif self._match_text_seq("PRIORITY"):
             if self._curr.token_type != TokenType.NUMBER or not self._curr.text.isdigit():
                 self._raise_authentication_error(

@@ -1,4 +1,5 @@
 .venv/
+.agent-cache/
 .wheel-venv/
 __pycache__/
 *.py[cod]
