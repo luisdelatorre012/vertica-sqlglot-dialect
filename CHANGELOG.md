@@ -59,6 +59,10 @@ plugin interface.
   `validate_type` and `jit_enabled` domains. Explicit secrets, arbitrary-string
   parameters, unknown names, and nonstandard literal forms remain behind the
   fixed pre-AST sanitizer.
+- Completed structured KEY, LIBRARY, DATA LOADER, and TLS CONFIGURATION GRANT/
+  REVOKE targets with exact privilege, target-cardinality, qualification,
+  grant-option, EXTEND, cascade, identifier, and foreign-generation contracts;
+  existing factory-UDx overload signatures remain typed and unchanged.
 - Added semantic classic and workload routing-rule lifecycle, every documented
   ALTER action, exact session workload/resource-pool assignment, SHOW workload
   controls, and canonical `ON ROUTING RULE` privilege alias handling.

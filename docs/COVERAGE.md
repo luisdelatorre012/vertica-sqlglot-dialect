@@ -77,7 +77,7 @@ Status meanings:
 
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Object `GRANT` / `REVOKE` | Semantic | Canonical single-target grants, multi-object and all-in-schema targets, `EXTEND`, routine signatures, locations, resource-pool subclusters, grant options, and cascade semantics |
+| Object `GRANT` / `REVOKE` | Semantic | Canonical roots with structured single/multi-object and all-in-schema targets, exact KEY/LIBRARY/DATA LOADER/TLS CONFIGURATION privilege and qualification domains, direction-specific `EXTEND`/grant-option/cascade rules, typed routine signatures, locations, and resource-pool subclusters |
 | Role and authentication `GRANT` / `REVOKE` | Semantic | Compound role/grantee lists, admin-option revocation, cascade, and authentication associations use dedicated AST nodes |
 | Role lifecycle | Semantic | Canonical `CREATE`, rename, and single-target `DROP`; atomic custom AST for comma-separated drops; exact unqualified-name and option validation |
 | User, profile, and authentication lifecycle | Partial | The non-secret USER core is semantic, including ordered CREATE/ALTER `PROFILE`, global/subcluster `RESOURCE POOL`, grace/idle/runtime intervals, scoped connection limits, memory/temp-space caps, CREATE/ALTER `SEARCH_PATH`, ALTER-only `SECURITY_ALGORITHM`, isolated `DEFAULT ROLE`, `TOTPSECRET RESET`, value-free configuration CLEAR, and a five-parameter depot-only SET allowlist; PROFILE CREATE/ALTER/DROP is semantic with all 15 ordered policy settings, numeric/`UNLIMITED` values, ALTER-only `DEFAULT` resets and rename, and ordered dependency drops. AUTHENTICATION CREATE/ALTER/DROP is semantic for finite methods, LOCAL/HOST TLS matching, enable/disable, rename, lexical nonnegative priority, Boolean MFA state, fallthrough state, single-target dependency drops, and the closed non-secret `validate_type`/`jit_enabled` SET domains; all other SET values remain sanitized |
@@ -102,6 +102,10 @@ Some rules require information that a syntax-only dialect does not have:
 - Library paths, dependency loading, SDK compatibility, factory availability,
   exported UDx signatures, and schema/library privileges require catalog and
   host state. The dialect validates only deterministic registration grammar.
+- Administrative privilege ownership, object existence, principal user/role
+  type, and grant-chain effects require catalog state. The dialect enforces the
+  documented KEY, LIBRARY, DATA LOADER, and TLS CONFIGURATION syntax, including
+  the asymmetric GRANT/REVOKE privilege and cascade domains.
 - Iceberg `COLUMN TYPES` compatibility depends on the source metadata, and a
   flexible external table's custom parser compatibility depends on the
   installed UDx catalog. The dialect validates their documented syntax and

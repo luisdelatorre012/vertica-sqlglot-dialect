@@ -3382,6 +3382,14 @@ class VerticaGenerator(PostgresGenerator):
                 self.unsupported("Vertica workload privilege targets require canonical WORKLOAD")
             self._validate_workload_security_generation(expression, target, grant)
 
+        if isinstance(kind, str) and workload_kind in {
+            "DATA LOADER",
+            "KEY",
+            "LIBRARY",
+            "TLS CONFIGURATION",
+        }:
+            self._validate_admin_security_generation(expression, target, grant)
+
         if (
             grant
             and kind == "RESOURCE POOL"
@@ -3401,10 +3409,116 @@ class VerticaGenerator(PostgresGenerator):
                 "LOCATION",
                 "PROCEDURE",
                 "RESOURCE POOL",
+                "TLS CONFIGURATION",
                 "WORKLOAD",
             }
         ):
             self.unsupported(f"Vertica {kind} privileges do not support EXTEND")
+
+    def _validate_admin_security_generation(
+        self,
+        expression: exp.Grant | exp.Revoke,
+        target: vexp.VerticaPrivilegeTarget,
+        grant: bool,
+    ) -> None:
+        kind = target.args.get("kind")
+        if not isinstance(kind, str):
+            self.unsupported("Vertica administrative privilege target kind must be a string")
+            return
+        grant_domains = {
+            "DATA LOADER": {"ALTER", "DROP", "EXECUTE"},
+            "KEY": {"ALTER", "DROP", "USAGE"},
+            "LIBRARY": {"DROP", "USAGE"},
+            "TLS CONFIGURATION": {"ALTER", "DROP", "USAGE"},
+        }
+        revoke_domains = {**grant_domains, "LIBRARY": {"USAGE"}}
+
+        allowed_root_args = {"privileges", "kind", "securable", "principals", "grant_option"}
+        if not grant:
+            allowed_root_args.add("cascade")
+        if self._has_statement_extras(expression, allowed_root_args):
+            self.unsupported(f"Vertica {kind} privileges contain unsupported statement fields")
+        if expression.args.get("kind") is not None:
+            self.unsupported(f"Vertica {kind} uses its structured target, not an outer kind")
+
+        grant_option = expression.args.get("grant_option")
+        if grant_option is not None and not isinstance(grant_option, bool):
+            self.unsupported(f"Vertica {kind} grant-option flag must be boolean")
+
+        cascade = expression.args.get("cascade")
+        if grant and cascade is not None:
+            self.unsupported(f"Vertica {kind} GRANT does not support CASCADE")
+        if not grant and cascade is not None:
+            if kind not in {"DATA LOADER", "LIBRARY"}:
+                self.unsupported(f"Vertica {kind} REVOKE does not support CASCADE")
+            elif cascade != "CASCADE":
+                self.unsupported(f"Vertica {kind} REVOKE CASCADE marker is malformed")
+
+        privileges = expression.args.get("privileges")
+        if not isinstance(privileges, list) or not privileges:
+            self.unsupported(f"Vertica {kind} requires at least one privilege")
+            privileges = []
+        is_all = False
+        for privilege in privileges:
+            if not isinstance(privilege, exp.GrantPrivilege):
+                self.unsupported(f"Vertica {kind} privileges require typed privilege nodes")
+                continue
+            marker = privilege.args.get("this")
+            if not isinstance(marker, exp.Var) or self._has_statement_extras(marker, {"this"}):
+                self.unsupported(f"Vertica {kind} privilege names require keyword markers")
+                continue
+            name = marker.name.upper()
+            if isinstance(privilege, vexp.ExtendedGrantPrivilege):
+                privileges_flag = privilege.args.get("privileges")
+                if (
+                    kind not in {"KEY", "LIBRARY"}
+                    or not grant
+                    or name != "ALL"
+                    or privilege.args.get("extend") is not True
+                    or not (privileges_flag is None or isinstance(privileges_flag, bool))
+                    or self._has_statement_extras(privilege, {"this", "privileges", "extend"})
+                ):
+                    self.unsupported(f"Invalid {kind} ALL EXTEND privilege")
+                is_all = True
+                continue
+            if self._has_statement_extras(privilege, {"this"}) or privilege.expressions:
+                self.unsupported(f"Invalid {kind} privilege structure")
+            if name in {"ALL", "ALL PRIVILEGES"}:
+                is_all = True
+            elif name not in (grant_domains if grant else revoke_domains)[kind]:
+                self.unsupported(f"Invalid {kind} privilege: {name}")
+
+        if is_all and len(privileges) != 1:
+            self.unsupported(f"Vertica {kind} ALL cannot be combined with other privileges")
+        if grant and kind == "TLS CONFIGURATION" and is_all:
+            self.unsupported("Vertica TLS CONFIGURATION does not support GRANT ALL")
+
+        if self._has_statement_extras(target, {"kind", "expressions"}):
+            self.unsupported(f"Vertica {kind} targets do not support qualifiers")
+        targets = target.expressions
+        if not targets or (kind == "DATA LOADER" and len(targets) != 1):
+            self.unsupported(f"Vertica {kind} target cardinality is invalid")
+        maximum_parts = {"DATA LOADER": 2, "KEY": 1, "LIBRARY": 3, "TLS CONFIGURATION": 1}[kind]
+        for value in targets:
+            if not isinstance(value, exp.Table) or not 1 <= len(value.parts) <= maximum_parts:
+                self.unsupported(f"Vertica {kind} target qualification is invalid")
+                continue
+            if self._has_statement_extras(value, {"this", "db", "catalog"}):
+                self.unsupported(f"Vertica {kind} targets cannot use table modifiers")
+            for part in value.parts:
+                self._validate_user_identifier(part, f"Vertica {kind} target")
+
+        principals = expression.args.get("principals")
+        if not isinstance(principals, list) or not principals:
+            self.unsupported(f"Vertica {kind} requires at least one principal")
+            principals = []
+        for principal in principals:
+            if not isinstance(principal, exp.GrantPrincipal):
+                self.unsupported(f"Vertica {kind} principals require typed principal nodes")
+                continue
+            if self._has_statement_extras(principal, {"this"}):
+                self.unsupported(f"Vertica {kind} principals cannot have qualifiers")
+            self._validate_user_identifier(principal.args.get("this"), f"Vertica {kind} principal")
 
     def _validate_workload_security_generation(
         self,

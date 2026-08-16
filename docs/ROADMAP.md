@@ -86,8 +86,9 @@ P1:
   priority, MFA/fallthrough state, and a parameter-by-parameter ALTER SET audit;
   only the closed non-secret `validate_type` and `jit_enabled` domains enter the
   AST, while credentials, arbitrary strings, and unknown values fail sanitized;
-- expand privilege targets for UDx, data loaders, keys, libraries, and TLS
-  configurations.
+- complete structured KEY, LIBRARY, DATA LOADER, and TLS CONFIGURATION GRANT/
+  REVOKE targets with exact privilege, cardinality, qualification, option, and
+  cascade domains while retaining typed UDx overload signatures.
 
 ## Phase 4 — maintenance and administration
 

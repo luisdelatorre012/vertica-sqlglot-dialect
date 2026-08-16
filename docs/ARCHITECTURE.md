@@ -179,6 +179,23 @@ payloads as opaque command text. Workload privilege targets remain canonical
 GRANT/REVOKE roots, but `ON ROUTING RULE` normalizes to the documented
 `ON WORKLOAD` target and receives exact USAGE/target/principal validation.
 
+Administrative KEY, LIBRARY, DATA LOADER, and TLS CONFIGURATION privileges use
+canonical `exp.Grant`/`exp.Revoke` roots with a `VerticaPrivilegeTarget` child,
+even for one target. That structured child makes the object kind, ordered
+targets, qualification, and foreign-generation boundary explicit. The parser
+and generator share direction-specific privilege domains: DATA LOADER grants
+and revokes accept ALTER/DROP/EXECUTE or ALL and exactly one target; KEY accepts
+USAGE/ALTER/DROP or ALL, with EXTEND only on grants; LIBRARY grants accept
+USAGE/DROP or ALL with optional EXTEND while revokes accept only USAGE or ALL;
+and TLS CONFIGURATION grants accept USAGE/ALTER/DROP while revokes additionally
+accept ALL. DATA LOADER and LIBRARY alone accept cascading revocation. KEY and
+TLS names are unqualified, DATA LOADER allows one schema qualifier, and LIBRARY
+allows database plus schema. Principal and target components share the strict
+128-byte identifier contract. Catalog ownership, object existence, and whether
+a named principal is a user or role remain server checks. Existing typed UDx
+routine signatures and their empty, named, and typed argument forms are
+unchanged.
+
 Load-balance-group roots follow the same atomic statement policy. A
 `LoadBalanceGroupSpec` keeps its ADDRESS, FAULT GROUP, or SUBCLUSTER members,
 optional policy, and required branch-specific filter traversable; a separate

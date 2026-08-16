@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P12 — SCHEMA lifecycle**.
-- Next eligible tasks are selected by dependency and numeric order; P13 is the
+- Completed through **P13 — Administrative privilege targets**.
+- Next eligible tasks are selected by dependency and numeric order; P14 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -64,7 +64,7 @@ task may be `IN_PROGRESS`.
 | P10 | DONE   | COMMENT ON family                             | P02                 | `feat: make Vertica comment statements semantic`        |
 | P11 | DONE   | VIEW lifecycle                                | P10                 | `feat: complete semantic view lifecycle`                |
 | P12 | DONE   | SCHEMA lifecycle                              | P11                 | `feat: complete semantic schema lifecycle`              |
-| P13 | TODO   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
+| P13 | DONE   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
 | P14 | TODO   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | TODO   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
 | P16 | TODO   | Native flexible-table definition form         | P15                 | `feat: model native flexible table definitions`         |
@@ -394,7 +394,7 @@ with 3.15 treating deprecations as errors. Ruff, formatting, strict mypy,
 sdist/wheel build, clean force-install, `pip check`, and installed-wheel
 entry-point/ALTER SCHEMA round-trip smoke passed.
 
-### P13 — administrative privilege targets — `TODO`
+### P13 — administrative privilege targets — `DONE`
 
 **Outcome.** Close the named remaining GRANT/REVOKE target gaps without
 regressing the current role, authentication, workload, resource-pool, routine,
@@ -411,7 +411,26 @@ both parser and strict generator.
 [GRANT LIBRARY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-library/),
 and [GRANT TLS CONFIGURATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-tls-config/).
 
-**Completion record.** Pending.
+**Completion record.** Added exact structured KEY, LIBRARY, DATA LOADER, and
+TLS CONFIGURATION targets to the canonical GRANT/REVOKE roots, including
+direction-specific privilege domains, target cardinality and qualification,
+`ALL [PRIVILEGES]`, grant-option, `EXTEND`, cascade, principal, and 128-byte
+identifier validation in both parser and strict generator. Single targets now
+retain `VerticaPrivilegeTarget`, so direct and nested foreign generation fails
+atomically instead of losing the Vertica object kind. The existing scalar,
+aggregate, analytic, transform, filter, parser, and source UDx grant signatures
+remain typed and unchanged. The re-opened 26.2 pages expose deliberate
+directional asymmetries: TLS grants do not accept ALL although TLS revokes do;
+LIBRARY grants accept DROP and optional ALL EXTEND while revokes accept only
+USAGE or ALL; and only DATA LOADER and LIBRARY revokes accept CASCADE. These
+formal syntax and parameter domains are enforced as documented. Ownership,
+object existence, principal user/role type, current-database resolution, and
+grant-chain effects remain catalog/server checks. The focused P13 suite passed
+97 tests. The default CPython 3.12.6 gate passed 4493 tests at 93.13% branch
+coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1 suites each passed 4493 tests, with 3.15 treating deprecations as
+errors. Ruff, formatting, strict mypy, sdist/wheel build, clean force-install,
+`pip check`, and installed-wheel entry-point/KEY GRANT round-trip smoke passed.
 
 ### P14 — access-policy lifecycle — `TODO`
 

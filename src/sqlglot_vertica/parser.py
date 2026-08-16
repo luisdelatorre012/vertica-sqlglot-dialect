@@ -161,12 +161,23 @@ class VerticaParser(PostgresParser):
         "TRANSFORM FUNCTION": {"ALTER", "DROP", "EXECUTE"},
         "WORKLOAD": {"USAGE"},
     }
+    SECURITY_ADMIN_GRANT_PRIVILEGES: t.ClassVar = {
+        "DATA LOADER": {"ALTER", "DROP", "EXECUTE"},
+        "KEY": {"ALTER", "DROP", "USAGE"},
+        "LIBRARY": {"DROP", "USAGE"},
+        "TLS CONFIGURATION": {"ALTER", "DROP", "USAGE"},
+    }
+    SECURITY_ADMIN_REVOKE_PRIVILEGES: t.ClassVar = {
+        **SECURITY_ADMIN_GRANT_PRIVILEGES,
+        "LIBRARY": {"USAGE"},
+    }
     SECURITY_EXTEND_DISALLOWED: t.ClassVar = {
         "DATABASE",
         "DATA LOADER",
         "LOCATION",
         "PROCEDURE",
         "RESOURCE POOL",
+        "TLS CONFIGURATION",
         "WORKLOAD",
     }
     ROUTING_RULE_OBJECT_BOUNDARIES: t.ClassVar = {
@@ -1524,6 +1535,7 @@ class VerticaParser(PostgresParser):
 
         principals = self._parse_security_principals("GRANT principal")
         grant_option = self._match_text_seq("WITH", "GRANT", "OPTION")
+        self._validate_admin_security_options(target, principals, grant=True)
         if target.args.get("kind") == "WORKLOAD":
             if len(principals) != 1:
                 self.raise_error("WORKLOAD GRANT requires exactly one principal")
@@ -1573,6 +1585,9 @@ class VerticaParser(PostgresParser):
 
         principals = self._parse_security_principals("REVOKE principal")
         cascade = "CASCADE" if self._match_text_seq("CASCADE") else None
+        self._validate_admin_security_options(
+            target, principals, grant=False, cascade=bool(cascade)
+        )
         if target.args.get("kind") == "WORKLOAD":
             if len(principals) != 1:
                 self.raise_error("WORKLOAD REVOKE requires exactly one principal")
@@ -1810,7 +1825,52 @@ class VerticaParser(PostgresParser):
             kind = ""
 
         targets = self._parse_security_named_targets("privilege target")
-        return self.expression(vexp.VerticaPrivilegeTarget(kind=kind, expressions=targets))
+        target = self.expression(vexp.VerticaPrivilegeTarget(kind=kind, expressions=targets))
+        self._validate_admin_security_target(target)
+        return target
+
+    def _validate_admin_security_target(self, target: vexp.VerticaPrivilegeTarget) -> None:
+        kind = target.args.get("kind")
+        if kind not in self.SECURITY_ADMIN_GRANT_PRIVILEGES:
+            return
+
+        targets = target.expressions
+        if kind == "DATA LOADER" and len(targets) != 1:
+            self._raise_security_error("DATA LOADER privileges require exactly one target")
+
+        maximum_parts = {"DATA LOADER": 2, "KEY": 1, "LIBRARY": 3, "TLS CONFIGURATION": 1}[kind]
+        for value in targets:
+            if not isinstance(value, exp.Table) or len(value.parts) > maximum_parts:
+                self._raise_security_error(f"Invalid {kind} target qualification")
+            for part in value.parts:
+                self._validate_user_name_component(part, f"{kind} privilege target")
+
+    def _validate_admin_security_options(
+        self,
+        target: vexp.VerticaPrivilegeTarget,
+        principals: list[exp.GrantPrincipal],
+        *,
+        grant: bool,
+        cascade: bool = False,
+    ) -> None:
+        kind = target.args.get("kind")
+        if kind not in self.SECURITY_ADMIN_GRANT_PRIVILEGES:
+            return
+        for principal in principals:
+            identifier = principal.args.get("this")
+            if not isinstance(identifier, exp.Identifier):
+                self._raise_security_error(f"Invalid {kind} principal")
+            assert isinstance(identifier, exp.Identifier)
+            self._validate_user_name_component(identifier, f"{kind} privilege principal")
+        if not grant and cascade and kind not in {"DATA LOADER", "LIBRARY"}:
+            self._raise_security_error(f"{kind} REVOKE does not support CASCADE")
+
+    def _raise_security_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
 
     def _parse_security_named_target(self, label: str) -> exp.Expr:
         if self._match_texts({"FOR", "FROM", "TO", "WITH"}, advance=False):
@@ -1884,20 +1944,29 @@ class VerticaParser(PostgresParser):
             any(isinstance(privilege, vexp.ExtendedGrantPrivilege) for privilege in privileges)
             and kind in self.SECURITY_EXTEND_DISALLOWED
         ):
+            if kind in self.SECURITY_ADMIN_GRANT_PRIVILEGES:
+                self._raise_security_error(f"{kind} privileges do not support EXTEND")
             self.raise_error(f"{kind} privileges do not support EXTEND")
 
         if is_all:
-            if kind == "WORKLOAD" or (grant and kind == "RESOURCE POOL"):
+            if kind == "WORKLOAD" or (grant and kind in {"RESOURCE POOL", "TLS CONFIGURATION"}):
+                if kind in self.SECURITY_ADMIN_GRANT_PRIVILEGES:
+                    self._raise_security_error(f"{kind} does not support GRANT ALL")
                 self.raise_error(f"{kind} does not support GRANT ALL")
             return
 
-        allowed = self.SECURITY_EXACT_PRIVILEGES.get(kind)
+        admin_domains = (
+            self.SECURITY_ADMIN_GRANT_PRIVILEGES if grant else self.SECURITY_ADMIN_REVOKE_PRIVILEGES
+        )
+        allowed = admin_domains.get(kind, self.SECURITY_EXACT_PRIVILEGES.get(kind))
         if allowed is None:
             return
         if kind == "WORKLOAD" and len(privileges) != 1:
             self.raise_error("WORKLOAD requires exactly one USAGE privilege")
         for privilege in privileges:
             if privilege.name.upper() not in allowed or privilege.expressions:
+                if kind in self.SECURITY_ADMIN_GRANT_PRIVILEGES:
+                    self._raise_security_error(f"Invalid {kind} privilege: {privilege.name}")
                 self.raise_error(f"Invalid {kind} privilege: {privilege.name}")
 
     def _canonical_security_target(
@@ -1905,7 +1974,12 @@ class VerticaParser(PostgresParser):
     ) -> tuple[str | None, exp.Expr]:
         kind_value = target.args.get("kind")
         kind = kind_value if isinstance(kind_value, str) and kind_value else None
-        custom_kinds = {*self.SECURITY_ROUTINE_KINDS, "LOCATION", "WORKLOAD"}
+        custom_kinds = {
+            *self.SECURITY_ROUTINE_KINDS,
+            *self.SECURITY_ADMIN_GRANT_PRIVILEGES,
+            "LOCATION",
+            "WORKLOAD",
+        }
         if (
             len(target.expressions) != 1
             or target.args.get("all_in_schema")
