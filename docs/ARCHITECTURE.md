@@ -72,8 +72,13 @@ prevent foreign generators from silently discarding account state or secondary
 drop targets. Ordered CREATE/ALTER parameter lists combine existing
 `UserAction` account lock/unlock and password-expiry markers with typed
 `UserParameter` profile and resource-pool assignments, including an optional
-subcluster identifier. No password, TOTP secret, or other credential value has
-an AST slot. Names share the connection-policy lexical rules, additionally
+subcluster identifier, plus deterministic time/capacity settings. Interval
+strings are checked lexically against the documented 20-day or one-year
+ceilings; memory and temporary-space strings have finite percentage/unit
+shapes; and `MAXCONNECTIONS` retains its explicit database/node scope.
+ALTER-only `SECURITY_ALGORITHM` retains one canonical reviewed enum string. No
+password, TOTP secret, or other credential value has an AST slot. Names share
+the connection-policy lexical rules, additionally
 enforce Vertica's 128-byte UTF-8 limit, and use the active Vertica tokenizer's
 identifier-token domain rather than a frozen reserved-word list. Profile and
 pool existence, pool grants, and assignment effects remain catalog/server
@@ -84,10 +89,12 @@ parser errors can retain or log their values, with a fixed sanitized error at
 every `ErrorLevel`. This is defense in depth, not a secret-handling API:
 SQLGlot tokenization happens before parser hooks, and an upstream tokenizer
 error (for example, an unterminated credential string) can include raw input.
-Callers must never submit real credentials to this dialect. AUTHENTICATION,
-USER capacity/time limits, roles, search paths, and arbitrary configuration
-parameters stay outside the current semantic contract and fail closed when
-recognized.
+Callers must never submit real credentials to this dialect. Literal admission
+is clause-aware so documented USER limit strings can enter the AST while
+credential literals in `IDENTIFIED BY`, `SALT`, and `REPLACE` paths still fail
+before ordinary parser diagnostics. AUTHENTICATION, USER roles, search paths,
+and arbitrary configuration parameters stay outside the current semantic
+contract and fail closed when recognized.
 
 PROFILE lifecycle uses `CreateProfile`, `AlterProfile`, and `DropProfiles`
 roots plus ordered `ProfileLimit` and `ProfileParameter` children. The values

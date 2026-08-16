@@ -32,10 +32,11 @@ plugin interface.
 - Added semantic role lifecycle DDL and typed CREATE/ALTER/DROP RESOURCE POOL
   statements with subcluster selectors and parameter-domain validation.
 - Added a bounded non-secret USER lifecycle: ordered CREATE/ALTER account-state,
-  password-expiry, profile, and global/subcluster resource-pool assignments;
-  isolated ALTER rename; and ordered multi-user DROP with postfix `IF EXISTS`
-  and `CASCADE`. Credential-bearing forms fail with sanitized errors and secret
-  values never enter the AST.
+  password-expiry, profile, global/subcluster resource-pool, time/capacity, and
+  scoped connection settings; ALTER-only security-algorithm selection; isolated
+  ALTER rename; and ordered multi-user DROP with postfix `IF EXISTS` and
+  `CASCADE`. Credential-bearing forms fail with clause-aware sanitized errors
+  and secret values never enter the AST.
 - Added semantic CREATE/ALTER/DROP PROFILE lifecycle with all 15 ordered
   password-policy metadata settings, lexical numeric domains, `UNLIMITED`,
   ALTER-only `DEFAULT` resets, rename, multi-target drop, and strict foreign

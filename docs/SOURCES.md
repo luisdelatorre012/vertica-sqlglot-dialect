@@ -149,6 +149,7 @@ called out in code review.
 - [CREATE USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-user/)
 - [ALTER USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-user/)
 - [DROP USER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-user/)
+- [Interval literal](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/literals/datetime-literals/interval-literal/)
 - [CREATE PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-profile/)
 - [ALTER PROFILE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-profile/)
 - [ALTER PROFILE RENAME](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-profile-rename/)

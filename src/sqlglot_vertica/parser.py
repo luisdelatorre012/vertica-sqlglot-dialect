@@ -14,6 +14,11 @@ from sqlglot.parsers.postgres import PostgresParser
 from sqlglot_vertica import dml as vdml
 from sqlglot_vertica import expressions as vexp
 from sqlglot_vertica.tokens import DirectedPostfixComment, MisplacedDirectedComment
+from sqlglot_vertica.user_limits import (
+    USER_INTERVAL_MAX_SECONDS,
+    canonical_user_capacity,
+    user_interval_at_most,
+)
 
 if t.TYPE_CHECKING:
     from sqlglot._typing import E
@@ -275,12 +280,16 @@ class VerticaParser(PostgresParser):
         "ACCOUNT": TokenType.VAR,
         "BY": TokenType.VAR,
         "CASCADE": TokenType.VAR,
+        "DATABASE": TokenType.DATABASE,
         "EXPIRE": TokenType.VAR,
         "EXISTS": TokenType.EXISTS,
         "FOR": TokenType.FOR,
         "IF": TokenType.VAR,
         "IDENTIFIED": TokenType.VAR,
         "LOCK": TokenType.LOCK,
+        "NODE": TokenType.VAR,
+        "NONE": TokenType.VAR,
+        "ON": TokenType.ON,
         "NOT": TokenType.NOT,
         "PASSWORD": TokenType.VAR,
         "POOL": TokenType.VAR,
@@ -292,6 +301,13 @@ class VerticaParser(PostgresParser):
         "TO": TokenType.VAR,
         "TOTPSECRET": TokenType.VAR,
         "UNLOCK": TokenType.VAR,
+        "GRACEPERIOD": TokenType.VAR,
+        "IDLESESSIONTIMEOUT": TokenType.VAR,
+        "MAXCONNECTIONS": TokenType.VAR,
+        "MEMORYCAP": TokenType.VAR,
+        "RUNTIMECAP": TokenType.VAR,
+        "SECURITY_ALGORITHM": TokenType.VAR,
+        "TEMPSPACECAP": TokenType.VAR,
     }
     USER_SENSITIVE_LITERAL_TOKENS: t.ClassVar[set[TokenType]] = {
         TokenType.BIT_STRING,
@@ -303,6 +319,15 @@ class VerticaParser(PostgresParser):
         TokenType.STRING,
         TokenType.UNICODE_STRING,
     }
+    USER_SAFE_STRING_PARAMETERS: t.ClassVar[set[str]] = {
+        "GRACEPERIOD",
+        "IDLESESSIONTIMEOUT",
+        "MEMORYCAP",
+        "RUNTIMECAP",
+        "SECURITY_ALGORITHM",
+        "TEMPSPACECAP",
+    }
+    USER_INTERVAL_MAX_SECONDS = USER_INTERVAL_MAX_SECONDS
     PROFILE_PARAMETERS: t.ClassVar[tuple[str, ...]] = (
         "PASSWORD_LIFE_TIME",
         "PASSWORD_MIN_LIFE_TIME",
@@ -3009,46 +3034,21 @@ class VerticaParser(PostgresParser):
         after_user = tokens[index + 1 :]
         if not after_user:
             return
-        if any(token.token_type in self.USER_SENSITIVE_LITERAL_TOKENS for token in after_user):
-            raise ParseError("Unsupported secret-bearing USER clause")
-        if statement == "DROP":
-            position = 0
-            if self._tokens_are_user_keywords(after_user, "IF", "EXISTS"):
-                position = 2
-            if position < len(after_user):
-                position += 1
-            while position < len(after_user) and after_user[position].token_type == TokenType.COMMA:
-                position += 2
-            if self._tokens_are_user_keywords(after_user[position:], "CASCADE"):
-                position += 1
-            unsupported_tail = after_user[position:]
-        else:
-            tail = after_user[1:]
-            account_state = self._tokens_are_user_keywords(
-                tail, "ACCOUNT", "LOCK"
-            ) or self._tokens_are_user_keywords(tail, "ACCOUNT", "UNLOCK")
-            password_expire = self._tokens_are_user_keywords(tail, "PASSWORD", "EXPIRE")
-            if statement == "ALTER" and self._tokens_are_user_keywords(tail, "RENAME", "TO"):
-                supported_length = min(3, len(tail))
-            elif account_state or password_expire:
-                supported_length = 2
-            else:
-                supported_length = 0
-            unsupported_tail = tail[supported_length:]
-
-        sensitive_keyword = any(
-            self._tokens_are_user_keywords(unsupported_tail[token_index:], "IDENTIFIED", "BY")
-            or self._tokens_are_user_keywords(unsupported_tail[token_index:], "TOTPSECRET")
-            or (
-                self._tokens_are_user_keywords(unsupported_tail[token_index:], "PASSWORD")
-                and not self._tokens_are_user_keywords(
-                    unsupported_tail[token_index:], "PASSWORD", "EXPIRE"
-                )
+        for token_index, token in enumerate(after_user):
+            if token.token_type not in self.USER_SENSITIVE_LITERAL_TOKENS:
+                continue
+            previous = after_user[token_index - 1] if token_index else None
+            safe_string = (
+                token.token_type == TokenType.STRING
+                and previous is not None
+                and previous.token_type == TokenType.VAR
+                and previous.text.isascii()
+                and previous.text.upper() in self.USER_SAFE_STRING_PARAMETERS
+                and statement != "DROP"
+                and (token_index == 2 or after_user[token_index - 2].token_type == TokenType.COMMA)
             )
-            for token_index in range(len(unsupported_tail))
-        )
-        if sensitive_keyword:
-            raise ParseError("Unsupported secret-bearing USER clause")
+            if not safe_string:
+                raise ParseError("Unsupported secret-bearing USER clause")
 
     def _user_prefix_length(self, statement: str, words: list[str]) -> int:
         index = 0
@@ -3959,9 +3959,13 @@ class VerticaParser(PostgresParser):
                 self._raise_user_error(f"{statement} PASSWORD requires EXPIRE")
             return self.expression(vexp.UserAction(this=exp.var("PASSWORD EXPIRE"))), "PASSWORD"
         if self._match_user_keywords("PROFILE"):
-            value = self._parse_profile_identifier(f"{statement} PROFILE", allow_default=True)
+            profile_value = self._parse_profile_identifier(
+                f"{statement} PROFILE", allow_default=True
+            )
             return (
-                self.expression(vexp.UserParameter(this=exp.var("PROFILE"), expression=value)),
+                self.expression(
+                    vexp.UserParameter(this=exp.var("PROFILE"), expression=profile_value)
+                ),
                 "PROFILE",
             )
         if self._match_user_keywords("RESOURCE", "POOL"):
@@ -3985,8 +3989,109 @@ class VerticaParser(PostgresParser):
                 ),
                 key,
             )
+        for name, maximum_seconds in self.USER_INTERVAL_MAX_SECONDS.items():
+            if self._match_user_keywords(name):
+                interval_value = self._parse_user_interval(name, maximum_seconds, statement)
+                return (
+                    self.expression(
+                        vexp.UserParameter(this=exp.var(name), expression=interval_value)
+                    ),
+                    name,
+                )
+        if self._match_user_keywords("MAXCONNECTIONS"):
+            if self._match_user_keywords("NONE"):
+                connections_value: exp.Expr = self.expression(exp.var("NONE"))
+                scope = None
+            else:
+                token = self._curr
+                if (
+                    token.token_type != TokenType.NUMBER
+                    or not token.text.isascii()
+                    or not token.text.isdigit()
+                ):
+                    self._raise_user_error(
+                        f"{statement} MAXCONNECTIONS requires NONE or an unsigned integer"
+                    )
+                self._advance()
+                connections_value = self.expression(exp.Literal.number(token.text))
+                if not self._match_user_keywords("ON"):
+                    self._raise_user_error(
+                        f"{statement} MAXCONNECTIONS integer requires ON DATABASE or ON NODE"
+                    )
+                if self._match_user_keywords("DATABASE"):
+                    scope = self.expression(exp.var("DATABASE"))
+                elif self._match_user_keywords("NODE"):
+                    scope = self.expression(exp.var("NODE"))
+                else:
+                    self._raise_user_error(
+                        f"{statement} MAXCONNECTIONS ON requires DATABASE or NODE"
+                    )
+                    scope = None
+            return (
+                self.expression(
+                    vexp.UserParameter(
+                        this=exp.var("MAXCONNECTIONS"),
+                        expression=connections_value,
+                        scope=scope,
+                    )
+                ),
+                "MAXCONNECTIONS",
+            )
+        for name in ("MEMORYCAP", "TEMPSPACECAP"):
+            if self._match_user_keywords(name):
+                if self._match_user_keywords("NONE"):
+                    capacity_value: exp.Expr = self.expression(exp.var("NONE"))
+                else:
+                    capacity_value = self._parse_user_string(name, statement)
+                    canonical = canonical_user_capacity(capacity_value.this)
+                    if canonical is None:
+                        self._raise_user_error(
+                            f"{statement} {name} requires a quoted 0-100 percentage or K/M/G/T size"
+                        )
+                    capacity_value.set("this", canonical)
+                return (
+                    self.expression(
+                        vexp.UserParameter(this=exp.var(name), expression=capacity_value)
+                    ),
+                    name,
+                )
+        if self._match_user_keywords("SECURITY_ALGORITHM"):
+            if statement != "ALTER USER":
+                self._raise_user_error("SECURITY_ALGORITHM is supported only by ALTER USER")
+            algorithm_value = self._parse_user_string("SECURITY_ALGORITHM", statement)
+            algorithm = algorithm_value.this.upper() if algorithm_value.this.isascii() else ""
+            if algorithm not in {"NONE", "SHA512", "MD5"}:
+                self._raise_user_error(
+                    f"{statement} SECURITY_ALGORITHM requires 'NONE', 'SHA512', or 'MD5'"
+                )
+            algorithm_value.set("this", algorithm)
+            return (
+                self.expression(
+                    vexp.UserParameter(
+                        this=exp.var("SECURITY_ALGORITHM"), expression=algorithm_value
+                    )
+                ),
+                "SECURITY_ALGORITHM",
+            )
         self._raise_user_error(f"{statement} requires a supported account parameter")
         return self.expression(vexp.UserAction(this=exp.var(""))), ""
+
+    def _parse_user_interval(self, name: str, maximum_seconds: int, statement: str) -> exp.Expr:
+        if self._match_user_keywords("NONE"):
+            return self.expression(exp.var("NONE"))
+        value = self._parse_user_string(name, statement)
+        if not user_interval_at_most(value.this, maximum_seconds):
+            self._raise_user_error(
+                f"{statement} {name} requires a nonnegative interval within its documented limit"
+            )
+        return value
+
+    def _parse_user_string(self, name: str, statement: str) -> exp.Literal:
+        if self._curr.token_type != TokenType.STRING:
+            self._raise_user_error(f"{statement} {name} requires a standard string literal")
+        value = self.expression(exp.Literal.string(self._curr.text))
+        self._advance()
+        return value
 
     def _parse_create_profile(self, replace: bool) -> vexp.CreateProfile:
         if replace:

@@ -13,6 +13,11 @@ from sqlglot.helper import csv
 
 from sqlglot_vertica import dml as vdml
 from sqlglot_vertica import expressions as vexp
+from sqlglot_vertica.user_limits import (
+    USER_INTERVAL_MAX_SECONDS,
+    canonical_user_capacity,
+    user_interval_at_most,
+)
 
 
 class VerticaGenerator(PostgresGenerator):
@@ -28,6 +33,7 @@ class VerticaGenerator(PostgresGenerator):
     NVL2_SUPPORTED = True
     SUPPORTS_MERGE_WHERE = True
     SUPPORTS_MEDIAN = True
+    USER_INTERVAL_MAX_SECONDS = USER_INTERVAL_MAX_SECONDS
 
     TYPE_MAPPING: t.ClassVar = {
         **PostgresGenerator.TYPE_MAPPING,
@@ -1532,7 +1538,7 @@ class VerticaGenerator(PostgresGenerator):
 
     def userparameter_sql(self, expression: vexp.UserParameter) -> str:
         valid = True
-        if self._has_user_extras(expression, {"this", "expression", "subcluster"}):
+        if self._has_user_extras(expression, {"this", "expression", "subcluster", "scope"}):
             self.unsupported("USER parameter contains unsupported fields")
             valid = False
         marker = expression.args.get("this")
@@ -1545,12 +1551,25 @@ class VerticaGenerator(PostgresGenerator):
             self.unsupported("USER parameter marker must be an ASCII string")
             valid = False
         name = raw_name.upper() if isinstance(raw_name, str) and raw_name.isascii() else ""
-        if name not in {"PROFILE", "RESOURCE POOL"}:
+        supported = {
+            "PROFILE",
+            "RESOURCE POOL",
+            "GRACEPERIOD",
+            "IDLESESSIONTIMEOUT",
+            "MAXCONNECTIONS",
+            "MEMORYCAP",
+            "RUNTIMECAP",
+            "SECURITY_ALGORITHM",
+            "TEMPSPACECAP",
+        }
+        if name not in supported:
             self.unsupported("Unsupported USER parameter")
             return ""
+        subcluster = expression.args.get("subcluster")
+        scope = expression.args.get("scope")
         if name == "PROFILE":
-            if expression.args.get("subcluster") is not None:
-                self.unsupported("USER PROFILE does not accept a subcluster")
+            if subcluster is not None or scope is not None:
+                self.unsupported("USER PROFILE does not accept a subcluster or scope")
                 valid = False
             if not isinstance(value, exp.Identifier):
                 self.unsupported("USER PROFILE requires a typed name or DEFAULT")
@@ -1562,17 +1581,109 @@ class VerticaGenerator(PostgresGenerator):
             elif not self._validate_user_identifier(value, "USER PROFILE name"):
                 valid = False
             return f"PROFILE {self.sql(value)}" if valid else ""
-        if not self._validate_user_identifier(value, "USER RESOURCE POOL name"):
+        if name == "RESOURCE POOL" and scope is not None:
+            self.unsupported("USER RESOURCE POOL does not accept a scope")
             valid = False
-        subcluster = expression.args.get("subcluster")
-        if subcluster is not None and not self._validate_user_identifier(
-            subcluster, "USER RESOURCE POOL FOR SUBCLUSTER name"
+        if name == "RESOURCE POOL" and not self._validate_user_identifier(
+            value, "USER RESOURCE POOL name"
         ):
             valid = False
-        if not valid:
-            return ""
-        suffix = f" FOR SUBCLUSTER {self.sql(subcluster)}" if subcluster is not None else ""
-        return f"RESOURCE POOL {self.sql(value)}{suffix}"
+        if (
+            name == "RESOURCE POOL"
+            and subcluster is not None
+            and not self._validate_user_identifier(
+                subcluster, "USER RESOURCE POOL FOR SUBCLUSTER name"
+            )
+        ):
+            valid = False
+        if name == "RESOURCE POOL":
+            if not valid:
+                return ""
+            suffix = f" FOR SUBCLUSTER {self.sql(subcluster)}" if subcluster is not None else ""
+            return f"RESOURCE POOL {self.sql(value)}{suffix}"
+        if subcluster is not None:
+            self.unsupported(f"USER {name} does not accept a subcluster")
+            valid = False
+        if name in self.USER_INTERVAL_MAX_SECONDS:
+            if scope is not None:
+                self.unsupported(f"USER {name} does not accept a scope")
+                valid = False
+            valid = (
+                self._validate_user_interval(name, value, self.USER_INTERVAL_MAX_SECONDS[name])
+                and valid
+            )
+        elif name == "MAXCONNECTIONS":
+            valid = self._validate_user_maxconnections(value, scope) and valid
+            if valid:
+                scope_name = self._user_keyword_value(scope)
+                suffix = f" ON {self.sql(scope)}" if scope_name is not None else ""
+                return f"MAXCONNECTIONS {self.sql(value)}{suffix}"
+        elif name in {"MEMORYCAP", "TEMPSPACECAP"}:
+            if scope is not None:
+                self.unsupported(f"USER {name} does not accept a scope")
+                valid = False
+            if self._user_keyword_value(value) != "NONE":
+                string_value = self._user_string_value(value)
+                if string_value is None:
+                    self.unsupported(f"USER {name} requires a string limit or NONE")
+                    valid = False
+                elif canonical_user_capacity(string_value) != string_value:
+                    self.unsupported(f"USER {name} requires a canonical 0-100 percentage or size")
+                    valid = False
+        elif name == "SECURITY_ALGORITHM":
+            if scope is not None:
+                self.unsupported("USER SECURITY_ALGORITHM does not accept a scope")
+                valid = False
+            if self._user_string_value(value) not in {"NONE", "SHA512", "MD5"}:
+                self.unsupported("USER SECURITY_ALGORITHM requires 'NONE', 'SHA512', or 'MD5'")
+                valid = False
+        return f"{name} {self.sql(value)}" if valid else ""
+
+    def _validate_user_interval(self, name: str, value: object, maximum_seconds: int) -> bool:
+        if self._user_keyword_value(value) == "NONE":
+            return True
+        string_value = self._user_string_value(value)
+        if string_value is None or not user_interval_at_most(string_value, maximum_seconds):
+            self.unsupported(f"USER {name} requires a nonnegative interval within its limit")
+            return False
+        return True
+
+    def _validate_user_maxconnections(self, value: object, scope: object) -> bool:
+        if self._user_keyword_value(value) == "NONE":
+            if scope is not None:
+                self.unsupported("USER MAXCONNECTIONS NONE does not accept ON scope")
+                return False
+            return True
+        valid = True
+        if (
+            not isinstance(value, exp.Literal)
+            or value.is_string
+            or not isinstance(value.this, str)
+            or not value.this.isascii()
+            or not value.this.isdigit()
+            or self._has_user_extras(value, {"this", "is_string"})
+        ):
+            self.unsupported("USER MAXCONNECTIONS requires an unsigned integer or NONE")
+            valid = False
+        if self._user_keyword_value(scope) not in {"DATABASE", "NODE"}:
+            self.unsupported("USER MAXCONNECTIONS integer requires ON DATABASE or ON NODE")
+            valid = False
+        return valid
+
+    def _user_keyword_value(self, value: object) -> str | None:
+        if not isinstance(value, exp.Var) or self._has_user_extras(value, {"this"}):
+            return None
+        raw = value.args.get("this")
+        return raw if isinstance(raw, str) and raw.isascii() and raw == raw.upper() else None
+
+    def _user_string_value(self, value: object) -> str | None:
+        valid = (
+            isinstance(value, exp.Literal)
+            and value.is_string
+            and isinstance(value.this, str)
+            and not self._has_user_extras(value, {"this", "is_string"})
+        )
+        return value.this if valid and isinstance(value, exp.Literal) else None
 
     def _validate_user_parameters(self, parameters: list[exp.Expr], statement: str) -> bool:
         valid = True
@@ -1604,6 +1715,19 @@ class VerticaGenerator(PostgresGenerator):
                         if parameter.args.get("subcluster") is not None
                         else "RESOURCE POOL"
                     )
+                elif name in {
+                    "GRACEPERIOD",
+                    "IDLESESSIONTIMEOUT",
+                    "MAXCONNECTIONS",
+                    "MEMORYCAP",
+                    "RUNTIMECAP",
+                    "SECURITY_ALGORITHM",
+                    "TEMPSPACECAP",
+                }:
+                    key = name
+                    if name == "SECURITY_ALGORITHM" and statement != "ALTER USER":
+                        self.unsupported("SECURITY_ALGORITHM is supported only by ALTER USER")
+                        valid = False
                 else:
                     self.unsupported(f"{statement} contains an unsupported UserParameter")
                     valid = False

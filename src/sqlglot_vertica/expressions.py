@@ -688,7 +688,12 @@ class UserAction(exp.Expression):
 class UserParameter(exp.Expression):
     """One ordered, non-secret CREATE/ALTER USER account parameter."""
 
-    arg_types: t.ClassVar = {"this": True, "expression": True, "subcluster": False}
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": True,
+        "subcluster": False,
+        "scope": False,
+    }
 
 
 class CreateUser(exp.Create):

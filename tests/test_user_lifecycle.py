@@ -94,6 +94,14 @@ def _parameter(
     )
 
 
+def _limit_parameter(name: str, value: exp.Expr, *, scope: str | None = None) -> vexp.UserParameter:
+    return vexp.UserParameter(
+        this=exp.var(name),
+        expression=value,
+        scope=exp.var(scope) if scope is not None else None,
+    )
+
+
 def _set_arg(expression: exp.Expr, key: str, value: object) -> exp.Expr:
     expression.set(key, value)
     return expression
@@ -103,6 +111,194 @@ def _assert_parent_links(expression: exp.Expr) -> None:
     for parent in expression.walk():
         for child in parent.iter_expressions():
             assert child.parent is parent
+
+
+@pytest.mark.parametrize(
+    ("sql", "name", "value", "scope"),
+    [
+        ("CREATE USER analyst GRACEPERIOD NONE", "GRACEPERIOD", "NONE", None),
+        ("CREATE USER analyst GRACEPERIOD '20 days'", "GRACEPERIOD", "20 days", None),
+        (
+            "ALTER USER analyst IDLESESSIONTIMEOUT '365 days'",
+            "IDLESESSIONTIMEOUT",
+            "365 days",
+            None,
+        ),
+        ("CREATE USER analyst MAXCONNECTIONS NONE", "MAXCONNECTIONS", "NONE", None),
+        (
+            "CREATE USER analyst MAXCONNECTIONS 00010 ON DATABASE",
+            "MAXCONNECTIONS",
+            "00010",
+            "DATABASE",
+        ),
+        (
+            "ALTER USER analyst MAXCONNECTIONS 10 ON NODE",
+            "MAXCONNECTIONS",
+            "10",
+            "NODE",
+        ),
+        ("CREATE USER analyst MEMORYCAP '40%'", "MEMORYCAP", "40%", None),
+        ("ALTER USER analyst MEMORYCAP NONE", "MEMORYCAP", "NONE", None),
+        ("CREATE USER analyst RUNTIMECAP '1 year'", "RUNTIMECAP", "1 year", None),
+        ("ALTER USER analyst TEMPSPACECAP '10G'", "TEMPSPACECAP", "10G", None),
+        (
+            "ALTER USER analyst SECURITY_ALGORITHM 'SHA512'",
+            "SECURITY_ALGORITHM",
+            "SHA512",
+            None,
+        ),
+    ],
+)
+def test_user_time_and_capacity_limits_are_typed(
+    sql: str, name: str, value: str, scope: str | None
+) -> None:
+    expression = assert_roundtrip(sql)
+    parameters = expression.args.get("parameters") or expression.args.get("actions")
+    assert isinstance(parameters, list)
+    parameter = parameters[0]
+    assert isinstance(parameter, vexp.UserParameter)
+    assert parameter.this.name == name
+    assert parameter.expression.name == value
+    parsed_scope = parameter.args.get("scope")
+    assert (parsed_scope.name if isinstance(parsed_scope, exp.Var) else None) == scope
+    _assert_parent_links(expression)
+
+
+def test_user_limits_preserve_order_and_canonicalize_finite_values() -> None:
+    sql = (
+        "ALTER USER analyst GRACEPERIOD '1 day 2 hours', MAXCONNECTIONS 12 ON NODE, "
+        "MEMORYCAP '010g', RUNTIMECAP '12:30:00', TEMPSPACECAP NONE, "
+        "SECURITY_ALGORITHM 'md5'"
+    )
+    expression = parse_one(sql, read="vertica")
+    assert _strict(expression) == (
+        "ALTER USER analyst GRACEPERIOD '1 day 2 hours', MAXCONNECTIONS 12 ON NODE, "
+        "MEMORYCAP '010G', RUNTIMECAP '12:30:00', TEMPSPACECAP NONE, "
+        "SECURITY_ALGORITHM 'MD5'"
+    )
+    assert parse_one(_strict(expression), read="vertica") == expression
+    assert exp.Expr.load(expression.dump()) == expression
+    assert expression.copy() == expression
+    transformed = expression.transform(
+        lambda node: (
+            exp.Literal.string("20G")
+            if isinstance(node, exp.Literal) and node.is_string and node.this == "010G"
+            else node
+        )
+    )
+    assert "MEMORYCAP '20G'" in _strict(transformed)
+    optimized = optimize(expression, dialect="vertica")
+    assert isinstance(optimized, vexp.AlterUser)
+    assert len(list(optimized.find_all(vexp.UserParameter))) == 6
+    annotated = annotate_types(expression, dialect="vertica")
+    assert all(
+        parameter.type == exp.DType.UNKNOWN.into_expr()
+        for parameter in annotated.find_all(vexp.UserParameter)
+    )
+
+
+def test_user_limits_preserve_comments_and_statement_boundaries() -> None:
+    expression = assert_roundtrip(
+        "/* lead */ CREATE USER analyst GRACEPERIOD '1 hour', "
+        "MAXCONNECTIONS 2 ON DATABASE /* tail */"
+    )
+    assert _strict(expression).count("lead") == 1
+    assert _strict(expression).count("tail") == 1
+    statements = parse(
+        "CREATE USER analyst MEMORYCAP '1G'; "
+        "ALTER USER analyst SECURITY_ALGORITHM 'MD5'; "
+        "DROP USER analyst",
+        read="vertica",
+    )
+    assert [type(statement) for statement in statements] == [
+        vexp.CreateUser,
+        vexp.AlterUser,
+        vexp.DropUsers,
+    ]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE USER analyst GRACEPERIOD",
+        "CREATE USER analyst GRACEPERIOD DEFAULT",
+        "CREATE USER analyst GRACEPERIOD '21 days'",
+        "CREATE USER analyst GRACEPERIOD '-1 day'",
+        "CREATE USER analyst GRACEPERIOD '1.5 days'",
+        "CREATE USER analyst IDLESESSIONTIMEOUT '366 days'",
+        "ALTER USER analyst RUNTIMECAP '1 year 1 microsecond'",
+        "ALTER USER analyst RUNTIMECAP '24:60:00'",
+        "ALTER USER analyst RUNTIMECAP '999999999999999999999 days'",
+        "CREATE USER analyst MAXCONNECTIONS",
+        "CREATE USER analyst MAXCONNECTIONS -1 ON NODE",
+        "CREATE USER analyst MAXCONNECTIONS +1 ON NODE",
+        "CREATE USER analyst MAXCONNECTIONS 1",
+        "CREATE USER analyst MAXCONNECTIONS 1 ON",
+        "CREATE USER analyst MAXCONNECTIONS 1 ON CLUSTER",
+        "CREATE USER analyst MAXCONNECTIONS NONE ON NODE",
+        "CREATE USER analyst MEMORYCAP 10G",
+        "CREATE USER analyst MEMORYCAP '101%'",
+        "CREATE USER analyst MEMORYCAP '-1G'",
+        "CREATE USER analyst MEMORYCAP '1.5G'",
+        "CREATE USER analyst TEMPSPACECAP ''",
+        "CREATE USER analyst SECURITY_ALGORITHM 'SHA512'",
+        "ALTER USER analyst SECURITY_ALGORITHM SHA512",
+        "ALTER USER analyst SECURITY_ALGORITHM 'SHA-512'",
+        "ALTER USER analyst SECURITY_ALGORITHM 'BCRYPT'",
+        "ALTER USER analyst MEMORYCAP '1G', MEMORYCAP NONE",
+        "ALTER USER analyst MAXCONNECTIONS 1 ON NODE, MAXCONNECTIONS NONE",
+        "ALTER USER analyst SECURITY_ALGORITHM 'MD5', SECURITY_ALGORITHM 'NONE'",
+        "ALTER USER analyst GRACEPERIOD '1 day' GRACEPERIOD NONE",
+    ],
+)
+@pytest.mark.parametrize(
+    "error_level", [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE]
+)
+def test_invalid_user_limits_fail_closed(sql: str, error_level: ErrorLevel) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'CREATE USER analyst "GRACEPERIOD" NONE',
+        "CREATE USER analyst GRACEPERİOD NONE",
+        'CREATE USER analyst MAXCONNECTIONS 1 "ON" NODE',
+        'CREATE USER analyst MAXCONNECTIONS 1 ON "NODE"',
+        "ALTER USER analyst \"SECURITY_ALGORITHM\" 'SHA512'",
+    ],
+)
+def test_user_limit_keyword_provenance_is_exact(sql: str) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica")
+
+
+def test_programmatic_user_limits_generate_exact_sql() -> None:
+    create = vexp.CreateUser(
+        this=_identifier("analyst"),
+        kind="USER",
+        parameters=[
+            _limit_parameter("GRACEPERIOD", exp.Literal.string("2 hours")),
+            _limit_parameter("MAXCONNECTIONS", exp.Literal.number("10"), scope="DATABASE"),
+            _limit_parameter("MEMORYCAP", exp.Literal.string("25%")),
+        ],
+    )
+    alter = vexp.AlterUser(
+        this=_identifier("analyst"),
+        kind="USER",
+        actions=[
+            _limit_parameter("TEMPSPACECAP", exp.var("NONE")),
+            _limit_parameter("SECURITY_ALGORITHM", exp.Literal.string("SHA512")),
+        ],
+    )
+    assert _strict(create) == (
+        "CREATE USER analyst GRACEPERIOD '2 hours', MAXCONNECTIONS 10 ON DATABASE, MEMORYCAP '25%'"
+    )
+    assert _strict(alter) == ("ALTER USER analyst TEMPSPACECAP NONE, SECURITY_ALGORITHM 'SHA512'")
+    for expression in (create, alter):
+        assert parse_one(_strict(expression), read="vertica") == expression
+        _assert_parent_links(expression)
 
 
 @pytest.mark.parametrize(
@@ -633,6 +829,10 @@ def test_user_dispatch_does_not_collide_with_other_object_names(sql: str) -> Non
         "ALTER USER analyst ACCOUNT LOCK PROFILE U&'S3CR3T_DO_NOT_LEAK'",
         "ALTER USER analyst ACCOUNT LOCK PROFILE N'S3CR3T_DO_NOT_LEAK'",
         "ALTER USER analyst ACCOUNT LOCK PROFILE $$S3CR3T_DO_NOT_LEAK$$",
+        "CREATE USER analyst MEMORYCAP '1G', IDENTIFIED BY 'S3CR3T_DO_NOT_LEAK'",
+        "CREATE USER analyst TEMPSPACECAP E'S3CR3T_DO_NOT_LEAK'",
+        ("ALTER USER analyst RUNTIMECAP '1 hour', IDENTIFIED BY 'hash' SALT 'S3CR3T_DO_NOT_LEAK'"),
+        ("ALTER USER analyst SECURITY_ALGORITHM 'SHA512', REPLACE 'S3CR3T_DO_NOT_LEAK'"),
         "CREATE \"USER\" analyst PROFILE E'S3CR3T_DO_NOT_LEAK'",
         "DROP USER analyst IDENTIFIED BY 'S3CR3T_DO_NOT_LEAK'",
         "DROP USER analyst PROFILE E'S3CR3T_DO_NOT_LEAK'",
@@ -672,6 +872,7 @@ def test_tokenizable_secret_bearing_user_input_is_sanitized_at_every_error_level
         "CREATE USER analyst PROFILE security, RESOURCE POOL general",
         "ALTER USER analyst PASSWORD EXPIRE",
         "ALTER USER analyst RESOURCE POOL etl FOR SUBCLUSTER sc",
+        "ALTER USER analyst GRACEPERIOD '1 hour', MAXCONNECTIONS 10 ON NODE",
         "DROP USER IF EXISTS analyst, loader CASCADE",
     ],
 )
@@ -683,7 +884,12 @@ def test_user_statement_roots_fail_atomically_in_foreign_dialects(sql: str, dial
 
 
 def test_user_action_leaf_fails_atomically_in_foreign_dialects() -> None:
-    for leaf in (_action("ACCOUNT LOCK"), _parameter("PROFILE", "security")):
+    for leaf in (
+        _action("ACCOUNT LOCK"),
+        _parameter("PROFILE", "security"),
+        _limit_parameter("GRACEPERIOD", exp.Literal.string("1 hour")),
+        _limit_parameter("MAXCONNECTIONS", exp.Literal.number("2"), scope="NODE"),
+    ):
         for dialect in ("postgres", "duckdb", "mysql", "sqlite"):
             with pytest.raises((UnsupportedError, ValueError)):
                 leaf.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
@@ -808,6 +1014,30 @@ def test_user_action_leaf_fails_atomically_in_foreign_dialects() -> None:
             this=exp.var("RESOURCE POOL"), expression=_identifier("pool"), subcluster=exp.var("sc")
         ),
         _set_arg(_parameter("PROFILE", "security"), "bogus", True),
+        _limit_parameter("GRACEPERIOD", exp.Literal.number("1")),
+        _limit_parameter("GRACEPERIOD", exp.Literal.string("21 days")),
+        _limit_parameter("GRACEPERIOD", exp.var("DEFAULT")),
+        _limit_parameter("GRACEPERIOD", exp.Literal.string("1 day"), scope="NODE"),
+        _limit_parameter("MAXCONNECTIONS", exp.Literal.number("1")),
+        _limit_parameter("MAXCONNECTIONS", exp.Literal.number("-1"), scope="NODE"),
+        _limit_parameter("MAXCONNECTIONS", exp.Literal.string("1"), scope="NODE"),
+        _limit_parameter("MAXCONNECTIONS", exp.Literal.number("1"), scope="CLUSTER"),
+        _limit_parameter("MAXCONNECTIONS", exp.var("NONE"), scope="NODE"),
+        _limit_parameter("MEMORYCAP", exp.Literal.string("101%")),
+        _limit_parameter("MEMORYCAP", exp.Literal.string("1g")),
+        _limit_parameter("TEMPSPACECAP", exp.Literal.number("10")),
+        _limit_parameter("SECURITY_ALGORITHM", exp.Literal.string("sha512")),
+        _limit_parameter("SECURITY_ALGORITHM", exp.var("NONE")),
+        vexp.UserParameter(
+            this=exp.var("MEMORYCAP"),
+            expression=exp.Literal.string("1G"),
+            subcluster=_identifier("sc"),
+        ),
+        vexp.CreateUser(
+            this=_identifier("analyst"),
+            kind="USER",
+            parameters=[_limit_parameter("SECURITY_ALGORITHM", exp.Literal.string("SHA512"))],
+        ),
     ],
 )
 def test_malformed_programmatic_user_asts_fail_atomically(expression: exp.Expr) -> None:

@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P03 — USER profile and resource-pool assignments**.
-- Next eligible tasks are selected by dependency and numeric order; P04 is the
+- Completed through **P04 — USER time and capacity limits**.
+- Next eligible tasks are selected by dependency and numeric order; P05 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -53,7 +53,7 @@ task may be `IN_PROGRESS`.
 | P01 | DONE | PROFILE lifecycle | `6ca2a0d` | `feat: model profile lifecycle` |
 | P02 | DONE | Executable `PROFILE` statement | P01 | `feat: model profiled statement execution` |
 | P03 | DONE | USER profile and resource-pool assignments | P01 | `feat: add user workload assignments` |
-| P04 | TODO | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
+| P04 | DONE | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
 | P05 | TODO | USER search path and default roles | P03 | `feat: model user path and default roles` |
 | P06 | TODO | Safe USER configuration/reset actions | P04, P05 | `feat: model safe user configuration actions` |
 | P07 | TODO | AUTHENTICATION create/drop core | P06 | `feat: model authentication creation and drop` |
@@ -329,7 +329,7 @@ full pre-commit, sdist/wheel build, clean force-install, `pip check`, and
 isolated installed-wheel smoke passed. CPython 3.14 and 3.15 were not available
 locally (`py -0p` exposed only 3.12), so those runtime suites were not claimed.
 
-### P04 — USER time and capacity limits — `TODO`
+### P04 — USER time and capacity limits — `DONE`
 
 **Outcome.** Add the remaining deterministic non-secret capacity/time policy
 parameters to the ordered USER representation.
@@ -346,7 +346,25 @@ SET/CLEAR configuration.
 
 **Primary sources.** The 26.2 CREATE/ALTER USER pages linked in P03.
 
-**Completion record.** Pending.
+**Completion record.** Added ordered typed USER parameters for grace, idle
+session, and runtime intervals; database/node-scoped connection counts;
+memory/temporary-space caps; and ALTER-only security-algorithm selection.
+Documented sentinels, percentage/unit shapes, interval ceilings, duplicates,
+programmatic ASTs, serialization/optimizer/type traversal, comments, and
+foreign generation are validated atomically. Literal admission is clause-aware,
+so legitimate limit strings are retained while `IDENTIFIED BY`, `SALT`, and
+`REPLACE` credential values still fail with fixed sanitized errors. The 26.2
+ALTER example places `SECURITY_ALGORITHM` immediately before excluded
+`IDENTIFIED BY` without the comma required by the page's general account-
+parameter grammar; this implementation follows the explicit comma-delimited
+grammar for the supported non-secret subset and does not infer credential
+behavior. Privileges, LDAP compatibility, effective limit interactions, and
+runtime password-expiration effects remain catalog/server concerns. The
+default CPython 3.12.6 gate passed 3042 tests at 93.82% coverage; isolated
+CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1
+suites each passed 3042 tests, with 3.15 treating deprecations as errors. Ruff,
+formatting, strict mypy, full pre-commit, sdist/wheel build, clean force-install,
+`pip check`, and installed-wheel entry-point/round-trip smoke passed.
 
 ### P05 — USER search path and default roles — `TODO`
 
