@@ -79,7 +79,7 @@ Status meanings:
 | Object `GRANT` / `REVOKE` | Semantic | Canonical single-target grants, multi-object and all-in-schema targets, `EXTEND`, routine signatures, locations, resource-pool subclusters, grant options, and cascade semantics |
 | Role and authentication `GRANT` / `REVOKE` | Semantic | Compound role/grantee lists, admin-option revocation, cascade, and authentication associations use dedicated AST nodes |
 | Role lifecycle | Semantic | Canonical `CREATE`, rename, and single-target `DROP`; atomic custom AST for comma-separated drops; exact unqualified-name and option validation |
-| User, profile, and authentication lifecycle | Partial | The non-secret USER core is semantic, including ordered CREATE/ALTER `PROFILE`, global/subcluster `RESOURCE POOL`, grace/idle/runtime intervals, scoped connection limits, memory/temp-space caps, CREATE/ALTER `SEARCH_PATH`, ALTER-only `SECURITY_ALGORITHM`, isolated `DEFAULT ROLE`, `TOTPSECRET RESET`, value-free configuration CLEAR, and a five-parameter depot-only SET allowlist; PROFILE CREATE/ALTER/DROP is semantic with all 15 ordered policy settings, numeric/`UNLIMITED` values, ALTER-only `DEFAULT` resets and rename, and ordered dependency drops. Credential-bearing, unreviewed SET, and AUTHENTICATION forms fail closed or remain planned |
+| User, profile, and authentication lifecycle | Partial | The non-secret USER core is semantic, including ordered CREATE/ALTER `PROFILE`, global/subcluster `RESOURCE POOL`, grace/idle/runtime intervals, scoped connection limits, memory/temp-space caps, CREATE/ALTER `SEARCH_PATH`, ALTER-only `SECURITY_ALGORITHM`, isolated `DEFAULT ROLE`, `TOTPSECRET RESET`, value-free configuration CLEAR, and a five-parameter depot-only SET allowlist; PROFILE CREATE/ALTER/DROP is semantic with all 15 ordered policy settings, numeric/`UNLIMITED` values, ALTER-only `DEFAULT` resets and rename, and ordered dependency drops. AUTHENTICATION CREATE/DROP is semantic for the eight finite methods, LOCAL/HOST TLS matching, MFA/fallthrough flags, and single-target dependency drops; ALTER SET is sanitized and structural ALTER remains planned |
 | Resource-pool lifecycle | Semantic | Ordered typed parameters, `DEFAULT`/`NONE`/`AUTO`/`HOLD` sentinels, named/current subcluster selectors, and CREATE/ALTER/DROP restrictions use dedicated AST roots |
 | Load-balance-group lifecycle | Semantic | Address, fault-group, and subcluster member specifications, mandatory filters, selection policies, every ALTER action, and dependency-cascading DROP use typed ASTs with atomic foreign failure |
 | Network-address lifecycle | Semantic | Fixed-order node/address/port/state creation, rename/endpoint/state ALTER actions, and postfix `IF EXISTS`/`CASCADE` DROP use typed ASTs; NETWORK INTERFACE remains intentionally opaque and distinct |
@@ -142,6 +142,12 @@ Some rules require information that a syntax-only dialect does not have:
   inherited/default effects, current-password effects, and catalog existence
   remain server concerns; only deterministic value domains and explicit
   same-statement numeric maximum conflicts are validated locally.
+- AUTHENTICATION address validity, record existence, grants, priority, access
+  matching, and runtime authentication effects remain server concerns. CREATE
+  validates only the finite method/access/flag grammar and documented
+  fallthrough exclusions. ALTER SET remains outside the AST security boundary;
+  all such values are rejected through a fixed sanitizer until P09 completes a
+  parameter-by-parameter audit.
 - Directed-query name existence, query compatibility, optimizer-version/date
   provenance, and activation effects require the Vertica catalog. The dialect
   validates statement grammar, target cardinality, nonempty query structure,

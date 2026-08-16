@@ -243,6 +243,22 @@ class VerticaGenerator(PostgresGenerator):
         "PASSWORD_MIN_SYMBOLS",
         "PASSWORD_MIN_UPPERCASE_LETTERS",
     }
+    AUTHENTICATION_METHODS: t.ClassVar[set[str]] = {
+        "GSS",
+        "HASH",
+        "IDENT",
+        "LDAP",
+        "OAUTH",
+        "REJECT",
+        "TLS",
+        "TRUST",
+    }
+    AUTHENTICATION_NO_FALLTHROUGH_METHODS: t.ClassVar[set[str]] = {
+        "GSS",
+        "OAUTH",
+        "REJECT",
+        "TRUST",
+    }
 
     TRANSFORMS: t.ClassVar = {
         **PostgresGenerator.TRANSFORMS,
@@ -286,6 +302,9 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AuthenticationRevoke: lambda self, expression: self.authenticationrevoke_sql(
             expression
         ),
+        vexp.AuthenticationAccess: lambda self, expression: self.authenticationaccess_sql(
+            expression
+        ),
         vexp.AlterLoadBalanceGroup: lambda self, expression: self.alterloadbalancegroup_sql(
             expression
         ),
@@ -296,6 +315,9 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AlterTablePartition: lambda self, expression: self.altertablepartition_sql(expression),
         vexp.AlterUser: lambda self, expression: self.alteruser_sql(expression),
         vexp.CreateDirectedQuery: lambda self, expression: self.createdirectedquery_sql(expression),
+        vexp.CreateAuthentication: lambda self, expression: self.createauthentication_sql(
+            expression
+        ),
         vexp.CreateExternalProcedure: lambda self, expression: self.createexternalprocedure_sql(
             expression
         ),
@@ -349,6 +371,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.DropExternalProcedure: lambda self, expression: self.dropexternalprocedure_sql(
             expression
         ),
+        vexp.DropAuthentication: lambda self, expression: self.dropauthentication_sql(expression),
         vexp.DropLibrary: lambda self, expression: self.droplibrary_sql(expression),
         vexp.DropLoadBalanceGroup: lambda self, expression: self.droploadbalancegroup_sql(
             expression
@@ -1175,6 +1198,129 @@ class VerticaGenerator(PostgresGenerator):
 
         user_sql = self.sql(user) if user_valid else ""
         return f"CREATE USER {user_sql}{parameters_sql}".rstrip()
+
+    def createauthentication_sql(self, expression: vexp.CreateAuthentication) -> str:
+        valid = True
+        if expression.args.get("kind") != "AUTHENTICATION":
+            self.unsupported("CreateAuthentication requires kind AUTHENTICATION")
+            valid = False
+        if self._has_user_extras(
+            expression,
+            {"this", "kind", "method", "access", "enforce_mfa", "fallthrough"},
+        ):
+            self.unsupported("CREATE AUTHENTICATION does not support additional CREATE clauses")
+            valid = False
+        valid = (
+            self._validate_user_identifier(
+                expression.args.get("this"), "CREATE AUTHENTICATION name"
+            )
+            and valid
+        )
+
+        method = expression.args.get("method")
+        if (
+            not isinstance(method, exp.Literal)
+            or not method.is_string
+            or not isinstance(method.this, str)
+            or not method.this.isascii()
+            or method.this.upper() not in self.AUTHENTICATION_METHODS
+            or self._has_user_extras(method, {"this", "is_string"})
+        ):
+            self.unsupported("CREATE AUTHENTICATION requires a reviewed METHOD string")
+            valid = False
+            method_name = ""
+        else:
+            method_name = method.this.upper()
+
+        access = expression.args.get("access")
+        if not isinstance(access, vexp.AuthenticationAccess):
+            self.unsupported("CREATE AUTHENTICATION requires structured LOCAL or HOST access")
+            valid = False
+
+        enforce_mfa = expression.args.get("enforce_mfa")
+        fallthrough = expression.args.get("fallthrough")
+        if enforce_mfa is not None and not isinstance(enforce_mfa, bool):
+            self.unsupported("CreateAuthentication enforce_mfa must be boolean")
+            valid = False
+        if fallthrough is not None and not isinstance(fallthrough, bool):
+            self.unsupported("CreateAuthentication fallthrough must be boolean")
+            valid = False
+        if fallthrough is True and method_name in self.AUTHENTICATION_NO_FALLTHROUGH_METHODS:
+            self.unsupported(
+                f"CREATE AUTHENTICATION METHOD '{method_name.lower()}' forbids FALLTHROUGH"
+            )
+            valid = False
+        if not valid:
+            return ""
+        options = " ENFORCEMFA" if enforce_mfa else ""
+        options += " FALLTHROUGH" if fallthrough else ""
+        return (
+            f"CREATE AUTHENTICATION {self.sql(expression, 'this')} "
+            f"METHOD '{method_name.lower()}' {self.sql(access)}{options}"
+        )
+
+    def authenticationaccess_sql(self, expression: vexp.AuthenticationAccess) -> str:
+        if self._has_user_extras(expression, {"this", "expression", "tls"}):
+            self.unsupported("AuthenticationAccess contains unsupported fields")
+            return ""
+        marker = expression.args.get("this")
+        if (
+            not isinstance(marker, exp.Var)
+            or not isinstance(marker.this, str)
+            or not marker.this.isascii()
+            or self._has_user_extras(marker, {"this"})
+        ):
+            self.unsupported("AuthenticationAccess requires a typed LOCAL or HOST marker")
+            return ""
+        kind = marker.this.upper()
+        address = expression.args.get("expression")
+        tls = expression.args.get("tls")
+        if tls is not None and not isinstance(tls, bool):
+            self.unsupported("AuthenticationAccess tls must be boolean or omitted")
+            return ""
+        if kind == "LOCAL":
+            if address is not None or tls is not None:
+                self.unsupported("LOCAL authentication access does not accept address or TLS")
+                return ""
+            return "LOCAL"
+        if kind != "HOST":
+            self.unsupported("AuthenticationAccess requires LOCAL or HOST")
+            return ""
+        if (
+            not isinstance(address, exp.Literal)
+            or not address.is_string
+            or self._has_user_extras(address, {"this", "is_string"})
+        ):
+            self.unsupported("HOST authentication access requires a standard string address")
+            return ""
+        tls_sql = " TLS" if tls is True else " NO TLS" if tls is False else ""
+        return f"HOST{tls_sql} {self.sql(address)}"
+
+    def dropauthentication_sql(self, expression: vexp.DropAuthentication) -> str:
+        valid = True
+        if expression.args.get("kind") != "AUTHENTICATION":
+            self.unsupported("DropAuthentication requires kind AUTHENTICATION")
+            valid = False
+        if self._has_user_extras(expression, {"this", "kind", "exists", "cascade"}):
+            self.unsupported("DROP AUTHENTICATION does not support additional DROP clauses")
+            valid = False
+        valid = (
+            self._validate_user_identifier(expression.args.get("this"), "DROP AUTHENTICATION name")
+            and valid
+        )
+        exists = expression.args.get("exists")
+        cascade = expression.args.get("cascade")
+        if exists is not None and not isinstance(exists, bool):
+            self.unsupported("DropAuthentication exists must be boolean")
+            valid = False
+        if cascade is not None and not isinstance(cascade, bool):
+            self.unsupported("DropAuthentication cascade must be boolean")
+            valid = False
+        if not valid:
+            return ""
+        exists_sql = " IF EXISTS" if exists else ""
+        cascade_sql = " CASCADE" if cascade else ""
+        return f"DROP AUTHENTICATION{exists_sql} {self.sql(expression, 'this')}{cascade_sql}"
 
     def createprofile_sql(self, expression: vexp.CreateProfile) -> str:
         valid = self._validate_profile_root(

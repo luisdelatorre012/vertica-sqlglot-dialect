@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P06 — safe USER configuration/reset actions**.
-- Next eligible tasks are selected by dependency and numeric order; P07 is the
+- Completed through **P07 — AUTHENTICATION create/drop core**.
+- Next eligible tasks are selected by dependency and numeric order; P08 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -58,7 +58,7 @@ task may be `IN_PROGRESS`.
 | P04 | DONE | USER time and capacity limits | P03 | `feat: model non-secret user limits` |
 | P05 | DONE | USER search path and default roles | P03 | `feat: model user path and default roles` |
 | P06 | DONE | Safe USER configuration/reset actions | P04, P05 | `feat: model safe user configuration actions` |
-| P07 | TODO | AUTHENTICATION create/drop core | P06 | `feat: model authentication creation and drop` |
+| P07 | DONE | AUTHENTICATION create/drop core | P06 | `feat: model authentication creation and drop` |
 | P08 | TODO | AUTHENTICATION structural ALTER actions | P07 | `feat: model authentication alter actions` |
 | P09 | TODO | AUTHENTICATION SET security boundary | P08 | `feat: add safe authentication parameters` |
 | P10 | TODO | COMMENT ON family | P02 | `feat: make Vertica comment statements semantic` |
@@ -449,7 +449,7 @@ deprecations as errors. Ruff, formatting, strict mypy, full pre-commit,
 sdist/wheel build, clean force-install, `pip check`, and installed-wheel
 entry-point/round-trip smoke passed.
 
-### P07 — AUTHENTICATION create/drop core — `TODO`
+### P07 — AUTHENTICATION create/drop core — `DONE`
 
 **Outcome.** Add a non-secret semantic core for CREATE/DROP AUTHENTICATION.
 
@@ -466,7 +466,25 @@ parameters. Recognized excluded tails must fail closed and be sanitized.
 **Primary sources.** [CREATE AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-authentication/)
 and [DROP AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-authentication/).
 
-**Completion record.** Pending.
+**Completion record.** Added atomic typed CREATE/DROP AUTHENTICATION roots and
+a structured LOCAL/HOST access child for all eight formal 26.2 methods,
+omitted/TLS/NO TLS host matching, ENFORCEMFA, compatible FALLTHROUGH, and
+single-target IF EXISTS/CASCADE drops. Addresses remain opaque strings;
+existence, grants, priority, address validity, and runtime matching remain
+catalog/server concerns. All ALTER SET and unexpected CREATE SET values fail
+through a fixed pre-AST sanitizer, so bind passwords, OAuth secrets, keys,
+URLs, and unknown parameter values cannot enter an AST or parser diagnostics.
+The 26.2 source re-audit found two material documentation contradictions: the
+formal CREATE syntax block omits ENFORCEMFA even though its parameter table and
+creation guide place it after access, while that guide also contains stale
+TYPE LDAP and METHOD password examples absent from the formal METHOD grammar.
+This implementation accepts ENFORCEMFA but follows the formal METHOD keyword
+and eight-value table rather than those examples. The default CPython 3.12.6
+gate passed 3511 tests at 93.57% branch coverage; isolated CPython 3.9.25,
+3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed
+3511 tests, with 3.15 treating deprecations as errors. Ruff, formatting,
+strict mypy, full pre-commit, sdist/wheel build, clean force-install, package
+compatibility check, and installed-wheel entry-point/round-trip smoke passed.
 
 ### P08 — AUTHENTICATION structural ALTER actions — `TODO`
 

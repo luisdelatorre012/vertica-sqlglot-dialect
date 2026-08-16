@@ -1057,6 +1057,32 @@ class AuthenticationRevoke(exp.Revoke):
     }
 
 
+class AuthenticationAccess(exp.Expression):
+    """The LOCAL or HOST connection matcher of an authentication record."""
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "expression": False,
+        "tls": False,
+    }
+
+
+class CreateAuthentication(exp.Create):
+    """Create one non-secret Vertica authentication record."""
+
+    arg_types: t.ClassVar = {
+        **exp.Create.arg_types,
+        "method": True,
+        "access": True,
+        "enforce_mfa": False,
+        "fallthrough": False,
+    }
+
+
+class DropAuthentication(exp.Drop):
+    """Drop one Vertica authentication record."""
+
+
 class CreateProjection(exp.Create):
     """`CREATE PROJECTION` with lineage-relevant query and design clauses."""
 

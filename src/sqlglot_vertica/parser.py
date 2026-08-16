@@ -385,6 +385,22 @@ class VerticaParser(PostgresParser):
         "PASSWORD_MIN_SYMBOLS",
         "PASSWORD_MIN_UPPERCASE_LETTERS",
     }
+    AUTHENTICATION_METHODS: t.ClassVar[set[str]] = {
+        "GSS",
+        "HASH",
+        "IDENT",
+        "LDAP",
+        "OAUTH",
+        "REJECT",
+        "TLS",
+        "TRUST",
+    }
+    AUTHENTICATION_NO_FALLTHROUGH_METHODS: t.ClassVar[set[str]] = {
+        "GSS",
+        "OAUTH",
+        "REJECT",
+        "TRUST",
+    }
 
     USER_DEFINED_EXTENSION_KINDS: t.ClassVar = (
         "AGGREGATE FUNCTION",
@@ -3048,6 +3064,20 @@ class VerticaParser(PostgresParser):
         if index:
             self._raise_profile_error(f"{statement} PROFILE does not support modifiers")
 
+    def _reject_prefixed_authentication(self, statement: str, words: list[str]) -> None:
+        index = self._user_prefix_length(statement, words)
+        if index >= len(words) or words[index] != "AUTHENTICATION":
+            return
+        token = self._tokens[self._index + index]
+        if token.token_type != TokenType.VAR or not token.text.isascii():
+            self._raise_authentication_error(
+                f"{statement} AUTHENTICATION requires the unquoted ASCII object keyword"
+            )
+        if index:
+            self._raise_authentication_error(
+                f"{statement} AUTHENTICATION does not support modifiers"
+            )
+
     def _reject_sensitive_user_statement(self, statement: str, words: list[str]) -> None:
         index = self._user_prefix_length(statement, words)
         if index >= len(words) or words[index] != "USER":
@@ -3082,6 +3112,19 @@ class VerticaParser(PostgresParser):
             )
             if not safe_string and not safe_configuration_string:
                 raise ParseError("Unsupported secret-bearing USER clause")
+
+    def _reject_sensitive_authentication_statement(self, statement: str, words: list[str]) -> None:
+        try:
+            index = words.index("AUTHENTICATION")
+        except ValueError:
+            return
+        token = self._tokens[self._index + index]
+        if token.token_type != TokenType.VAR or not token.text.isascii():
+            return
+        if statement == "ALTER" and any(word == "SET" for word in words[index + 1 :]):
+            raise ParseError("Unsupported secret-bearing AUTHENTICATION clause")
+        if statement == "CREATE" and any(word == "SET" for word in words[index + 1 :]):
+            raise ParseError("Unsupported secret-bearing AUTHENTICATION clause")
 
     def _reject_unsafe_user_configuration(self, statement: str, after_user: list[Token]) -> None:
         if statement != "ALTER" or len(after_user) < 2:
@@ -3160,6 +3203,13 @@ class VerticaParser(PostgresParser):
         if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
             raise ParseError(message)
 
+    def _raise_authentication_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
     def _match_user_object(self, *, advance: bool = True) -> bool:
         matched = (
             self._curr.token_type == TokenType.VAR
@@ -3175,6 +3225,16 @@ class VerticaParser(PostgresParser):
             self._curr.token_type == TokenType.VAR
             and self._curr.text.isascii()
             and self._curr.text.upper() == "PROFILE"
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _match_authentication_object(self, *, advance: bool = True) -> bool:
+        matched = (
+            self._curr.token_type == TokenType.VAR
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == "AUTHENTICATION"
         )
         if matched and advance:
             self._advance()
@@ -3217,11 +3277,13 @@ class VerticaParser(PostgresParser):
     ) -> exp.Create | vexp.CreateDirectedQuery | exp.Command:
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_sensitive_user_statement("CREATE", words)
+        self._reject_sensitive_authentication_statement("CREATE", words)
         self._reject_prefixed_routing_rule("CREATE", words)
         self._reject_prefixed_load_balance_group("CREATE", words)
         self._reject_prefixed_network_address("CREATE", words)
         self._reject_prefixed_profile("CREATE", words)
         self._reject_prefixed_user("CREATE", words)
+        self._reject_prefixed_authentication("CREATE", words)
         unsupported_directed_prefixes = (
             ("IF", "NOT", "EXISTS", "DIRECTED", "QUERY"),
             ("TEMPORARY", "DIRECTED", "QUERY"),
@@ -3250,6 +3312,13 @@ class VerticaParser(PostgresParser):
             return self._parse_create_user_defined_extension(kind=udx_kind, replace=replace)
         if self._match_text_seq("LIBRARY"):
             return self._parse_create_library(replace=replace)
+
+        if self._match_authentication_object():
+            return self._parse_create_authentication(replace=replace)
+        if self._curr.text.upper() == "AUTHENTICATION":
+            self._raise_authentication_error(
+                "CREATE AUTHENTICATION requires the unquoted ASCII AUTHENTICATION object kind"
+            )
 
         if self._match(TokenType.LOAD):
             if not self._match_text_seq("BALANCE", "GROUP"):
@@ -3980,6 +4049,77 @@ class VerticaParser(PostgresParser):
         if self._curr:
             self.raise_error(f"Unexpected CREATE ROLE clause at {self._curr.text!r}")
         return self.expression(exp.Create(this=role, kind="ROLE"))
+
+    def _parse_create_authentication(self, replace: bool) -> vexp.CreateAuthentication:
+        if replace:
+            self._raise_authentication_error(
+                "CREATE OR REPLACE AUTHENTICATION is not supported by Vertica"
+            )
+        if self._match_text_seq("IF", "NOT", "EXISTS", advance=False):
+            self._raise_authentication_error("CREATE AUTHENTICATION does not support IF NOT EXISTS")
+
+        name = self._parse_user_identifier("CREATE AUTHENTICATION")
+        if not self._match_text_seq("METHOD"):
+            self._raise_authentication_error("CREATE AUTHENTICATION requires METHOD")
+        method = self._parse_string()
+        if not isinstance(method, exp.Literal) or not method.is_string:
+            self._raise_authentication_error(
+                "CREATE AUTHENTICATION METHOD requires a standard string literal"
+            )
+        assert isinstance(method, exp.Literal)
+        method_name = method.this.upper() if method.this.isascii() else ""
+        if method_name not in self.AUTHENTICATION_METHODS:
+            self._raise_authentication_error(
+                "CREATE AUTHENTICATION METHOD requires one of "
+                + ", ".join(sorted(self.AUTHENTICATION_METHODS))
+            )
+        method.set("this", method_name.lower())
+
+        if self._match_text_seq("LOCAL"):
+            access = self.expression(vexp.AuthenticationAccess(this=exp.var("LOCAL")))
+        elif self._match_text_seq("HOST"):
+            tls: bool | None = None
+            if self._match_text_seq("TLS"):
+                tls = True
+            elif self._match_text_seq("NO"):
+                if not self._match_text_seq("TLS"):
+                    self._raise_authentication_error("CREATE AUTHENTICATION HOST NO requires TLS")
+                tls = False
+            address = self._parse_string()
+            if not isinstance(address, exp.Literal) or not address.is_string:
+                self._raise_authentication_error(
+                    "CREATE AUTHENTICATION HOST requires a standard string literal"
+                )
+            access = self.expression(
+                vexp.AuthenticationAccess(
+                    this=exp.var("HOST"),
+                    expression=address,
+                    tls=tls,
+                )
+            )
+        else:
+            self._raise_authentication_error("CREATE AUTHENTICATION requires LOCAL or HOST access")
+
+        enforce_mfa = self._match_text_seq("ENFORCEMFA")
+        fallthrough = self._match_text_seq("FALLTHROUGH")
+        if fallthrough and method_name in self.AUTHENTICATION_NO_FALLTHROUGH_METHODS:
+            self._raise_authentication_error(
+                f"CREATE AUTHENTICATION METHOD '{method_name.lower()}' forbids FALLTHROUGH"
+            )
+        if self._curr:
+            self._raise_authentication_error(
+                f"Unexpected CREATE AUTHENTICATION clause at {self._curr.text!r}"
+            )
+        return self.expression(
+            vexp.CreateAuthentication(
+                this=name,
+                kind="AUTHENTICATION",
+                method=method,
+                access=access,
+                enforce_mfa=enforce_mfa,
+                fallthrough=fallthrough,
+            )
+        )
 
     def _parse_create_user(self, replace: bool) -> vexp.CreateUser:
         if replace:
@@ -5493,11 +5633,13 @@ class VerticaParser(PostgresParser):
         index = self._index
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_sensitive_user_statement("ALTER", words)
+        self._reject_sensitive_authentication_statement("ALTER", words)
         self._reject_prefixed_routing_rule("ALTER", words)
         self._reject_prefixed_load_balance_group("ALTER", words)
         self._reject_prefixed_network_address("ALTER", words)
         self._reject_prefixed_profile("ALTER", words)
         self._reject_prefixed_user("ALTER", words)
+        self._reject_prefixed_authentication("ALTER", words)
         if self._curr.token_type == TokenType.TABLE and self._has_mixed_reorganize_action():
             self.raise_error(
                 "Mixed ALTER TABLE REORGANIZE action lists are not yet represented semantically"
@@ -6490,16 +6632,43 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _parse_drop_authentication(self, exists: bool) -> vexp.DropAuthentication:
+        if exists:
+            self._raise_authentication_error(
+                "DROP AUTHENTICATION IF EXISTS must follow AUTHENTICATION"
+            )
+        if_exists = bool(self._parse_exists())
+        name = self._parse_user_identifier("DROP AUTHENTICATION")
+        if self._match(TokenType.COMMA, advance=False):
+            self._raise_authentication_error("DROP AUTHENTICATION accepts exactly one target")
+        cascade = self._match_text_seq("CASCADE")
+        if self._match_text_seq("RESTRICT", advance=False):
+            self._raise_authentication_error("DROP AUTHENTICATION does not support RESTRICT")
+        if self._curr:
+            self._raise_authentication_error(
+                f"Unexpected DROP AUTHENTICATION clause at {self._curr.text!r}"
+            )
+        return self.expression(
+            vexp.DropAuthentication(
+                this=name,
+                kind="AUTHENTICATION",
+                exists=if_exists,
+                cascade=cascade,
+            )
+        )
+
     def _parse_drop(  # type: ignore[override]
         self, exists: bool = False
     ) -> exp.Drop | vexp.DirectedQueryAction | exp.Command:
         words = [token.text.upper() for token in self._tokens[self._index :]]
         self._reject_sensitive_user_statement("DROP", words)
+        self._reject_sensitive_authentication_statement("DROP", words)
         self._reject_prefixed_routing_rule("DROP", words)
         self._reject_prefixed_load_balance_group("DROP", words)
         self._reject_prefixed_network_address("DROP", words)
         self._reject_prefixed_profile("DROP", words)
         self._reject_prefixed_user("DROP", words)
+        self._reject_prefixed_authentication("DROP", words)
         lookahead = words[:3]
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
             self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
@@ -6518,6 +6687,13 @@ class VerticaParser(PostgresParser):
             return self._parse_drop_user_defined_extension(kind=udx_kind, exists=exists)
         if self._match_text_seq("LIBRARY"):
             return self._parse_drop_library(exists=exists)
+
+        if self._match_authentication_object():
+            return self._parse_drop_authentication(exists=exists)
+        if self._curr.text.upper() == "AUTHENTICATION":
+            self._raise_authentication_error(
+                "DROP AUTHENTICATION requires the unquoted ASCII AUTHENTICATION object kind"
+            )
 
         if self._match(TokenType.LOAD):
             if not self._match_text_seq("BALANCE", "GROUP"):

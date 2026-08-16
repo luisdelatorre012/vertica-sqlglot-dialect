@@ -45,6 +45,10 @@ plugin interface.
   password-policy metadata settings, lexical numeric domains, `UNLIMITED`,
   ALTER-only `DEFAULT` resets, rename, multi-target drop, and strict foreign
   generation failure. User assignment and catalog effects remain server-side.
+- Added semantic non-secret CREATE/DROP AUTHENTICATION with finite method
+  validation, structured LOCAL/HOST TLS access, MFA/fallthrough flags,
+  single-target cascading drops, and sanitized rejection of excluded ALTER SET
+  values before they enter an AST.
 - Added semantic classic and workload routing-rule lifecycle, every documented
   ALTER action, exact session workload/resource-pool assignment, SHOW workload
   controls, and canonical `ON ROUTING RULE` privilege alias handling.

@@ -184,6 +184,8 @@ called out in code review.
 ## Audited next-phase statements
 
 - [CREATE AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-authentication/)
+- [DROP AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-authentication/)
+- [Creating authentication records](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/creating-authentication-records/)
 
 The source list is reviewed when the target server version changes. A version
 bump is not a documentation-only change: affected fixtures and generated SQL
