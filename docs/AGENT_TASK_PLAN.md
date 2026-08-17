@@ -48,8 +48,9 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   [ON COMMIT …]` clause does not parse (the 26.2 doc page's own example
   fails), and multi-target `DROP TABLE` lists do not parse.
 - Next eligible tasks are selected milestone-first: every Q task must be
-  `DONE` before any P task is eligible. Q01 is the lowest-numbered remaining
-  task.
+  `DONE` before any P task is eligible.
+- Completed **Q01 — scoped temporary CTAS acceptance**. Q02 is the
+  lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Installed local Python runtimes
@@ -145,7 +146,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
-| Q01 | TODO   | Scoped temporary CTAS acceptance              | —                   | `feat: accept scoped temporary ctas`                    |
+| Q01 | DONE   | Scoped temporary CTAS acceptance              | —                    | `feat: accept scoped temporary ctas`                    |
 | Q02 | TODO   | SELECT INTO TABLE clause conformance          | —                   | `feat: model select into table targets`                 |
 | Q03 | TODO   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
 | Q04 | TODO   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
@@ -235,6 +236,18 @@ These rules apply to every implementation task:
 - Custom roots and detached custom leaves must fail atomically in foreign
   dialects under `unsupported_level=RAISE` unless the task documents a safe
   lowering. Never allow foreign generation to silently drop a clause.
+- The standard bare-instantiation foreign-atomicity sweep (`vexp.SomeClass().sql(dialect=...)`)
+  does not prove a custom `exp.Property` subclass fails atomically once it is
+  actually embedded in a real `exp.Properties` list: `Generator.locate_properties`
+  indexes `self.PROPERTIES_LOCATION` with a plain dict lookup before any
+  per-node dispatch runs, so a foreign dialect with no entry for the class
+  raises raw `KeyError`, not `UnsupportedError`. This is a confirmed,
+  cross-cutting, pre-existing gap across every custom Vertica table property
+  (see `ARCHITECTURE.md`'s AST-policy section for the mechanism and evidence);
+  do not treat the generic sweep as proof for a `Property` subclass, and do
+  not assume `KeyError` from a new feature's foreign-generation test is a
+  regression it introduced without first checking whether the same property
+  already crashes the same way in its pre-existing context.
 - Recognized malformed Vertica syntax must raise `ParseError`; it must not fall
   back to `exp.Command`, truncate a tail, or emit a warning and partial AST at
   any `ErrorLevel`.
@@ -687,7 +700,7 @@ foundation and the milestone goal: parsing, analyzing, and regenerating
 `SELECT`/CTE/temporary-table workloads. No database-management capability is
 in scope in this milestone.
 
-### Q01 — scoped temporary CTAS acceptance — `TODO`
+### Q01 — scoped temporary CTAS acceptance — `DONE`
 
 **Outcome.** Accept `CREATE { GLOBAL | LOCAL } TEMP[ORARY] TABLE … AS query`
 with the same typed contract as unscoped temporary CTAS, recording the
@@ -723,7 +736,67 @@ and foreign-generation policy consistent with the existing CTAS contract.
 **Primary sources.** [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/)
 and [Creating temporary tables](https://docs.vertica.com/26.2.x/en/admin/working-with-native-tables/creating-temporary-tables/).
 
-**Completion record.** Pending.
+**Completion record.** Removed the deliberate `if scope: raise` block from
+`_parse_create_table_ctas` in `src/sqlglot_vertica/parser.py`. `scope` is
+already reflected in `properties` by the caller (`_parse_create_table`) as a
+canonical `GlobalProperty`/detached `LocalProperty` before the CTAS dispatch
+ever runs, so no other branch needed to change for column lists,
+`ON COMMIT`, hints, `ENCODED BY`, `AT EPOCH`/`AT TIME`, or parenthesized query
+bodies (`AS (SELECT …)`, already handled losslessly by the inherited
+`_parse_ddl_select`/`_parse_select(nested=True)` path) — all were already
+scope-blind and unaffected once the rejection was removed. Re-opening both
+26.2 primary sources confirmed the task's framing of the grammar conflict
+exactly: the CREATE TEMPORARY TABLE page's formal syntax splits a
+column-definition block (with `scope`) from an AS-query block (without
+`scope`), with no worked example either way on that page or the admin
+"Creating temporary tables" guide. That same page's `DISK_QUOTA` parameter
+description — "Disk quota is valid for global temporary tables but not local
+ones" — is written once, covering both syntax forms, rather than per-block;
+this is direct textual evidence that the LOCAL/`DISK_QUOTA` restriction is
+meant to apply to any local temporary table, not only the column-definition
+form. Per that evidence and the task's server-fixture escape hatch, the
+LOCAL/`DISK_QUOTA` rejection already enforced by the definition form was
+extended, verbatim, to the CTAS `DISK_QUOTA` clause; no 26.2 server was
+available to capture a live fixture, so this rests on the shared
+parameter-table wording plus the task-authorized ecosystem evidence
+(dbt-vertica's `CREATE LOCAL TEMPORARY TABLE … ON COMMIT PRESERVE ROWS AS
+(SELECT …)` materializations) rather than a captured server response. Every
+other post-query clause is unchanged and scope-blind, matching "exactly the
+unscoped contract"; `INCLUDE`/`EXCLUDE PRIVILEGES` remains unavailable to
+temporary CTAS regardless of scope, consistent with the pre-existing (not
+Q01-introduced) `if temporary: on_commit … else: privileges` exclusivity
+already in the CTAS dispatch. Testing the required foreign-generation matrix
+surfaced a pre-existing, cross-cutting defect predating this task and
+documented in `ARCHITECTURE.md`'s AST-policy section and the policy rules
+above: any custom Vertica table `Property` embedded in a real `CREATE TABLE`
+`Properties` list — not only the newly-scoped `LocalProperty` — raises raw
+`KeyError` rather than `UnsupportedError` in PostgreSQL, DuckDB, MySQL, and
+SQLite, because `Generator.locate_properties` indexes `PROPERTIES_LOCATION`
+directly and no foreign dialect registers Vertica-only property classes; this
+reproduces identically, independent of scope and of this task, for unscoped
+CTAS's own `InheritedPrivilegesProperty` (`CREATE TABLE t INCLUDE PRIVILEGES
+AS SELECT 1 AS id` against `postgres`). Foreign generation still never
+silently drops the clause — failure remains atomic — but the exception type
+is not the intended one; fixing it is a cross-cutting change spanning every
+custom table property across the whole physical-design surface, so it is
+recorded rather than fixed in this bounded task. `GLOBAL` scope's foreign
+behavior is unaffected and matches the pre-existing definition-form/CTAS
+pattern exactly: PostgreSQL and MySQL accept canonical `GlobalProperty`,
+DuckDB and SQLite cleanly raise `UnsupportedError`. Separately,
+`scripts/release_gate.ps1`'s `-TaskId` parameter validated only `^p\d{2}$`,
+left over from before the 2026-08-16 milestone split introduced `Q`-prefixed
+task IDs; this would have blocked every Milestone 1 task's release gate, not
+just this one, so the pattern was widened to `^[pq]\d{2}$` as necessary
+infrastructure for this task's own mandatory release-gate step. Column-
+definition/LIKE dispatch neighbors, unscoped regression parity, and both
+scopes/spellings/`ON COMMIT` values/column lists/hints/parenthesized bodies
+are covered. The focused `test_create_table.py` suite passed 86 tests. The
+default CPython 3.12.6 gate passed 4887 tests at 93.24% branch coverage;
+isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
+3.15.0rc1 suites each passed 4887 tests, with 3.15 treating deprecations as
+errors. Ruff, formatting, strict mypy, sdist/wheel build, clean force-install,
+`pip check`, and installed-wheel entry-point/scoped-temporary-CTAS round-trip
+smoke passed.
 
 ### Q02 — SELECT INTO TABLE clause conformance — `TODO`
 

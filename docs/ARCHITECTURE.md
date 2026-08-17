@@ -44,6 +44,38 @@ canonical class to carry a new Vertica-specific field value, check whether any
 supported foreign dialect performs this kind of pre-dispatch structural
 rewrite on that class, not just what its ordinary per-node renderer emits.
 
+The standard bare-instantiation sweep also misses a second, unrelated gap in
+the opposite direction: a detached custom `exp.Property` subclass that is
+never wrapped in a real `exp.Properties`/`exp.Create` tree does not exercise
+the code path SQLGlot's base `Generator.create_sql` actually uses in
+production. `vexp.LocalProperty().sql(dialect="postgres")` raises a clean
+`UnsupportedError`, because rendering a detached expression goes straight to
+per-node dispatch and `self.unsupported(...)`. But every Vertica table
+property is always rendered inside a real `exp.Properties` list, and
+`Generator.locate_properties` looks up each property's class in
+`self.PROPERTIES_LOCATION` with a plain dict index before any per-node
+dispatch runs; a foreign dialect that has never heard of a Vertica-only
+`Property` subclass raises a raw `KeyError` from that lookup instead of the
+intended `UnsupportedError`. This reproduces for every pre-existing
+Vertica-only table `Property` class once it is exercised inside a real
+`CREATE TABLE`/`CREATE TABLE AS` statement — confirmed for `LocalProperty`,
+`KsafeProperty`, `TableSegmentationProperty`, `TablePartitionProperty`,
+`DiskQuotaProperty`/`CtasDiskQuotaProperty`, and `InheritedPrivilegesProperty`
+against PostgreSQL, DuckDB, MySQL, and SQLite — and predates scoped temporary
+CTAS: `CREATE TABLE t INCLUDE PRIVILEGES AS SELECT 1 AS id` already raised
+`KeyError` against `postgres` before scoped CTAS existed. Foreign generation
+still fails atomically in the sense that matters most (no dialect silently
+emits SQL with the clause dropped), but the exception is `KeyError` rather
+than `UnsupportedError`, and no regression caught it because the generic sweep
+only instantiates bare `vexp.*` classes outside any `Properties` container.
+Fixing this cleanly needs either an upstream SQLGlot extension point or a
+Vertica-side `Properties`-rendering strategy that intercepts before
+`locate_properties` runs, which is a cross-cutting change spanning every
+custom table property rather than a single-family fix; treat any custom
+`Property` subclass's foreign behavior as unproven until it is tested inside
+a real `Properties` list, not just bare, and do not assume `KeyError` here
+indicates a new regression rather than this known, still-open gap.
+
 Function syntax follows the same wrapper pattern. `UsingParameters` and
 `StringUnit` retain the parsed function as `this` and store ordered parameter
 or unit children separately. Source-sensitive calls such as Vertica `EXPLODE`,

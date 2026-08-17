@@ -122,3 +122,9 @@ plugin interface.
 - Added frozen, cross-platform pre-commit hooks for repository hygiene, syntax
   and secret checks, Ruff, strict mypy, and Conventional Commit messages, with
   matching Linux and Windows CI enforcement and mandatory agent policy.
+- Added scoped (`GLOBAL`/`LOCAL`) temporary `CREATE TABLE AS` with exactly the
+  unscoped contract: column lists, `ON COMMIT`, hints, parenthesized query
+  bodies, and the LOCAL/`DISK_QUOTA` restriction extended from the definition
+  form. Recorded a pre-existing, cross-cutting gap where custom Vertica table
+  `Property` classes raise `KeyError` rather than `UnsupportedError` in
+  foreign generation once embedded in a real `Properties` list.

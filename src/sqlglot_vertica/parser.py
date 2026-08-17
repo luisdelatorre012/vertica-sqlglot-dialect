@@ -6826,12 +6826,21 @@ class VerticaParser(PostgresParser):
         scope: str | None,
         properties: list[exp.Expr],
     ) -> exp.Create:
-        """Parse CREATE TABLE AS with Vertica's pre- and post-query clauses."""
+        """Parse CREATE TABLE AS with Vertica's pre- and post-query clauses.
 
-        if scope:
-            self._raise_create_table_error(
-                "GLOBAL or LOCAL scope is not supported for temporary CTAS"
-            )
+        Scope (GLOBAL/LOCAL) is accepted here with the same contract as
+        unscoped temporary CTAS: the 26.2 CREATE TEMPORARY TABLE page's formal
+        grammar splits column-definition (scoped) and AS-query (unscoped)
+        forms, but its own DISK_QUOTA parameter description is written once
+        for both forms ("valid for global temporary tables but not local
+        ones"), and working deployments and ecosystem tooling (for example
+        the dbt-vertica adapter's `CREATE LOCAL TEMPORARY TABLE ... ON COMMIT
+        PRESERVE ROWS AS (SELECT ...)` materializations) exercise scoped
+        temporary CTAS routinely. `scope` is already reflected in `properties`
+        by the caller (`_parse_create_table`) as a `GlobalProperty`/
+        `LocalProperty`, so no extra property handling is needed here beyond
+        the shared LOCAL/DISK_QUOTA restriction below.
+        """
 
         if temporary:
             on_commit = self._parse_on_commit_property()
@@ -6882,6 +6891,8 @@ class VerticaParser(PostgresParser):
 
         quota = self._parse_disk_quota_property(ctas=True)
         if quota:
+            if scope == "LOCAL":
+                self._raise_create_table_error("LOCAL temporary tables cannot specify DISK_QUOTA")
             properties.append(quota)
 
         if self._curr:

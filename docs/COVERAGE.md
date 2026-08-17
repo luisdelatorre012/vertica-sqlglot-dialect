@@ -59,7 +59,7 @@ Status meanings:
 | --- | --- | --- |
 | `CREATE PROJECTION` / `DROP PROJECTION` | Semantic | Columns, grouped columns, encoding/access rank, query order, segmentation, node sets, offset, K-safety |
 | Definition-form `CREATE TABLE` | Semantic | Encoding/access rank, physical order, segmentation, K-safety, partition grouping/count, inherited privileges, quota |
-| `CREATE TABLE AS`, `LIKE`, temporary tables | Semantic | CTAS hints/snapshots, column lists and encodings, segmentation/quota, projection-copy options, scope, commit behavior, and `NO PROJECTION` |
+| `CREATE TABLE AS`, `LIKE`, temporary tables | Semantic | CTAS hints/snapshots, column lists and encodings, segmentation/quota, projection-copy options, scope (including scoped temporary CTAS), commit behavior, and `NO PROJECTION` |
 | Ordinary column/table constraints | Partial | `AUTO_INCREMENT`/`IDENTITY`, `SET USING`, `DEFAULT USING`, and typed `ENABLED`/`DISABLED` enforcement on `PRIMARY KEY`/`UNIQUE`/`CHECK` are semantic; column-definition vs. table-constraint order, `CONSTRAINT`-name eligibility, single-column `REFERENCES`, PRIMARY KEY/AUTO_INCREMENT cardinality, DEFAULT-family exclusivity/single-SELECT limits, and temporary-table restrictions are enforced. CHECK expression content restrictions (no subqueries, aggregates, window functions, meta-functions, epoch/other-table references) remain a server-side residual |
 | `COPY` target columns and options | Semantic | Filler columns, transforms, per-column and `COLUMN OPTION` parameters, including duplicate/order/conflict validation |
 | `COPY` file/STDIN sources | Semantic | Local/server paths, compression, node selection, partition columns |

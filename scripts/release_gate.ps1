@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^p\d{2}$')]
+    [ValidatePattern('^[pq]\d{2}$')]
     [string]$TaskId,
 
     [Parameter(Mandatory = $true)]
