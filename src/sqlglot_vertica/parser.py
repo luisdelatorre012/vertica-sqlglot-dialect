@@ -493,11 +493,36 @@ class VerticaParser(PostgresParser):
         "SECOND": set(),
     }
 
+    # Vertica's column-constraint grammar is much narrower than the inherited
+    # Postgres/generic set (no CHARACTER SET, COLLATE, GENERATED AS IDENTITY,
+    # EXCLUDE, PERIOD, and so on), so this dict is built explicitly rather than
+    # by spreading the base dialect's entries: an omitted keyword fails closed
+    # via a natural leftover-token ParseError instead of needing an explicit
+    # rejection. AUTO_INCREMENT/IDENTITY, CHECK, DEFAULT, NOT, PRIMARY KEY,
+    # REFERENCES, SET, and UNIQUE are Vertica-specific parsers; NULL keeps the
+    # canonical constructor.
     CONSTRAINT_PARSERS: t.ClassVar = {
-        **PostgresParser.CONSTRAINT_PARSERS,
         "ACCESSRANK": lambda self: self._parse_access_rank_column_constraint(),
         "ENCODING": lambda self: self._parse_encoding_column_constraint(),
+        "AUTO_INCREMENT": lambda self: self._parse_identity_constraint("AUTO_INCREMENT"),
+        "IDENTITY": lambda self: self._parse_identity_constraint("IDENTITY"),
+        "CHECK": lambda self: self._parse_check_expression(),
+        "DEFAULT": lambda self: self._parse_default_constraint(),
+        "NOT": lambda self: self._parse_not_constraint(),
+        "NULL": lambda self: self.expression(exp.NotNullColumnConstraint(allow_null=True)),
+        "PRIMARY KEY": lambda self: self._parse_column_primary_key(),
+        "REFERENCES": lambda self: self._parse_column_references(),
+        "SET": lambda self: self._parse_set_using_constraint(),
+        "UNIQUE": lambda self: self._parse_column_unique(),
     }
+
+    # The only constraints that may carry an explicit `CONSTRAINT name` prefix
+    # at column level, per the column-constraint primary source.
+    NAMEABLE_COLUMN_CONSTRAINTS: t.ClassVar = ("CHECK", "PRIMARY KEY", "REFERENCES", "UNIQUE")
+
+    # The exclusive table-constraint kinds, per the table-constraint primary
+    # source; CONSTRAINT_PARSERS keys above cover the column-constraint form.
+    TABLE_CONSTRAINT_KEYWORDS: t.ClassVar = ("PRIMARY KEY", "FOREIGN KEY", "UNIQUE", "CHECK")
 
     COPY_COMPRESSIONS: t.ClassVar = {"UNCOMPRESSED", "BZIP", "GZIP", "LZO", "ZSTD"}
     COPY_COLUMN_PARAMETER_ORDER: t.ClassVar = {
@@ -6657,11 +6682,18 @@ class VerticaParser(PostgresParser):
         assert action is not None
         return self.expression(exp.Alter(this=sequence, kind="SEQUENCE", actions=[action]))
 
+    def _raise_create_table_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
     def _parse_create_table(self, temporary: bool, scope: str | None) -> exp.Create:
         exists = self._parse_exists(not_=True)
         table = self._parse_table_parts(schema=True)
         if not table:
-            self.raise_error("CREATE TABLE requires a table name")
+            self._raise_create_table_error("CREATE TABLE requires a table name")
         assert table is not None
 
         properties: list[exp.Expr] = []
@@ -6674,7 +6706,7 @@ class VerticaParser(PostgresParser):
 
         if self._match_text_seq("LIKE"):
             if temporary:
-                self.raise_error("CREATE TEMPORARY TABLE does not support LIKE")
+                self._raise_create_table_error("CREATE TEMPORARY TABLE does not support LIKE")
             return self._parse_create_table_like(
                 table=table,
                 exists=exists,
@@ -6720,16 +6752,9 @@ class VerticaParser(PostgresParser):
         """Parse a persistent or temporary table from column definitions."""
 
         if not schema.expressions:
-            self.raise_error("CREATE TABLE requires at least one column definition")
+            self._raise_create_table_error("CREATE TABLE requires at least one column definition")
 
-        for item in schema.expressions:
-            if isinstance(item, exp.ColumnDef) and not item.kind:
-                self.raise_error("CREATE TABLE column definitions require data types")
-            if isinstance(
-                item,
-                (exp.Identifier, vexp.GroupedProjectionColumns, vexp.ProjectionColumn),
-            ):
-                self.raise_error("CREATE TABLE column definitions require data types")
+        self._validate_table_definition_constraints(schema.expressions, temporary=temporary)
 
         on_commit = self._parse_on_commit_property() if temporary else None
         if on_commit:
@@ -6753,12 +6778,12 @@ class VerticaParser(PostgresParser):
         if self._match_text_seq("KSAFE"):
             safety = self._parse_number()
             if safety is not None and not safety.is_int:
-                self.raise_error("KSAFE requires an integer safety level")
+                self._raise_create_table_error("KSAFE requires an integer safety level")
             ksafe = self.expression(vexp.KsafeProperty(this=safety))
             properties.append(ksafe)
 
         if no_projection and (order or segmentation or ksafe):
-            self.raise_error(
+            self._raise_create_table_error(
                 "NO PROJECTION cannot be combined with ORDER BY, segmentation, or KSAFE"
             )
 
@@ -6773,11 +6798,11 @@ class VerticaParser(PostgresParser):
         quota = self._parse_disk_quota_property()
         if quota:
             if scope == "LOCAL":
-                self.raise_error("LOCAL temporary tables cannot specify DISK_QUOTA")
+                self._raise_create_table_error("LOCAL temporary tables cannot specify DISK_QUOTA")
             properties.append(quota)
 
         if self._curr:
-            self.raise_error(
+            self._raise_create_table_error(
                 f"Unexpected or out-of-order CREATE TABLE clause starting at {self._curr.text!r}"
             )
 
@@ -6804,7 +6829,9 @@ class VerticaParser(PostgresParser):
         """Parse CREATE TABLE AS with Vertica's pre- and post-query clauses."""
 
         if scope:
-            self.raise_error("GLOBAL or LOCAL scope is not supported for temporary CTAS")
+            self._raise_create_table_error(
+                "GLOBAL or LOCAL scope is not supported for temporary CTAS"
+            )
 
         if temporary:
             on_commit = self._parse_on_commit_property()
@@ -6817,7 +6844,7 @@ class VerticaParser(PostgresParser):
 
         as_token = self._curr
         if not self._match(TokenType.ALIAS):
-            self.raise_error("CREATE TABLE AS requires AS followed by a query")
+            self._raise_create_table_error("CREATE TABLE AS requires AS followed by a query")
 
         hint = self._parse_ctas_hint(as_token.comments)
         if hint:
@@ -6829,23 +6856,27 @@ class VerticaParser(PostgresParser):
 
         query = self._parse_ddl_select()
         if not query:
-            self.raise_error("CREATE TABLE AS requires a SELECT query")
+            self._raise_create_table_error("CREATE TABLE AS requires a SELECT query")
         assert query is not None
 
         if self._match_text_seq("ENCODED", "BY"):
             if columns:
-                self.raise_error("CTAS column-name lists and ENCODED BY are mutually exclusive")
+                self._raise_create_table_error(
+                    "CTAS column-name lists and ENCODED BY are mutually exclusive"
+                )
             encoded_columns = self._parse_csv(
                 lambda: self._parse_ctas_column(require_physical_design=True)
             )
             if not encoded_columns:
-                self.raise_error("ENCODED BY requires at least one column reference")
+                self._raise_create_table_error("ENCODED BY requires at least one column reference")
             properties.append(self.expression(vexp.EncodedByProperty(expressions=encoded_columns)))
 
         segmentation = self._parse_projection_segmentation()
         if segmentation:
             if temporary:
-                self.raise_error("Temporary CTAS does not support a segmentation clause")
+                self._raise_create_table_error(
+                    "Temporary CTAS does not support a segmentation clause"
+                )
             self._validate_table_segmentation(segmentation)
             properties.append(self.expression(vexp.CtasSegmentationProperty(this=segmentation)))
 
@@ -6854,7 +6885,7 @@ class VerticaParser(PostgresParser):
             properties.append(quota)
 
         if self._curr:
-            self.raise_error(
+            self._raise_create_table_error(
                 f"Unexpected or out-of-order CREATE TABLE AS clause starting at {self._curr.text!r}"
             )
 
@@ -6881,19 +6912,21 @@ class VerticaParser(PostgresParser):
     ) -> exp.Create:
         source = self._parse_table_parts(schema=True)
         if not source:
-            self.raise_error("CREATE TABLE LIKE requires a source table")
+            self._raise_create_table_error("CREATE TABLE LIKE requires a source table")
         assert source is not None
 
         options: list[exp.Expr] = []
         if self._match_texts(("INCLUDING", "EXCLUDING")):
             action = self._prev.text.upper()
             if not self._match_text_seq("PROJECTIONS"):
-                self.raise_error(f"{action} must be followed by PROJECTIONS")
+                self._raise_create_table_error(f"{action} must be followed by PROJECTIONS")
             options.append(
                 self.expression(exp.Property(this=exp.var(action), value=exp.var("PROJECTIONS")))
             )
             if self._match_texts(("INCLUDING", "EXCLUDING"), advance=False):
-                self.raise_error("CREATE TABLE LIKE accepts only one projection-copy option")
+                self._raise_create_table_error(
+                    "CREATE TABLE LIKE accepts only one projection-copy option"
+                )
 
         properties.append(self.expression(exp.LikeProperty(this=source, expressions=options)))
 
@@ -6906,7 +6939,7 @@ class VerticaParser(PostgresParser):
             properties.append(quota)
 
         if self._curr:
-            self.raise_error(
+            self._raise_create_table_error(
                 "Unexpected or out-of-order CREATE TABLE LIKE clause "
                 f"starting at {self._curr.text!r}"
             )
@@ -7034,6 +7067,129 @@ class VerticaParser(PostgresParser):
         ):
             self.raise_error("CREATE TABLE segmentation requires ALL NODES and forbids OFFSET")
 
+    def _validate_table_definition_constraints(
+        self, items: list[exp.Expr], *, temporary: bool
+    ) -> None:
+        """Enforce column/table-constraint order, cardinality, and DEFAULT rules.
+
+        Vertica's definition-form grammar puts every column-definition before any
+        table-constraint, allows only one PRIMARY KEY and one AUTO_INCREMENT/IDENTITY
+        column per table, forbids AUTO_INCREMENT/IDENTITY in temporary tables, and
+        restricts DEFAULT/SET USING/DEFAULT USING to one SELECT statement each with
+        no subqueries at all in a temporary table.
+        """
+
+        primary_keys = 0
+        identities = 0
+        seen_constraint = False
+
+        for item in items:
+            if isinstance(item, exp.ColumnDef):
+                if seen_constraint:
+                    self._raise_constraint_error(
+                        "CREATE TABLE column definitions must precede table constraints"
+                    )
+                if not item.kind:
+                    self._raise_constraint_error(
+                        "CREATE TABLE column definitions require data types"
+                    )
+                kinds = self._column_constraint_kinds(item)
+                primary_keys += sum(
+                    isinstance(
+                        kind,
+                        (exp.PrimaryKeyColumnConstraint, vexp.VerticaPrimaryKeyColumnConstraint),
+                    )
+                    for kind in kinds
+                )
+                identities += sum(
+                    isinstance(kind, vexp.VerticaIdentityColumnConstraint) for kind in kinds
+                )
+                self._validate_default_family(kinds, temporary=temporary)
+            elif isinstance(
+                item, (exp.Identifier, vexp.GroupedProjectionColumns, vexp.ProjectionColumn)
+            ):
+                self._raise_constraint_error("CREATE TABLE column definitions require data types")
+            else:
+                seen_constraint = True
+                primary_keys += self._count_table_primary_keys(item)
+
+        if primary_keys > 1:
+            self._raise_constraint_error("CREATE TABLE allows at most one PRIMARY KEY")
+        if identities > 1:
+            self._raise_constraint_error(
+                "AUTO_INCREMENT or IDENTITY is allowed on only one table column"
+            )
+        if temporary and identities:
+            self._raise_constraint_error(
+                "AUTO_INCREMENT and IDENTITY are not supported in temporary tables"
+            )
+
+    @staticmethod
+    def _column_constraint_kinds(column: exp.ColumnDef) -> list[exp.Expr]:
+        kinds = []
+        for constraint in column.args.get("constraints") or []:
+            kind = (
+                constraint.args.get("kind")
+                if isinstance(constraint, exp.ColumnConstraint)
+                else None
+            )
+            if kind is not None:
+                kinds.append(kind)
+        return kinds
+
+    @staticmethod
+    def _count_table_primary_keys(item: exp.Expr) -> int:
+        primary_key_types = (exp.PrimaryKey, vexp.VerticaPrimaryKey)
+        if isinstance(item, primary_key_types):
+            return 1
+        if isinstance(item, exp.Constraint):
+            return sum(isinstance(kind, primary_key_types) for kind in item.expressions)
+        return 0
+
+    def _validate_default_family(self, kinds: list[exp.Expr], *, temporary: bool) -> None:
+        defaults = 0
+        set_usings = 0
+        default_usings = 0
+        for kind in kinds:
+            if isinstance(kind, exp.DefaultColumnConstraint):
+                defaults += 1
+                self._validate_default_family_expression(kind.this, temporary, "DEFAULT")
+            elif isinstance(kind, vexp.SetUsingColumnConstraint):
+                set_usings += 1
+                self._validate_default_family_expression(kind.this, temporary, "SET USING")
+            elif isinstance(kind, vexp.DefaultUsingColumnConstraint):
+                default_usings += 1
+                self._validate_default_family_expression(kind.this, temporary, "DEFAULT USING")
+
+        if defaults > 1:
+            self._raise_constraint_error("DEFAULT may be specified at most once per column")
+        if set_usings > 1:
+            self._raise_constraint_error("SET USING may be specified at most once per column")
+        if default_usings and (defaults or set_usings or default_usings > 1):
+            self._raise_constraint_error(
+                "DEFAULT USING cannot be combined with a separate DEFAULT or SET USING "
+                "on the same column"
+            )
+
+    def _validate_default_family_expression(
+        self, expression: exp.Expr | None, temporary: bool, label: str
+    ) -> None:
+        if expression is None:
+            return
+        if self._count_disjoint_subqueries(expression) > 1:
+            self._raise_constraint_error(f"{label} expressions support only one SELECT statement")
+        if temporary and expression.find(exp.Select, exp.Subquery):
+            self._raise_constraint_error(
+                f"{label} does not support subqueries in a temporary table"
+            )
+
+    def _count_disjoint_subqueries(self, expression: exp.Expr) -> int:
+        if isinstance(expression, (exp.Select, exp.Subquery)):
+            return 1
+        return sum(
+            self._count_disjoint_subqueries(child) for child in expression.iter_expressions()
+        )
+
     def _parse_table_order(self) -> exp.Order | None:
         if not self._match(TokenType.ORDER_BY):
             return None
@@ -7104,6 +7260,212 @@ class VerticaParser(PostgresParser):
         if not access_rank or not access_rank.is_int:
             self.raise_error("ACCESSRANK requires an integer")
         return self.expression(vexp.AccessRankColumnConstraint(this=access_rank))
+
+    def _raise_constraint_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
+    def _parse_enforcement_state(self) -> bool | None:
+        """Return True/False/None for a trailing ENABLED/DISABLED/omitted marker."""
+
+        if self._match_texts(("ENABLED", "DISABLED")):
+            return self._prev.text.upper() == "ENABLED"
+        return None
+
+    def _parse_check_expression(
+        self,
+    ) -> exp.CheckColumnConstraint | vexp.VerticaCheckColumnConstraint | None:
+        if not self._match(TokenType.L_PAREN, advance=False):
+            return None
+        this = self._parse_wrapped(self._parse_assignment)
+        state = self._parse_enforcement_state()
+        if state is None:
+            return self.expression(exp.CheckColumnConstraint(this=this))
+        return self.expression(vexp.VerticaCheckColumnConstraint(this=this, enforced=state))
+
+    def _parse_not_constraint(self) -> exp.NotNullColumnConstraint | None:
+        if self._match_text_seq("NULL"):
+            return self.expression(exp.NotNullColumnConstraint())
+        self._retreat(self._index - 1)
+        return None
+
+    def _parse_default_constraint(
+        self,
+    ) -> exp.DefaultColumnConstraint | vexp.DefaultUsingColumnConstraint:
+        if self._match_text_seq("USING"):
+            return self.expression(vexp.DefaultUsingColumnConstraint(this=self._parse_bitwise()))
+        return self.expression(exp.DefaultColumnConstraint(this=self._parse_bitwise()))
+
+    def _parse_set_using_constraint(self) -> vexp.SetUsingColumnConstraint:
+        if not self._match_text_seq("USING"):
+            self._raise_constraint_error("SET column constraint requires USING")
+        return self.expression(vexp.SetUsingColumnConstraint(this=self._parse_bitwise()))
+
+    def _parse_column_primary_key(
+        self,
+    ) -> exp.PrimaryKeyColumnConstraint | vexp.VerticaPrimaryKeyColumnConstraint:
+        state = self._parse_enforcement_state()
+        if state is None:
+            return self.expression(exp.PrimaryKeyColumnConstraint())
+        return self.expression(vexp.VerticaPrimaryKeyColumnConstraint(enforced=state))
+
+    def _parse_column_unique(
+        self,
+    ) -> exp.UniqueColumnConstraint | vexp.VerticaUniqueColumnConstraint:
+        state = self._parse_enforcement_state()
+        if state is None:
+            return self.expression(exp.UniqueColumnConstraint())
+        return self.expression(vexp.VerticaUniqueColumnConstraint(enforced=state))
+
+    def _parse_reference_clause(self, *, max_columns: int | None) -> exp.Reference:
+        this = self._parse_table(schema=True)
+        if not this:
+            self._raise_constraint_error("REFERENCES requires a table name")
+        assert this is not None
+        if (
+            max_columns is not None
+            and isinstance(this, exp.Schema)
+            and len(this.expressions) > max_columns
+        ):
+            self._raise_constraint_error(
+                f"REFERENCES accepts at most {max_columns} column"
+                f"{'' if max_columns == 1 else 's'} at column level"
+            )
+        return self.expression(exp.Reference(this=this))
+
+    def _parse_column_references(self) -> exp.Reference:
+        return self._parse_reference_clause(max_columns=1)
+
+    def _parse_table_primary_key(self) -> exp.PrimaryKey | vexp.VerticaPrimaryKey:
+        columns = self._parse_wrapped_id_vars()
+        if not columns:
+            self._raise_constraint_error("PRIMARY KEY requires at least one column")
+        state = self._parse_enforcement_state()
+        if state is None:
+            return self.expression(exp.PrimaryKey(expressions=columns))
+        return self.expression(vexp.VerticaPrimaryKey(expressions=columns, enforced=state))
+
+    def _parse_table_unique(
+        self,
+    ) -> exp.UniqueColumnConstraint | vexp.VerticaUniqueColumnConstraint:
+        columns = self._parse_wrapped_id_vars()
+        if not columns:
+            self._raise_constraint_error("UNIQUE requires at least one column")
+        state = self._parse_enforcement_state()
+        schema = self.expression(exp.Schema(expressions=columns))
+        if state is None:
+            return self.expression(exp.UniqueColumnConstraint(this=schema))
+        return self.expression(vexp.VerticaUniqueColumnConstraint(this=schema, enforced=state))
+
+    def _parse_table_foreign_key(self) -> exp.ForeignKey:
+        columns = self._parse_wrapped_id_vars()
+        if not columns:
+            self._raise_constraint_error("FOREIGN KEY requires at least one column")
+        if not self._match(TokenType.REFERENCES):
+            self._raise_constraint_error("FOREIGN KEY requires REFERENCES")
+        reference = self._parse_reference_clause(max_columns=None)
+        return self.expression(exp.ForeignKey(expressions=columns, reference=reference))
+
+    def _parse_identity_argument(self, label: str, *, allow_negative: bool) -> exp.Expr:
+        negative = allow_negative and self._match(TokenType.DASH)
+        if not negative:
+            self._match(TokenType.PLUS)
+        number = self._parse_number()
+        if not number or not number.is_int:
+            self._raise_constraint_error(f"{label} requires an integer")
+        assert number is not None
+        return self.expression(exp.Neg(this=number)) if negative else number
+
+    def _parse_identity_constraint(self, kind: str) -> vexp.VerticaIdentityColumnConstraint:
+        start: exp.Expr | None = None
+        increment: exp.Expr | None = None
+        cache_size: exp.Expr | None = None
+        if self._match(TokenType.L_PAREN):
+            args = self._parse_csv(lambda: self._parse_identity_argument(kind, allow_negative=True))
+            if not self._match(TokenType.R_PAREN):
+                self._raise_constraint_error(f"{kind} arguments require a closing parenthesis")
+            if not 1 <= len(args) <= 3:
+                self._raise_constraint_error(f"{kind} accepts between 1 and 3 arguments")
+            start = args[0]
+            if len(args) > 1:
+                increment = args[1]
+            if len(args) > 2:
+                cache_size = args[2]
+                if isinstance(cache_size, exp.Neg):
+                    self._raise_constraint_error(f"{kind} cache size must not be negative")
+        return self.expression(
+            vexp.VerticaIdentityColumnConstraint(
+                kind=exp.var(kind),
+                start=start,
+                increment=increment,
+                cache_size=cache_size,
+            )
+        )
+
+    def _parse_column_constraint(self) -> exp.Expr | None:
+        """Dispatch one Vertica column-constraint, honoring the CONSTRAINT-name allowlist."""
+
+        if self._match(TokenType.CONSTRAINT):
+            name = self._parse_id_var()
+            if name is None:
+                self._raise_constraint_error("CONSTRAINT requires a name")
+            if not self._match_texts(self.NAMEABLE_COLUMN_CONSTRAINTS):
+                self._raise_constraint_error(
+                    "CONSTRAINT name is only supported for CHECK, PRIMARY KEY, "
+                    "REFERENCES, or UNIQUE column constraints"
+                )
+            keyword = self._prev.text.upper()
+            constraint = self.CONSTRAINT_PARSERS[keyword](self)
+            if constraint is None:
+                self._raise_constraint_error(f"{keyword} requires a parenthesized expression")
+            return self.expression(exp.ColumnConstraint(this=name, kind=constraint))
+
+        if not self._match_texts(self.CONSTRAINT_PARSERS):
+            return None
+
+        keyword = self._prev.text.upper()
+        constraint = self.CONSTRAINT_PARSERS[keyword](self)
+        if not constraint:
+            self._retreat(self._index - 1)
+            return None
+        return self.expression(exp.ColumnConstraint(kind=constraint))
+
+    def _parse_constraint(self) -> exp.Expr | None:
+        """Dispatch exactly one table-constraint kind, optionally CONSTRAINT-named."""
+
+        name = None
+        if self._match(TokenType.CONSTRAINT):
+            name = self._parse_id_var()
+            if name is None:
+                self._raise_constraint_error("CONSTRAINT requires a name")
+        elif not self._match_texts(self.TABLE_CONSTRAINT_KEYWORDS, advance=False):
+            return None
+
+        kind: exp.Expr
+        if self._match_text_seq("PRIMARY KEY"):
+            kind = self._parse_table_primary_key()
+        elif self._match_text_seq("FOREIGN KEY"):
+            kind = self._parse_table_foreign_key()
+        elif self._match_text_seq("UNIQUE"):
+            kind = self._parse_table_unique()
+        elif self._match_text_seq("CHECK"):
+            check = self._parse_check_expression()
+            if check is None:
+                self._raise_constraint_error("CHECK requires a parenthesized expression")
+            assert check is not None
+            kind = check
+        else:
+            self._raise_constraint_error(
+                "CONSTRAINT name requires PRIMARY KEY, FOREIGN KEY, UNIQUE, or CHECK"
+            )
+            return None
+
+        if name is not None:
+            return self.expression(exp.Constraint(this=name, expressions=[kind]))
+        return kind
 
     @t.overload
     def _parse_query_modifiers(self, this: E) -> E: ...

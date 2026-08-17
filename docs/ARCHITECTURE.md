@@ -275,6 +275,66 @@ explicit `RESTRICT`. Compound CREATE SCHEMA bodies remain fail-closed and
 separately planned. Namespace mode, current-database resolution, ownership,
 object dependencies, and quota relationships remain catalog/server checks.
 
+Ordinary column- and table-constraint grammar is rebuilt as an explicit
+allowlist rather than inherited wholesale from Postgres: `CONSTRAINT_PARSERS`
+lists only the keywords the 26.2 column-constraint and table-constraint pages
+document, so an omitted keyword (Postgres `MATCH`, `DEFERRABLE`, `INCLUDE`,
+`GENERATED ... AS IDENTITY`, `CHARACTER SET`, `EXCLUDE`, `PERIOD`, and similar)
+fails through a natural leftover-token `ParseError` instead of silently
+parsing. `AUTO_INCREMENT`/`IDENTITY` use a dedicated `VerticaIdentityColumnConstraint`
+for their positional `(start, increment, cache-size)` arguments and exact
+spelling, because the canonical `AutoIncrementColumnConstraint`/
+`GeneratedAsIdentityColumnConstraint` pair has no slot for cache size and
+generates Postgres's unrelated `GENERATED ... AS IDENTITY` syntax.
+`SetUsingColumnConstraint` and `DefaultUsingColumnConstraint` model
+`SET USING expr` and `DEFAULT USING expr`, which have no canonical equivalent.
+`PRIMARY KEY`/`UNIQUE`/`CHECK` reuse their canonical nodes when no `ENABLED`/
+`DISABLED` marker is written, keeping bare constraints portable to other
+dialects; once a marker is present, parsing switches to a detached
+`VerticaPrimaryKeyColumnConstraint`/`VerticaUniqueColumnConstraint`/
+`VerticaPrimaryKey`/`VerticaCheckColumnConstraint`. These are deliberately not
+subclasses of the canonical constraint nodes: `exp.CheckColumnConstraint.enforced`
+already means MySQL `[NOT] ENFORCED`, and at least one foreign dialect
+generator (SQLite) structurally rewrites plain `exp.PrimaryKey` nodes by
+`isinstance` before per-node dispatch runs, so a subclass would let Vertica's
+enforcement marker either be reinterpreted as MySQL's or silently dropped
+instead of failing atomically. Table-level `PRIMARY KEY`/`FOREIGN KEY`/
+`UNIQUE`/`CHECK` dispatch (bare or `CONSTRAINT`-named) is a single custom
+`_parse_constraint` override that accepts exactly one of the four kinds, so a
+named constraint can no longer bundle multiple kinds under one name the way
+the inherited generic dispatch allowed. Column-level `CONSTRAINT name` is
+accepted only before `CHECK`, `PRIMARY KEY`, `REFERENCES`, or `UNIQUE`, per the
+documented naming rule; column-level `REFERENCES` cannot exceed one referenced
+column, distinguishing it from table-level `FOREIGN KEY`'s multi-column form
+that reuses the same reference-clause parser. A same-statement structural pass
+enforces that column definitions precede table constraints, at most one
+`PRIMARY KEY` and one `AUTO_INCREMENT`/`IDENTITY` column exist per table,
+`AUTO_INCREMENT`/`IDENTITY` is absent from temporary tables, `DEFAULT`/
+`SET USING` are not repeated and `DEFAULT USING` is not combined with either,
+and `DEFAULT`/`SET USING`/`DEFAULT USING` expressions contain at most one
+top-level SELECT statement with no subquery at all in a temporary table.
+Enforcing these same-statement rules at every error level required correcting
+a latent defect in the pre-existing CREATE TABLE definition/CTAS/LIKE
+dispatch, which called the plain, level-dependent `raise_error` immediately
+before an `assert ... is not None`; at `RAISE`,
+`WARN`, and `IGNORE` levels this could reach the assert without having raised
+and crash with `AssertionError` instead of `ParseError`. Those call sites now
+use the same guaranteed-raise wrapper pattern established for other statement
+families. The re-opened 26.2 column-constraint page's own formal grammar has
+an internal inconsistency: `[ { PRIMARY KEY [ ENABLED | DISABLED ] REFERENCES
+table [( column )] } ]` is missing the `|` that separates `PRIMARY KEY` from
+`REFERENCES` as alternatives everywhere else in the same production (compare
+the table-constraint page's clean `{ A | B | C | D }` alternation); the parser
+treats them as separate, independently optional column-constraint pieces,
+consistent with the surrounding prose and every worked example, and this
+contradiction is recorded rather than silently resolved. Referential
+existence, type compatibility (including collection-typed key columns),
+same-database name uniqueness, unspecified enforcement state, dependency
+effects, and CHECK expression content restrictions (subqueries, aggregates,
+window functions, meta-functions, epoch-column and other-table references,
+and the Boolean-return requirement, all catalog- or volatility-dependent)
+remain catalog/server concerns.
+
 Directed-query statements use atomic custom roots because SQLGlot has no
 canonical SAVE/GET/CREATE/activation lifecycle. Their input SELECTs and WHERE
 filters remain ordinary traversable query children. `DirectedConstantHint`

@@ -623,6 +623,69 @@ class AccessRankColumnConstraint(exp.Expression, exp.ColumnConstraintKind):
     arg_types: t.ClassVar = {"this": True}
 
 
+class SetUsingColumnConstraint(exp.Expression, exp.ColumnConstraintKind):
+    """A column value refreshed from an expression only by REFRESH_COLUMNS."""
+
+    arg_types: t.ClassVar = {"this": True}
+
+
+class DefaultUsingColumnConstraint(exp.Expression, exp.ColumnConstraintKind):
+    """A column's combined DEFAULT and SET USING constraint sharing one expression."""
+
+    arg_types: t.ClassVar = {"this": True}
+
+
+class VerticaCheckColumnConstraint(exp.Expression, exp.ColumnConstraintKind):
+    """CHECK (...) carrying Vertica's ENABLED/DISABLED marker.
+
+    Deliberately detached from the canonical CheckColumnConstraint (whose
+    ``enforced`` flag means MySQL ENFORCED) rather than subclassing it, so a
+    foreign generator cannot structurally recognize this as an ordinary check
+    constraint and silently reinterpret or discard Vertica's enforcement state.
+    """
+
+    arg_types: t.ClassVar = {"this": True, "enforced": True}
+
+
+class VerticaPrimaryKeyColumnConstraint(exp.Expression, exp.ColumnConstraintKind):
+    """Column-level PRIMARY KEY carrying an explicit Vertica ENABLED/DISABLED marker.
+
+    Detached from the canonical PrimaryKeyColumnConstraint so dialects that
+    structurally rewrite plain PRIMARY KEY nodes (for example SQLite folding a
+    single-column table constraint into the column definition) cannot silently
+    drop the enforcement marker; they fail atomically instead.
+    """
+
+    arg_types: t.ClassVar = {"enforced": True}
+
+
+class VerticaUniqueColumnConstraint(exp.Expression, exp.ColumnConstraintKind):
+    """Column- or table-level UNIQUE carrying an explicit Vertica ENABLED/DISABLED marker.
+
+    Detached from the canonical UniqueColumnConstraint for the same foreign-
+    generation-safety reason as VerticaPrimaryKeyColumnConstraint.
+    """
+
+    arg_types: t.ClassVar = {"this": False, "enforced": True}
+
+
+class VerticaPrimaryKey(exp.Expression):
+    """Table-level PRIMARY KEY (...) carrying an explicit Vertica ENABLED/DISABLED marker.
+
+    Detached from the canonical PrimaryKey so dialects that structurally
+    rewrite a single-column table PRIMARY KEY (for example SQLite folding it
+    into the column definition) cannot silently drop the enforcement marker.
+    """
+
+    arg_types: t.ClassVar = {"expressions": True, "enforced": True}
+
+
+class VerticaIdentityColumnConstraint(exp.Expression, exp.ColumnConstraintKind):
+    """AUTO_INCREMENT/IDENTITY with Vertica's positional start/increment/cache-size form."""
+
+    arg_types: t.ClassVar = {"kind": True, "start": False, "increment": False, "cache_size": False}
+
+
 class TableSegmentationProperty(exp.Property):
     """Segmentation design for a table's automatically created projections."""
 

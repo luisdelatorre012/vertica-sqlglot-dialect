@@ -60,7 +60,7 @@ Status meanings:
 | `CREATE PROJECTION` / `DROP PROJECTION` | Semantic | Columns, grouped columns, encoding/access rank, query order, segmentation, node sets, offset, K-safety |
 | Definition-form `CREATE TABLE` | Semantic | Encoding/access rank, physical order, segmentation, K-safety, partition grouping/count, inherited privileges, quota |
 | `CREATE TABLE AS`, `LIKE`, temporary tables | Semantic | CTAS hints/snapshots, column lists and encodings, segmentation/quota, projection-copy options, scope, commit behavior, and `NO PROJECTION` |
-| Ordinary column/table constraints | Generic | Vertica-specific constraint restrictions need a larger negative corpus |
+| Ordinary column/table constraints | Partial | `AUTO_INCREMENT`/`IDENTITY`, `SET USING`, `DEFAULT USING`, and typed `ENABLED`/`DISABLED` enforcement on `PRIMARY KEY`/`UNIQUE`/`CHECK` are semantic; column-definition vs. table-constraint order, `CONSTRAINT`-name eligibility, single-column `REFERENCES`, PRIMARY KEY/AUTO_INCREMENT cardinality, DEFAULT-family exclusivity/single-SELECT limits, and temporary-table restrictions are enforced. CHECK expression content restrictions (no subqueries, aggregates, window functions, meta-functions, epoch/other-table references) remain a server-side residual |
 | `COPY` target columns and options | Semantic | Filler columns, transforms, per-column and `COLUMN OPTION` parameters, including duplicate/order/conflict validation |
 | `COPY` file/STDIN sources | Semantic | Local/server paths, compression, node selection, partition columns |
 | `COPY FROM VERTICA` and UDL pipelines | Semantic | Source/filter/parser functions represented structurally |
@@ -113,6 +113,16 @@ Some rules require information that a syntax-only dialect does not have:
   structural restrictions but cannot validate those catalog relationships.
 - Physical-design expression validity can depend on volatility and catalog
   metadata.
+- Constraint referential existence (`REFERENCES`/`FOREIGN KEY` targets),
+  column-type compatibility (for example collection-typed key columns),
+  same-name uniqueness across a database, enforcement state left unspecified,
+  and dependency effects require catalog state. CHECK expression content
+  restrictions (no subqueries, aggregates, window functions, SQL
+  meta-functions, epoch-column, or other-table references) and the Boolean
+  return-type requirement depend on function volatility and catalog
+  typing, so they remain server-side; the dialect validates only the
+  documented deterministic grammar, cardinality, and same-statement
+  restrictions.
 - COMMENT ON target existence/ownership and the server's documented
   8192-character truncation/message behavior require the catalog or execution;
   the dialect validates target shape and string-or-NULL syntax only.

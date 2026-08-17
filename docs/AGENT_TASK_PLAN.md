@@ -17,8 +17,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P14 — Access-policy lifecycle**.
-- Next eligible tasks are selected by dependency and numeric order; P15 is the
+- Completed through **P15 — Ordinary constraint conformance**.
+- Next eligible tasks are selected by dependency and numeric order; P16 is the
   lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
@@ -66,7 +66,7 @@ task may be `IN_PROGRESS`.
 | P12 | DONE   | SCHEMA lifecycle                              | P11                 | `feat: complete semantic schema lifecycle`              |
 | P13 | DONE   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
 | P14 | DONE   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
-| P15 | TODO   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
+| P15 | DONE   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
 | P16 | TODO   | Native flexible-table definition form         | P15                 | `feat: model native flexible table definitions`         |
 | P17 | TODO   | Flexible-table CTAS                           | P16                 | `feat: model flexible table ctas`                       |
 | P18 | TODO   | Flex map transform core                       | P16                 | `feat: model flex map transforms`                       |
@@ -472,7 +472,7 @@ tests at 93.16% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15,
 sdist/wheel build, clean force-install, `pip check`, and installed-wheel
 entry-point/CREATE ACCESS POLICY round-trip smoke passed.
 
-### P15 — ordinary constraint conformance — `TODO`
+### P15 — ordinary constraint conformance — `DONE`
 
 **Outcome.** Turn the current Generic ordinary column/table constraint row into
 a documented Vertica contract, using canonical SQLGlot nodes wherever exact.
@@ -490,7 +490,66 @@ volatility, enforcement state, and dependency checks.
 **Primary sources.** The [CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/)
 subpages for column definitions, column constraints, and table constraints.
 
-**Completion record.** Pending.
+**Completion record.** Re-audited the column-definition, column-constraint,
+table-constraint, and admin constraints-guide pages against current canonical
+SQLGlot behavior. The prior "Generic" status understated both gaps and
+un-Vertica-documented Postgres leakage: `ENABLED`/`DISABLED` enforcement on
+`PRIMARY KEY`/`UNIQUE`/`CHECK`, `SET USING`, and `DEFAULT USING` did not parse
+at all; `AUTO_INCREMENT`/`IDENTITY` silently dropped its cache-size argument
+and generated Postgres's unrelated `GENERATED ... AS IDENTITY` syntax; and the
+inherited Postgres grammar accepted undocumented `ON DELETE`/`UPDATE`,
+`MATCH`, `DEFERRABLE`, `INCLUDE`, `GENERATED AS IDENTITY`, `CHARACTER SET`,
+`COLLATE`, `COMMENT`, `EXCLUDE`, `PERIOD`, multi-kind named table constraints,
+and interleaved column-definition/table-constraint order. `CONSTRAINT_PARSERS`
+is now an explicit allowlist (not spread from Postgres); every other inherited
+keyword fails through a natural leftover-token `ParseError`. New
+`VerticaIdentityColumnConstraint`, `SetUsingColumnConstraint`, and
+`DefaultUsingColumnConstraint` nodes model syntax with no canonical
+equivalent. `PRIMARY KEY`/`UNIQUE`/`CHECK` reuse their canonical nodes when no
+enforcement marker is written, keeping bare constraints portable to foreign
+dialects, and switch to detached (not subclassed) `VerticaPrimaryKeyColumnConstraint`/
+`VerticaUniqueColumnConstraint`/`VerticaPrimaryKey`/`VerticaCheckColumnConstraint`
+nodes once a marker is present; testing proved detachment necessary; because
+the canonical `CheckColumnConstraint.enforced` field already means MySQL
+`ENFORCED`, and because SQLite's generator structurally rewrites plain
+`exp.PrimaryKey` by `isinstance` before per-node dispatch, a subclass let a
+foreign generator reinterpret or silently drop Vertica's marker instead of
+failing atomically — a real, demonstrated leak, not a hypothetical one. Table-
+constraint dispatch is now an exclusive one-of-four parser; column-level
+`CONSTRAINT` naming is restricted to `CHECK`/`PRIMARY KEY`/`REFERENCES`/`UNIQUE`;
+column-level `REFERENCES` is capped at one column. A same-statement pass
+enforces column-definitions-before-table-constraints order, single
+`PRIMARY KEY`/`AUTO_INCREMENT`/`IDENTITY` cardinality, temporary-table
+exclusion of `AUTO_INCREMENT`/`IDENTITY`, `DEFAULT`/`SET USING`
+non-repetition and `DEFAULT USING` exclusivity, and the documented
+single-SELECT-statement/temporary-table-subquery limits on `DEFAULT`/
+`SET USING`/`DEFAULT USING`. Proving these restrictions at every `ErrorLevel`
+surfaced a latent, pre-existing defect: the CREATE TABLE definition/CTAS/LIKE
+dispatch called the plain, level-dependent `raise_error` immediately before an
+`assert ... is not None`, so at `RAISE`/`WARN`/`IGNORE` several negatives could
+reach the assert without having raised and crash with `AssertionError` instead
+of `ParseError`; every call site in that dispatch now uses the same
+guaranteed-raise wrapper already established for other statement families.
+The re-opened 26.2 column-constraint page's own formal grammar has an internal
+inconsistency: the `PRIMARY KEY`/`REFERENCES` alternative is missing the `|`
+that separates every other alternative in the same production, unlike the
+table-constraint page's clean four-way alternation; per the plan's source
+policy this is recorded rather than resolved by guessing, and `PRIMARY KEY`
+and `REFERENCES` are parsed as separate, independently optional pieces,
+consistent with the surrounding prose and every worked example. CHECK
+expression content restrictions (subqueries, aggregates, window functions,
+meta-functions, epoch-column/other-table references) and its Boolean-return
+requirement remain a named server-side residual per the task's own exclusions,
+along with referential existence, type compatibility (including
+collection-typed key columns), same-database name uniqueness, unspecified
+enforcement state, and dependency effects. Native flex-table definition
+parsing is unaffected and remains an opaque `Command` pending P16. The focused
+P15 suite passed 188 tests. The default CPython 3.12.6 gate passed 4861 tests
+at 93.24% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 4861 tests, with 3.15
+treating deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel
+build, clean force-install, `pip check`, and installed-wheel entry-point/
+CREATE TABLE constraint round-trip smoke passed.
 
 ### P16 — native flexible-table definition form — `TODO`
 

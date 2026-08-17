@@ -114,7 +114,14 @@ Implemented catalog P0:
 - semantic directed-query SAVE/GET/CREATE/ACTIVATE/DEACTIVATE/DROP statements,
   export metadata, and typed constant annotations with lexical provenance;
 - semantic standalone table reorganization and partition-definition changes,
-  including the valid metadata-only form without a `REORGANIZE` suffix.
+  including the valid metadata-only form without a `REORGANIZE` suffix;
+- documented ordinary column/table constraint grammar: typed `ENABLED`/
+  `DISABLED` enforcement on `PRIMARY KEY`/`UNIQUE`/`CHECK`, `AUTO_INCREMENT`/
+  `IDENTITY` with positional arguments, `SET USING`/`DEFAULT USING`,
+  column-definition-before-table-constraint ordering, `CONSTRAINT`-name
+  eligibility, single-column `REFERENCES`, and same-statement cardinality/
+  temporary-table/single-SELECT restrictions, with CHECK expression content
+  left as a named server-side residual.
 
 Remaining:
 

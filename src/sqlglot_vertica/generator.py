@@ -273,6 +273,9 @@ class VerticaGenerator(PostgresGenerator):
         exp.DayOfWeek: rename_func("DAYOFWEEK"),
         exp.DayOfWeekIso: rename_func("DAYOFWEEK_ISO"),
         exp.DayOfYear: rename_func("DAYOFYEAR"),
+        exp.CheckColumnConstraint: lambda self, expression: self.checkcolumnconstraint_sql(
+            expression
+        ),
         exp.EncodeColumnConstraint: lambda self, expression: (
             f"ENCODING {self.sql(expression, 'this')}"
         ),
@@ -297,6 +300,25 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AccessRankColumnConstraint: lambda self, expression: (
             f"ACCESSRANK {self.sql(expression, 'this')}"
         ),
+        vexp.SetUsingColumnConstraint: lambda self, expression: (
+            f"SET USING {self.sql(expression, 'this')}"
+        ),
+        vexp.DefaultUsingColumnConstraint: lambda self, expression: (
+            f"DEFAULT USING {self.sql(expression, 'this')}"
+        ),
+        vexp.VerticaIdentityColumnConstraint: lambda self, expression: (
+            self.verticaidentitycolumnconstraint_sql(expression)
+        ),
+        vexp.VerticaCheckColumnConstraint: lambda self, expression: (
+            self.verticacheckcolumnconstraint_sql(expression)
+        ),
+        vexp.VerticaPrimaryKeyColumnConstraint: lambda self, expression: (
+            self.verticaprimarykeycolumnconstraint_sql(expression)
+        ),
+        vexp.VerticaUniqueColumnConstraint: lambda self, expression: (
+            self.verticauniquecolumnconstraint_sql(expression)
+        ),
+        vexp.VerticaPrimaryKey: lambda self, expression: self.verticaprimarykey_sql(expression),
         vexp.AccessPolicyTarget: lambda self, expression: self.accesspolicytarget_sql(expression),
         vexp.AtEpochProperty: lambda self, expression: self.atepochproperty_sql(expression),
         vexp.AuthenticationGrant: lambda self, expression: self.authenticationgrant_sql(expression),
@@ -3801,6 +3823,72 @@ class VerticaGenerator(PostgresGenerator):
                 f"{label} expressions do not support subqueries, aggregates, or analytics"
             )
         return self.sql(value)
+
+    def checkcolumnconstraint_sql(self, expression: exp.CheckColumnConstraint) -> str:
+        if expression.args.get("enforced") is not None:
+            self.unsupported(
+                "Vertica CHECK enforcement requires VerticaCheckColumnConstraint, not ENFORCED"
+            )
+        return f"CHECK ({self.sql(expression, 'this')})"
+
+    def verticacheckcolumnconstraint_sql(
+        self, expression: vexp.VerticaCheckColumnConstraint
+    ) -> str:
+        enforced = expression.args.get("enforced")
+        if not isinstance(enforced, bool):
+            self.unsupported("CHECK enforcement state must be a boolean")
+            return f"CHECK ({self.sql(expression, 'this')})"
+        state = " ENABLED" if enforced else " DISABLED"
+        return f"CHECK ({self.sql(expression, 'this')}){state}"
+
+    def _enforcement_state_sql(self, expression: exp.Expr, label: str) -> str:
+        enforced = expression.args.get("enforced")
+        if not isinstance(enforced, bool):
+            self.unsupported(f"{label} enforcement state must be a boolean")
+            return ""
+        return " ENABLED" if enforced else " DISABLED"
+
+    def verticaprimarykeycolumnconstraint_sql(
+        self, expression: vexp.VerticaPrimaryKeyColumnConstraint
+    ) -> str:
+        return f"PRIMARY KEY{self._enforcement_state_sql(expression, 'PRIMARY KEY')}"
+
+    def verticauniquecolumnconstraint_sql(
+        self, expression: vexp.VerticaUniqueColumnConstraint
+    ) -> str:
+        this = self.sql(expression, "this")
+        this = f" {this}" if this else ""
+        return f"UNIQUE{this}{self._enforcement_state_sql(expression, 'UNIQUE')}"
+
+    def verticaprimarykey_sql(self, expression: vexp.VerticaPrimaryKey) -> str:
+        expressions = self.expressions(expression, flat=True)
+        state = self._enforcement_state_sql(expression, "PRIMARY KEY")
+        return f"PRIMARY KEY ({expressions}){state}"
+
+    def verticaidentitycolumnconstraint_sql(
+        self, expression: vexp.VerticaIdentityColumnConstraint
+    ) -> str:
+        kind_name = expression.args.get("kind")
+        if not isinstance(kind_name, exp.Var) or kind_name.name.upper() not in (
+            "AUTO_INCREMENT",
+            "IDENTITY",
+        ):
+            self.unsupported("AUTO_INCREMENT/IDENTITY requires a valid kind marker")
+            return "IDENTITY"
+
+        kind = self.sql(kind_name)
+        args = [
+            arg
+            for arg in (
+                expression.args.get("start"),
+                expression.args.get("increment"),
+                expression.args.get("cache_size"),
+            )
+            if arg is not None
+        ]
+        if not args:
+            return kind
+        return f"{kind}({', '.join(self.sql(arg) for arg in args)})"
 
     def commentconstrainttarget_sql(self, expression: vexp.CommentConstraintTarget) -> str:
         constraint = expression.args.get("this")

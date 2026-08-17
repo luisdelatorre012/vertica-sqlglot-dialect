@@ -67,6 +67,18 @@ plugin interface.
   shared row/column targets, traversable policy expressions, expression/state
   modification and COPY actions, strict qualification and identifier checks,
   and atomic foreign-generation failure.
+- Completed documented ordinary column/table constraint grammar: typed
+  `ENABLED`/`DISABLED` enforcement on `PRIMARY KEY`/`UNIQUE`/`CHECK` using
+  detached Vertica nodes so foreign generators fail atomically instead of
+  reinterpreting or dropping the marker; `AUTO_INCREMENT`/`IDENTITY` with
+  positional start/increment/cache-size arguments; `SET USING`/`DEFAULT USING`;
+  an explicit allowlisted column-constraint grammar in place of the inherited
+  Postgres superset; exclusive single-kind table-constraint dispatch;
+  column-definition-before-table-constraint ordering; `CONSTRAINT`-name
+  eligibility; single-column `REFERENCES`; and same-statement cardinality,
+  temporary-table, and single-SELECT restrictions. Also fixed a latent
+  `AssertionError` crash (instead of `ParseError`) in the CREATE TABLE
+  definition/CTAS/LIKE dispatch at `RAISE`/`WARN`/`IGNORE` error levels.
 - Added semantic classic and workload routing-rule lifecycle, every documented
   ALTER action, exact session workload/resource-pool assignment, SHOW workload
   controls, and canonical `ON ROUTING RULE` privilege alias handling.
