@@ -135,3 +135,11 @@ plugin interface.
   of PostgreSQL `STRICT`/`UNLOGGED`/variable-list forms and malformed tails at
   every error level, and atomic foreign generation in place of SQLGlot's
   silent `SUPPORTS_SELECT_INTO` CTAS rewrite.
+- Completed the documented `DROP TABLE` grammar: comma-separated multi-target
+  lists share prefix `IF EXISTS` and one trailing `CASCADE` through an atomic
+  `DropTables` root (SQLGlot's canonical `Drop.expressions` generator renders
+  secondary targets in malformed parentheses), single targets stay canonical
+  `exp.Drop`, target names share the sibling DROP families' identifier and
+  qualification contracts, and undocumented `RESTRICT`, `PURGE`, `TEMPORARY`,
+  `MATERIALIZED`, and `ICEBERG` modifiers now fail closed in parsing and
+  generation instead of leaking through inherited grammar.

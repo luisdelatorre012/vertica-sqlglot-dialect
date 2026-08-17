@@ -327,6 +327,21 @@ explicit `RESTRICT`. Compound CREATE SCHEMA bodies remain fail-closed and
 separately planned. Namespace mode, current-database resolution, ownership,
 object dependencies, and quota relationships remain catalog/server checks.
 
+Table drops complete the same lifecycle pattern with a split representation.
+Single-target `DROP TABLE` remains canonical `exp.Drop` because SQLGlot
+preserves `IF EXISTS`, up-to-three-part qualification, and `CASCADE` exactly,
+while a comma-separated list uses the atomic `DropTables` root because the
+canonical `Drop.expressions` generator renders secondary targets in malformed
+parentheses. The 26.2 grammar documents only prefix `IF EXISTS` (scoped over
+the whole list) and one trailing `CASCADE`, so `RESTRICT`, `PURGE`,
+`TEMPORARY`, `MATERIALIZED`, and `ICEBERG` fail closed at parse time, and the
+Vertica generator rejects the same foreign modifier fields on canonical trees
+with `UnsupportedError` instead of emitting undocumented Vertica. Target
+names share the sibling DROP families' component validation (128-byte UTF-8
+limits and unquoted-ASCII keyword provenance for `CASCADE`/`RESTRICT`);
+catalog existence, dependency effects, and temporary-table auto-drop
+semantics remain server concerns.
+
 Ordinary column- and table-constraint grammar is rebuilt as an explicit
 allowlist rather than inherited wholesale from Postgres: `CONSTRAINT_PARSERS`
 lists only the keywords the 26.2 column-constraint and table-constraint pages

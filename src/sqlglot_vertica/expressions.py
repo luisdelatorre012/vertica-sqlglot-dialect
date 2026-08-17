@@ -863,6 +863,16 @@ class ReorganizeTable(exp.Alter):
     """Apply a table's existing partition scheme to stored data."""
 
 
+class DropTables(exp.Drop):
+    """A comma-delimited, multi-table ``DROP TABLE`` statement.
+
+    SQLGlot 30.13's canonical ``Drop.expressions`` generator renders secondary
+    targets in parentheses.  A distinct root prevents that malformed spelling
+    from leaking into foreign dialects while keeping the ordinary single-table
+    form canonical.
+    """
+
+
 class DropRoles(exp.Drop):
     """A comma-delimited, multi-role ``DROP ROLE`` statement.
 

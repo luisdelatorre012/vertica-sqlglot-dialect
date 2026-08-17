@@ -422,6 +422,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.DropRoutingRule: lambda self, expression: self.droproutingrule_sql(expression),
         vexp.DropRoles: lambda self, expression: self.droproles_sql(expression),
         vexp.DropSchemas: lambda self, expression: self.dropschemas_sql(expression),
+        vexp.DropTables: lambda self, expression: self.droptables_sql(expression),
         vexp.DropUserDefinedExtension: lambda self, expression: self.dropuserdefinedextension_sql(
             expression
         ),
@@ -1124,6 +1125,8 @@ class VerticaGenerator(PostgresGenerator):
     def drop_sql(self, expression: exp.Drop) -> str:
         if expression.kind == "ROLE":
             return self._drop_role_sql(expression, require_multiple=False)
+        if expression.kind == "TABLE":
+            return self._drop_table_sql(expression, require_multiple=False)
         if expression.kind != "SEQUENCE":
             return super().drop_sql(expression)
 
@@ -1217,6 +1220,67 @@ class VerticaGenerator(PostgresGenerator):
         cascade = " CASCADE" if expression.args.get("cascade") else ""
         targets_sql = ", ".join(self.sql(target) for target in targets)
         return f"DROP ROLE{exists} {targets_sql}{cascade}"
+
+    def droptables_sql(self, expression: vexp.DropTables) -> str:
+        return self._drop_table_sql(expression, require_multiple=True)
+
+    def _validate_drop_table_name(self, expression: object, label: str) -> bool:
+        if not isinstance(expression, exp.Table):
+            self.unsupported(f"{label} requires a qualified table-shaped name")
+            return False
+        valid = True
+        if self._has_user_extras(expression, {"this", "db", "catalog"}):
+            self.unsupported(f"{label} contains unsupported table fields")
+            valid = False
+        parts = [expression.args.get("catalog"), expression.args.get("db"), expression.this]
+        if parts[0] is not None and parts[1] is None:
+            self.unsupported(f"{label} cannot have a namespace or database without a schema")
+            valid = False
+        for part_label, part in zip(("namespace/database", "schema", "table"), parts):
+            if part is not None:
+                valid = self._validate_user_identifier(part, f"{label} {part_label}") and valid
+        return valid
+
+    def _drop_table_sql(self, expression: exp.Drop, require_multiple: bool) -> str:
+        valid = True
+        if expression.args.get("kind") != "TABLE":
+            self.unsupported(f"{type(expression).__name__} requires kind TABLE")
+            valid = False
+        if expression.args.get("restrict"):
+            self.unsupported("Vertica DROP TABLE does not support RESTRICT")
+            valid = False
+        if self._has_user_extras(expression, {"this", "expressions", "kind", "exists", "cascade"}):
+            self.unsupported("DROP TABLE contains unsupported statement fields")
+            valid = False
+        for name in ("exists", "cascade"):
+            value = expression.args.get(name)
+            if value is not None and not isinstance(value, bool):
+                self.unsupported(f"DROP TABLE {name} must be boolean")
+                valid = False
+        raw_secondary = expression.args.get("expressions")
+        if raw_secondary is None:
+            secondary: list[exp.Expr] = []
+        elif not isinstance(raw_secondary, list):
+            self.unsupported("DROP TABLE secondary targets must be a list")
+            secondary = []
+            valid = False
+        else:
+            secondary = raw_secondary
+        if require_multiple and not secondary:
+            self.unsupported("DropTables requires at least two table names")
+            valid = False
+        if not require_multiple and secondary:
+            self.unsupported("Multiple DROP TABLE targets require the DropTables expression")
+            valid = False
+        targets = [expression.args.get("this"), *secondary]
+        for target in targets:
+            valid = self._validate_drop_table_name(target, "DROP TABLE target") and valid
+        if not valid:
+            return ""
+        exists_sql = " IF EXISTS" if expression.args.get("exists") else ""
+        cascade_sql = " CASCADE" if expression.args.get("cascade") else ""
+        targets_sql = ", ".join(self.sql(target) for target in targets)
+        return f"DROP TABLE{exists_sql} {targets_sql}{cascade_sql}"
 
     def createuser_sql(self, expression: vexp.CreateUser) -> str:
         kind = expression.args.get("kind")

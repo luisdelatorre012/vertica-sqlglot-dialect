@@ -51,7 +51,7 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   fails), and multi-target `DROP TABLE` lists do not parse.
 - Next eligible tasks are selected milestone-first: every Q task must be
   `DONE` before any P task is eligible.
-- Completed **Q02 — SELECT INTO TABLE clause conformance**. Q03 is the
+- Completed **Q03 — DROP TABLE grammar completion**. Q04 is the
   lowest-numbered remaining task.
 - On 2026-08-16 the embedded foreign-property `KeyError` gap recorded by
   Q01 was scheduled as new task Q05, and the acceptance gate was renumbered
@@ -185,7 +185,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
 | Q01 | DONE   | Scoped temporary CTAS acceptance              | —                   | `feat: accept scoped temporary ctas`                    |
 | Q02 | DONE   | SELECT INTO TABLE clause conformance          | —                   | `feat: model select into table targets`                 |
-| Q03 | TODO   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
+| Q03 | DONE   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
 | Q04 | TODO   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
 | Q05 | TODO   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
 | Q06 | TODO   | Milestone 1 acceptance gate                   | Q01–Q05             | `test: certify milestone one analysis surface`          |
@@ -650,7 +650,7 @@ as errors. sdist/wheel build, clean force-install, `pip check`, and the
 installed-wheel `python -I` entry-point smoke (scoped temporary INTO
 round-trip returning `SelectInto`) passed.
 
-### Q03 — DROP TABLE grammar completion — `TODO`
+### Q03 — DROP TABLE grammar completion — `DONE`
 
 **Outcome.** Complete Vertica `DROP TABLE`: ordered multi-target lists with
 `IF EXISTS` and `CASCADE`.
@@ -681,7 +681,69 @@ parser's canonical `exp.Drop`. The ordered multi-target precedent is
 `_parse_drop` is the established guard pattern for a family's negatives.
 Nearest sibling tests: the DROP coverage in `test_schema_view.py`.
 
-**Completion record.** Pending.
+**Completion record.** Implemented with the DROP ROLE split representation
+rather than the all-custom DROP VIEW/SCHEMA one, per this task's "canonical
+where lossless, atomic root only for demonstrated loss" instruction: a
+single-target statement still builds canonical `exp.Drop` (lossless for
+`IF EXISTS`, up-to-three-part qualification, and `CASCADE`), while a
+comma-separated list builds the new `vexp.DropTables` root, because the
+canonical `Drop.expressions` generator demonstrably renders secondary
+targets as malformed parentheses (`DROP TABLE a (b)`, verified against
+installed 30.13). A new `TokenType.TABLE` branch in `_parse_drop` dispatches
+to `_parse_drop_table`, with `_parse_drop_table_name` mirroring
+`_parse_view_name` (`_parse_table_parts(schema=True)` plus the shared
+per-component validator, so the sibling DROP families' 128-byte UTF-8 and
+unquoted-identifier contracts now apply to table targets),
+`_match_drop_table_keyword` enforcing unquoted-ASCII provenance for
+`CASCADE`/`RESTRICT`, and a new guaranteed-raise `_raise_drop_table_error`
+wrapper. Re-opening the primary source found no material contradiction: the
+formal syntax is exactly `DROP TABLE [IF EXISTS]
+[[{namespace.|database.}]schema.]table[,…] [CASCADE]`, its only modifiers
+are prefix `IF EXISTS` (list-scoped per the parameter text, "if one or more
+of the tables to drop does not exist") and one trailing `CASCADE`, and the
+statement page carries no worked examples of its own (they live on the
+admin "Dropping tables" page and are all single-target); the
+namespace/database qualifier repeats Q02's observation — syntactically
+indistinguishable three-part names resolved server-side. Making the family
+deliberate closed several inherited-grammar leaks as intentional boundary
+changes: `DROP TABLE t RESTRICT`, `… PURGE`, `DROP TEMP[ORARY] TABLE`,
+`DROP MATERIALIZED TABLE`, `DROP ICEBERG TABLE`, four-part names
+(`a.b.c.d`), ON-cluster/parenthesized tails, and over-128-byte target
+components all previously parsed via the base parser and now raise
+`ParseError` at every error level, and `DROP IF EXISTS TABLE t` previously
+degraded to `exp.Command` (a standing policy violation) and now fails
+closed through the same lookahead-guard pattern the view/schema families
+use. Contextual words stay contextual: `cascade`, `local`, `restrict`, and
+similar still parse as table names, and quoted `"CASCADE"`/`"RESTRICT"`
+payloads never act as keywords. On the generator side, `drop_sql` now
+intercepts kind `TABLE` (DROP ROLE pattern): shared validation requires at
+least two targets for `DropTables`, rejects canonical `exp.Drop` carrying
+`expressions` (eliminating the malformed parenthesized rendering), and
+rejects `restrict`/`purge`/`temporary`/`materialized`/`iceberg`/`cluster`/
+`concurrently`/`sync`/`constraints` on foreign-parsed or programmatic
+canonical trees with `UnsupportedError` instead of emitting undocumented
+Vertica, while valid unscoped canonical trees from foreign dialects still
+render (`postgres`-parsed `DROP TABLE IF EXISTS a CASCADE` round-trips).
+`DropTables` fails atomically abroad exactly like `DropViews`
+(`ValueError`, PostgreSQL/DuckDB/MySQL/SQLite, at `RAISE`/`WARN`/`IGNORE`),
+and the `test_ast_safety.py` bare-instantiation sweep picked the class up
+automatically. One neighboring observation recorded, not fixed (out of
+scope): `DROP TEMPORARY VIEW v` still reaches the base parser as canonical
+`exp.Drop(kind="VIEW", temporary=True)`, bypassing the view family's
+`DropViews` contract — a pre-existing view-family gap analogous to the
+TEMPORARY leak this task closed for tables. The focused
+`test_drop_table.py` module passed 138 tests; neighboring dispatch families
+(schema/view, CREATE TABLE, AST safety, access policy, load-balance
+groups, network addresses, PROFILE statement, user lifecycle, workload
+routing, sequences, projection, core statements, DML, SELECT INTO,
+keywords) passed 3,000. The default CPython 3.12.6 gate passed 5209 tests
+at 93.34% branch coverage with Ruff, formatting, and strict mypy clean;
+isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
+3.15.0rc1 suites each passed 5209 tests, with 3.15 treating deprecations
+as errors. sdist/wheel build, clean force-install, `pip check`, and the
+installed-wheel `python -I` entry-point smoke (multi-target
+`DROP TABLE IF EXISTS t1, s.t2 CASCADE` round-trip returning `DropTables`)
+passed.
 
 ### Q04 — official query-corpus hardening — `TODO`
 

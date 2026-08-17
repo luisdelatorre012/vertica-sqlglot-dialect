@@ -3499,6 +3499,13 @@ class VerticaParser(PostgresParser):
         if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
             raise ParseError(message)
 
+    def _raise_drop_table_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
     def _match_user_object(self, *, advance: bool = True) -> bool:
         matched = (
             self._curr.token_type == TokenType.VAR
@@ -7862,6 +7869,53 @@ class VerticaParser(PostgresParser):
             )
         )
 
+    def _match_drop_table_keyword(self, word: str, *, advance: bool = True) -> bool:
+        matched = (
+            self._curr.token_type == TokenType.VAR
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == word
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _parse_drop_table_name(self) -> exp.Table:
+        name = self._parse_table_parts(schema=True)
+        if not isinstance(name, exp.Table) or not isinstance(name.this, exp.Identifier):
+            self._raise_drop_table_error("DROP TABLE requires a table name")
+        assert isinstance(name, exp.Table)
+        for component in (name.args.get("catalog"), name.args.get("db"), name.this):
+            if isinstance(component, exp.Identifier):
+                self._validate_user_name_component(component, "DROP TABLE")
+        return name
+
+    def _parse_drop_table(self, exists: bool) -> exp.Drop:
+        if exists:
+            self._raise_drop_table_error("DROP TABLE IF EXISTS must follow TABLE")
+        if_exists = bool(self._parse_exists())
+        tables = [self._parse_drop_table_name()]
+        while self._match(TokenType.COMMA):
+            if not self._curr:
+                self._raise_drop_table_error("DROP TABLE requires a name after each comma")
+            tables.append(self._parse_drop_table_name())
+
+        cascade = self._match_drop_table_keyword("CASCADE")
+        if self._match_drop_table_keyword("RESTRICT", advance=False):
+            self._raise_drop_table_error("Vertica DROP TABLE does not support RESTRICT")
+        if self._curr:
+            self._raise_drop_table_error(f"Unexpected DROP TABLE clause at {self._curr.text!r}")
+
+        expression_type: type[exp.Drop] = vexp.DropTables if len(tables) > 1 else exp.Drop
+        return self.expression(
+            expression_type(
+                this=tables[0],
+                expressions=tables[1:] or None,
+                kind="TABLE",
+                exists=if_exists,
+                cascade=cascade,
+            )
+        )
+
     def _parse_drop_user(self, exists: bool) -> vexp.DropUsers:
         if exists:
             self._raise_user_error("DROP USER IF EXISTS must follow USER")
@@ -8067,6 +8121,14 @@ class VerticaParser(PostgresParser):
             self._raise_view_error("DROP VIEW IF EXISTS must follow VIEW")
         if lookahead == ["IF", "EXISTS", "SCHEMA"]:
             self._raise_schema_error("DROP SCHEMA IF EXISTS must follow SCHEMA")
+        if lookahead == ["IF", "EXISTS", "TABLE"]:
+            self._raise_drop_table_error("DROP TABLE IF EXISTS must follow TABLE")
+        if lookahead[:2] in (["TEMPORARY", "TABLE"], ["TEMP", "TABLE"]):
+            self._raise_drop_table_error("Vertica DROP TABLE does not support TEMPORARY")
+        if lookahead[:2] == ["MATERIALIZED", "TABLE"]:
+            self._raise_drop_table_error("Vertica DROP TABLE does not support MATERIALIZED")
+        if lookahead[:2] == ["ICEBERG", "TABLE"]:
+            self._raise_drop_table_error("Vertica DROP TABLE does not support ICEBERG")
         if lookahead == ["IF", "EXISTS", "DIRECTED"]:
             self.raise_error("DROP DIRECTED QUERY does not support IF EXISTS")
         if lookahead[:2] == ["TEMPORARY", "DIRECTED"]:
@@ -8127,6 +8189,8 @@ class VerticaParser(PostgresParser):
             return self._parse_drop_schema(exists=exists)
         if self._match(TokenType.VIEW):
             return self._parse_drop_view(exists=exists)
+        if self._match(TokenType.TABLE):
+            return self._parse_drop_table(exists=exists)
 
         if self._match(TokenType.PROCEDURE):
             if_exists = exists or self._parse_exists()
