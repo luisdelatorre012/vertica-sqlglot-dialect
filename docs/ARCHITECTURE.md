@@ -54,27 +54,59 @@ per-node dispatch and `self.unsupported(...)`. But every Vertica table
 property is always rendered inside a real `exp.Properties` list, and
 `Generator.locate_properties` looks up each property's class in
 `self.PROPERTIES_LOCATION` with a plain dict index before any per-node
-dispatch runs; a foreign dialect that has never heard of a Vertica-only
-`Property` subclass raises a raw `KeyError` from that lookup instead of the
-intended `UnsupportedError`. This reproduces for every pre-existing
-Vertica-only table `Property` class once it is exercised inside a real
+dispatch runs; a foreign dialect that had never heard of a Vertica-only
+`Property` subclass used to raise a raw `KeyError` from that lookup instead
+of an intended, atomic failure. This reproduced for every pre-existing
+Vertica-only table `Property` class once it was exercised inside a real
 `CREATE TABLE`/`CREATE TABLE AS` statement — confirmed for `LocalProperty`,
 `KsafeProperty`, `TableSegmentationProperty`, `TablePartitionProperty`,
 `DiskQuotaProperty`/`CtasDiskQuotaProperty`, and `InheritedPrivilegesProperty`
-against PostgreSQL, DuckDB, MySQL, and SQLite — and predates scoped temporary
+against PostgreSQL, DuckDB, MySQL, and SQLite, and predated scoped temporary
 CTAS: `CREATE TABLE t INCLUDE PRIVILEGES AS SELECT 1 AS id` already raised
 `KeyError` against `postgres` before scoped CTAS existed. Foreign generation
-still fails atomically in the sense that matters most (no dialect silently
-emits SQL with the clause dropped), but the exception is `KeyError` rather
-than `UnsupportedError`, and no regression caught it because the generic sweep
-only instantiates bare `vexp.*` classes outside any `Properties` container.
-Fixing this cleanly needs either an upstream SQLGlot extension point or a
-Vertica-side `Properties`-rendering strategy that intercepts before
-`locate_properties` runs, which is a cross-cutting change spanning every
-custom table property rather than a single-family fix; treat any custom
-`Property` subclass's foreign behavior as unproven until it is tested inside
-a real `Properties` list, not just bare, and do not assume `KeyError` here
-indicates a new regression rather than this known, still-open gap.
+still failed atomically in the sense that matters most (no dialect silently
+emitted SQL with the clause dropped), but the exception was `KeyError` rather
+than an intended one, and no regression caught it because the generic sweep
+only instantiates bare `vexp.*` classes outside any `Properties` container —
+treat any *new* custom `Property` subclass's foreign behavior as unproven
+until it is tested inside a real `Properties` list, not just bare, since nothing
+about constructing it bare would reveal a regression here.
+
+Task Q05 closed this gap with a dict-based registration mirroring the
+established custom-node contract rather than the alternative, weaker
+upstream `Properties.Location.UNSUPPORTED` semantics (`UnsupportedError` at
+`RAISE` only, silent/warned drop at `WARN`/`IGNORE` — rejected because it
+would have silently dropped the clause at two of four error levels, the exact
+failure mode this policy prohibits). `src/sqlglot_vertica/foreign_properties.py`
+gives PostgreSQL's, DuckDB's, MySQL's, and SQLite's generator classes —
+the four release-gate foreign dialects — a `PROPERTIES_LOCATION` whose
+`__missing__` hook raises `ValueError(f"Unsupported expression type
+{key.__name__}")` for any class introspected from `sqlglot_vertica.expressions`
+as an `exp.Property` subclass, exactly the message and exception
+`vexp.DropViews` already raises as an unregistered custom root, at every
+`unsupported_level` including `WARN` and `IGNORE`; any other missing key
+still raises the original plain `KeyError`, so non-Vertica trees and
+dialects outside this release-gate set are unaffected. Because the
+registered set is introspected from `vexp` rather than hand-maintained, a
+newly added `Property` subclass is covered automatically the moment it is
+embedded and generated abroad — `tests/test_foreign_property_atomicity.py`
+pins this with an exhaustive sweep over every `vexp` `Property` subclass,
+every release-gate foreign dialect, and every `unsupported_level`, plus a
+frozen-set assertion that fails loudly if the enumeration itself drifts.
+One property, `vexp.ResourcePoolParameter`, is deliberately excluded from
+that sweep and carries no `PROPERTIES_LOCATION` entry, native or foreign: it
+is only ever embedded inside `vexp.CreateResourcePool`/`AlterResourcePool`,
+custom `exp.Create`/`exp.Alter` roots that already fail atomically on their
+own unregistered class name before `locate_properties` ever runs, so it never
+reaches this mechanism at all. The registration reaches its target generator
+classes under either import order — Vertica-first or foreign-first — because
+`patch_foreign_properties_location` imports the four target generator
+modules directly rather than relying on `sqlglot.dialects`' lazy
+`__getattr__` loader, which forces those four (lightweight, generator-only)
+submodules to load as a side effect of importing the Vertica dialect even if
+the host program never generates to them; this trade-off is deliberate and
+verified under both orders in a fresh interpreter by
+`tests/test_foreign_property_atomicity.py`.
 
 Function syntax follows the same wrapper pattern. `UsingParameters` and
 `StringUnit` retain the parsed function as `this` and store ordered parameter

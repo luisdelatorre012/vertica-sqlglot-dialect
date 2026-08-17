@@ -45,7 +45,14 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   expanded for SELECT-family words, and the exercise surfaced two named
   residuals recorded in `COVERAGE.md`: `LIMIT ALL` is dropped at parse time
   (a pre-existing, non-Vertica-specific base-SQLGlot limit) and the SELECT
-  page's own `[ AT epoch ]` prefix does not parse (now Q06). Q05–Q07 remain.
+  page's own `[ AT epoch ]` prefix does not parse (now Q06). Q05 is complete:
+  every `vexp` `Property` subclass, embedded in a real `Properties` list and
+  generated against PostgreSQL, DuckDB, MySQL, or SQLite, now raises the same
+  atomic `ValueError("Unsupported expression type <Name>")` an unregistered
+  custom root already raises, at every `unsupported_level`, instead of a raw
+  `KeyError`; the registered set is introspected from `sqlglot_vertica.expressions`
+  rather than hand-maintained, so a future property is covered automatically.
+  Q06–Q07 remain.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

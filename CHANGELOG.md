@@ -152,3 +152,11 @@ plugin interface.
   `LIMIT ALL` is discarded at parse time (a pre-existing, non-Vertica-specific
   base-SQLGlot limit), and the SELECT page's own `[ AT epoch ]`
   historical-query prefix does not yet parse.
+- Closed the cross-cutting gap recorded above where embedding a custom
+  Vertica table `Property` in a real `Properties` list raised raw `KeyError`
+  in foreign generation: PostgreSQL, DuckDB, MySQL, and SQLite generators now
+  raise `ValueError("Unsupported expression type <Name>")` for every
+  Vertica-only property at every `unsupported_level`, matching the atomic
+  contract every other custom Vertica root already gives, while canonical
+  properties and non-Vertica `Property` subclasses keep today's behavior
+  unchanged.

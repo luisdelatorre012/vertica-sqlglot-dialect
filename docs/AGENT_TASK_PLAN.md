@@ -63,6 +63,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   recorded by Q04 was scheduled as new task Q06, and the acceptance gate was
   renumbered Q06 → Q07 before any gate work began; no completion record
   references the old gate number.
+- Completed **Q05 — foreign embedded-property atomicity**. Q06 is the
+  lowest-numbered remaining task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Installed local Python runtimes
@@ -193,7 +195,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q02 | DONE   | SELECT INTO TABLE clause conformance          | —                   | `feat: model select into table targets`                 |
 | Q03 | DONE   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
 | Q04 | DONE   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
-| Q05 | TODO   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
+| Q05 | DONE   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
 | Q06 | TODO   | SELECT `AT epoch` historical-query prefix     | —                   | `feat: model select at epoch historical query prefix`   |
 | Q07 | TODO   | Milestone 1 acceptance gate                   | Q01–Q06             | `test: certify milestone one analysis surface`          |
 
@@ -309,14 +311,27 @@ These rules apply to every implementation task:
   actually embedded in a real `exp.Properties` list: `Generator.locate_properties`
   indexes `self.PROPERTIES_LOCATION` with a plain dict lookup before any
   per-node dispatch runs, so a foreign dialect with no entry for the class
-  raises raw `KeyError`, not `UnsupportedError`. This is a confirmed,
-  cross-cutting, pre-existing gap across every custom Vertica table property
-  (see `ARCHITECTURE.md`'s AST-policy section for the mechanism and evidence);
-  do not treat the generic sweep as proof for a `Property` subclass, and do
-  not assume `KeyError` from a new feature's foreign-generation test is a
-  regression it introduced without first checking whether the same property
-  already crashes the same way in its pre-existing context. Closing this gap
-  is scheduled as task Q05.
+  used to raise raw `KeyError`, not an intended atomic failure. Task Q05
+  closed this: `src/sqlglot_vertica/foreign_properties.py` registers every
+  `exp.Property` subclass introspected from `sqlglot_vertica.expressions`
+  with PostgreSQL's, DuckDB's, MySQL's, and SQLite's generators, so a missing
+  key for one of those classes now raises the same
+  `ValueError("Unsupported expression type <Name>")` an unregistered custom
+  root such as `vexp.DropViews` already raises, at every `unsupported_level`
+  including `WARN`/`IGNORE` (see `ARCHITECTURE.md`'s AST-policy section for
+  the mechanism). Because the registered set is introspected rather than
+  hand-maintained, a new `Property` subclass is covered automatically the
+  moment it is embedded and generated abroad, and
+  `tests/test_foreign_property_atomicity.py` pins this with an exhaustive
+  sweep plus a frozen-set enumeration assertion — a new task adding a
+  `Property` subclass does not need to re-derive this coverage, only extend
+  that frozen set (or document a `ResourcePoolParameter`-style exclusion if
+  the class is never reachable through `locate_properties` at all). The
+  registration is still scoped to the four release-gate foreign dialects: a
+  Vertica-only property embedded and generated against some other foreign
+  dialect not in that set still raises the original plain `KeyError`, and the
+  generic bare-instantiation sweep still does not by itself prove embedded
+  atomicity for a class outside that set.
 - Recognized malformed Vertica syntax must raise `ParseError`; it must not fall
   back to `exp.Command`, truncate a tail, or emit a warning and partial AST at
   any `ErrorLevel`.
@@ -876,7 +891,7 @@ tests, with 3.15 treating deprecations as errors. sdist/wheel build, clean
 force-install, `pip check`, and the installed-wheel `python -I` entry-point
 smoke (`MINUS` round-trip returning `Except`) passed.
 
-### Q05 — foreign embedded-property atomicity — `TODO`
+### Q05 — foreign embedded-property atomicity — `DONE`
 
 **Outcome.** Close the cross-cutting gap recorded by Q01: a custom Vertica
 table `Property` embedded in a real `exp.Properties` list must fail in
@@ -944,7 +959,106 @@ registration precedent is the
 `PROPERTIES_LOCATION: t.ClassVar = {**PostgresGenerator.PROPERTIES_LOCATION,
 …}` spread near the top of `generator.py`.
 
-**Completion record.** Pending.
+**Completion record.** Delivered the preferred all-level-parity contract, not
+the upstream `Properties.Location.UNSUPPORTED` fallback: the fallback was
+rejected because it is gated by `self.unsupported(...)`, which silently drops
+the clause at `WARN` (with only a log line) and at `IGNORE` (with no signal
+at all) — exactly the "never allow foreign generation to silently drop a
+clause" failure this file's AST-policy bullets prohibit. The delivered
+contract needed no upstream-machinery change for non-Vertica trees: added
+`src/sqlglot_vertica/foreign_properties.py`, whose `_FailAtomicPropertiesLocation`
+dict subclass wraps each target generator's existing `PROPERTIES_LOCATION`
+dict unchanged and only overrides `__missing__` — every already-registered
+key (canonical or foreign-specific) resolves exactly as before, and any
+missing key that is not one of the 15 classes introspected from
+`sqlglot_vertica.expressions` still raises the original plain `KeyError`,
+proven by a dedicated test with a `Property` subclass defined outside `vexp`.
+For the 15 introspected classes, `__missing__` raises
+`ValueError(f"Unsupported expression type {key.__name__}")` — reproducing
+`vexp.DropViews`'s exact exception type and message for an unregistered
+custom root — unconditionally, before `Generator.generate()`'s
+`unsupported_level` gating ever runs, so it fires identically at `IMMEDIATE`,
+`RAISE`, `WARN`, and `IGNORE`; this was verified directly for all 4 dialects
+× 4 levels, not inferred. `patch_foreign_properties_location()` imports
+`sqlglot.generators.{postgres,duckdb,mysql,sqlite}` directly and is called
+once from `dialect.py` at Vertica-dialect import time; because Python caches
+each module on first import regardless of who imports it, this reaches the
+same single canonical generator class either way, so there is no
+"Vertica-first" vs. "foreign-first" case where the patch is missed — proven
+with two fresh-interpreter subprocess tests, one importing `sqlglot_vertica`
+before anything touches `sqlglot.generators.duckdb` and one importing
+`sqlglot.generators.duckdb` first. The trade-off recorded as part of that
+proof: because the patch function itself imports all four target generator
+modules, `import sqlglot_vertica` now unconditionally loads DuckDB's,
+MySQL's, and SQLite's (lightweight, generator-only) submodules even for a
+caller who only ever generates Vertica or PostgreSQL SQL; this was judged
+acceptable rather than pursuing a lazier hook into SQLGlot's
+`sqlglot/dialects/__init__.py` module `__getattr__`, which would have meant
+patching shared upstream loader machinery instead of an additive per-class
+dict. Audited all 15 `exp.Property` subclasses in `expressions.py`
+(confirmed via `inspect.getmembers`, matching the plan's "15 as of
+2026-08-16"). 14 are embedded through the generic `exp.Properties`/
+`Generator.locate_properties` path this task fixes and are covered by an
+exhaustive parametrized sweep (14 properties × 4 dialects × 4 levels) that
+constructs each as a bare instance inside a synthetic `exp.Create`/
+`exp.Properties` tree — the same shape `locate_properties` actually receives
+in production, unlike the pre-existing bare-instantiation sweep in
+`test_ast_safety.py`, which never wraps a class in a real `Properties`
+container and therefore cannot see this class of gap either way. The 15th,
+`vexp.ResourcePoolParameter`, was confirmed to never reach
+`locate_properties` at all: it is only ever embedded inside
+`vexp.CreateResourcePool`/`AlterResourcePool`, and those are themselves
+canonical `exp.Create`/`exp.Alter` subclasses with no per-node dispatch entry
+in any foreign generator, so `Generator.sql()`'s own "no dispatch, not a
+`Func`/`Property`" fallback raises `ValueError("Unsupported expression type
+CreateResourcePool")` first, atomically, before the tree is ever asked for
+its properties — confirmed at all 4 dialects × 4 levels; it deliberately
+carries no `PROPERTIES_LOCATION` entry, native or foreign, and giving it one
+was rejected as unnecessary and untested-by-construction. Because the
+registered set is introspected from `vexp` rather than hand-maintained, a
+future `Property` subclass is covered automatically the moment it is
+embedded and generated abroad; `tests/test_foreign_property_atomicity.py`
+freezes the current 15-name enumeration in an assertion so a class silently
+falling outside both the generic sweep and the `ResourcePoolParameter`-style
+exclusion is caught immediately rather than discovered later. Also added
+five embedded-context regressions reusing real parsed SQL already exercising
+several properties together (definition-form full physical design, CTAS full
+physical design, a GLOBAL temporary table, `CREATE LOCAL TEMPORARY TABLE …
+AS`, and CREATE SCHEMA), each swept across 4 dialects × 4 levels; these
+accept either `ValueError` or `UnsupportedError` rather than pinning one
+exact type, because at `IMMEDIATE` specifically, DuckDB and SQLite blanket-map
+most *canonical* properties (`exp.Order`, `exp.GlobalProperty`) to
+`Properties.Location.UNSUPPORTED` too, and two of the five fixtures place one
+of those before the Vertica-only property in list order — confirmed
+pre-existing and unrelated to this task (`self.unsupported` only raises
+synchronously at `IMMEDIATE`; at every other level the loop continues past a
+canonical-UNSUPPORTED hit and still reaches the Vertica-only `ValueError`).
+`KeyError` is explicitly excluded from the accepted set in that test, so a
+regression reintroducing it would still fail the suite. Also added dedicated
+regressions confirming `exp.GlobalProperty`'s existing PostgreSQL/MySQL
+render and DuckDB/SQLite `UnsupportedError` are byte-for-byte unaffected (it
+was already present, not missing, in all four dicts), confirming
+`exp.TransientProperty` keeps its pre-existing warn-and-drop-at-`WARN`/
+silent-drop-at-`IGNORE`/raise-at-`RAISE` semantics (the patch only
+special-cases *missing* keys, never a registered one), and confirming
+Vertica-dialect generation is byte-identical for all five embedded-context
+fixtures. Updated the one pinned `KeyError` regression
+(`test_create_local_temporary_table_as_foreign_generation_fails_atomically`
+in `test_create_table.py`) to assert the new `ValueError` contract instead;
+no sibling pins existed elsewhere. Updated the AST-policy bullet in this
+file, `ARCHITECTURE.md`'s AST-policy section, the two affected `CREATE TABLE`
+coverage rows plus the schema-lifecycle row in `COVERAGE.md`, `ROADMAP.md`,
+and `CHANGELOG.md`. The focused `test_foreign_property_atomicity.py` module
+passed 329 tests; combined with neighboring dispatch families
+(`test_create_table.py`, `test_ast_safety.py`, `test_roles_resource_pools.py`,
+`test_schema_view.py`) the combined focused run passed 1,164. The default
+CPython 3.12.6 gate passed 5,591 tests at 93.35% branch coverage with Ruff,
+formatting, strict mypy, and `git diff --check` clean; isolated CPython
+3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each
+passed 5,591 tests, with 3.15 treating deprecations as errors. sdist/wheel
+build, clean force-install, `pip check`, and the installed-wheel `python -I`
+entry-point smoke (`CREATE LOCAL TEMPORARY TABLE t AS SELECT 1 AS id`
+round-trip returning canonical `Create`) passed.
 
 ### Q06 — SELECT `AT epoch` historical-query prefix — `TODO`
 

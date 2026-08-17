@@ -460,22 +460,21 @@ def test_create_local_temporary_table_as_foreign_generation_fails_atomically(
 ) -> None:
     """LOCAL-scoped CTAS foreign generation fails atomically in every tested foreign dialect,
     exactly as `vexp.LocalProperty` already does for definition-form LOCAL temporary tables
-    today: no foreign dialect's `PROPERTIES_LOCATION` map knows the Vertica-only property, so
-    `sqlglot.Generator.locate_properties`'s direct dict lookup raises `KeyError` rather than
-    the cleaner `UnsupportedError` a bare, un-embedded `vexp.LocalProperty()` instance raises
-    (see `test_every_custom_expression_fails_explicitly_in_postgres`). This is a pre-existing,
-    cross-cutting gap in `sqlglot_vertica`'s custom `Property` foreign-dispatch story that
-    predates and is not introduced by scoped temporary CTAS: it reproduces identically for
-    today's definition-form `CREATE LOCAL TEMPORARY TABLE` and, independently of scope, for
-    unscoped CTAS's own `InheritedPrivilegesProperty` (`CREATE TABLE t INCLUDE PRIVILEGES AS
-    SELECT 1 AS id` also raises `KeyError` against every tested foreign dialect). No SQL is
-    ever silently produced, so foreign generation still fails atomically as required; the
-    exception type not being `UnsupportedError` is a known, out-of-scope residual flagged for
-    a dedicated follow-up rather than papered over by this task."""
+    today, and, independently of scope, as unscoped CTAS's own `InheritedPrivilegesProperty`
+    does (`CREATE TABLE t INCLUDE PRIVILEGES AS SELECT 1 AS id` also raises `ValueError`
+    against every tested foreign dialect). Before Q05, no foreign dialect's
+    `PROPERTIES_LOCATION` map knew any Vertica-only property, so
+    `sqlglot.Generator.locate_properties`'s direct dict lookup raised a raw `KeyError`; Q05
+    registered every `vexp` `Property` subclass with
+    `sqlglot_vertica.foreign_properties.patch_foreign_properties_location`, so the same lookup
+    now raises the same `ValueError("Unsupported expression type <Name>")`
+    `vexp.DropViews` already raises for an unregistered custom root, at every
+    `unsupported_level` (see `tests/test_foreign_property_atomicity.py` for the exhaustive,
+    all-property, all-level sweep this pin now mirrors for one representative statement)."""
 
     expression = parse_one("CREATE LOCAL TEMPORARY TABLE t AS SELECT 1 AS id", read="vertica")
 
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="Unsupported expression type LocalProperty"):
         expression.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
 
 
