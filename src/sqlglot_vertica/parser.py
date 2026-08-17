@@ -3492,6 +3492,13 @@ class VerticaParser(PostgresParser):
         if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
             raise ParseError(message)
 
+    def _raise_select_into_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
+
     def _match_user_object(self, *, advance: bool = True) -> bool:
         matched = (
             self._curr.token_type == TokenType.VAR
@@ -7478,6 +7485,99 @@ class VerticaParser(PostgresParser):
             return self.expression(exp.Constraint(this=name, expressions=[kind]))
         return kind
 
+    def _match_into_word(self, word: str, *, advance: bool = True) -> bool:
+        matched = (
+            self._curr is not None
+            and self._curr.token_type == TokenType.VAR
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == word
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _parse_into(self) -> exp.Into | None:
+        if not self._match(TokenType.INTO):
+            return None
+
+        for foreign_word in ("STRICT", "UNLOGGED"):
+            if (
+                self._match_into_word(foreign_word, advance=False)
+                and self._next is not None
+                and self._next.token_type in self.ID_VAR_TOKENS
+            ):
+                self._raise_select_into_error(
+                    f"INTO {foreign_word} is not Vertica INTO TABLE syntax"
+                )
+
+        scope = None
+        for scope_word in ("GLOBAL", "LOCAL"):
+            if not self._match_into_word(scope_word, advance=False):
+                continue
+            if self._next is not None and self._next.token_type == TokenType.TEMPORARY:
+                self._advance()
+                scope = scope_word
+            elif self._next is not None and self._next.token_type == TokenType.TABLE:
+                self._raise_select_into_error(f"INTO {scope_word} requires TEMP or TEMPORARY")
+            break
+
+        temporary = self._match(TokenType.TEMPORARY)
+        spelling = self._prev.text.upper() if temporary else None
+        self._match(TokenType.TABLE)
+
+        target = self._parse_table_parts()
+        if not isinstance(target, exp.Table) or not isinstance(target.this, exp.Identifier):
+            self._raise_select_into_error(
+                "INTO requires one table name with at most three qualifier parts"
+            )
+            return None
+        if self._match(TokenType.COMMA, advance=False):
+            self._raise_select_into_error("INTO accepts exactly one table target")
+        if self._match(TokenType.L_PAREN, advance=False):
+            self._raise_select_into_error("INTO targets do not take a column list")
+
+        on_commit = None
+        if self._match(TokenType.ON):
+            if not self._match(TokenType.COMMIT):
+                self._raise_select_into_error("INTO ON must begin ON COMMIT")
+            if not temporary:
+                self._raise_select_into_error("INTO ON COMMIT requires a temporary table target")
+            if self._match(TokenType.DELETE):
+                on_commit = "DELETE"
+            elif self._match_into_word("PRESERVE"):
+                on_commit = "PRESERVE"
+            else:
+                self._raise_select_into_error("INTO ON COMMIT requires DELETE or PRESERVE")
+            if not self._match(TokenType.ROWS):
+                self._raise_select_into_error("INTO ON COMMIT requires ROWS")
+
+        args: dict[str, t.Any] = {"this": target}
+        if temporary:
+            args["temporary"] = True
+            args["spelling"] = spelling
+        if scope:
+            args["scope"] = scope
+        if on_commit:
+            args["on_commit"] = on_commit
+        return self.expression(vexp.IntoTableClause(**args))
+
+    def _promote_select_into(self, this: E | None) -> E | None:
+        """Promote a SELECT carrying a typed Vertica INTO clause to an atomic root.
+
+        Foreign generators with ``SUPPORTS_SELECT_INTO = False`` pop
+        ``Select.args["into"]`` and structurally rewrite the statement into a
+        CTAS before per-node dispatch runs, so the clause is only safe to
+        regenerate under a custom Select root that fails atomically first.
+        """
+
+        if type(this) is not exp.Select or not isinstance(
+            this.args.get("into"), vexp.IntoTableClause
+        ):
+            return this
+        result = self.expression(vexp.SelectInto(**this.args), comments=this.pop_comments())
+        result.meta.update(this.meta)
+        return t.cast("E", result)
+
     @t.overload
     def _parse_query_modifiers(self, this: E) -> E: ...
 
@@ -7487,7 +7587,7 @@ class VerticaParser(PostgresParser):
     def _parse_query_modifiers(self, this: E | None) -> E | None:
         this = super()._parse_query_modifiers(this)
         if not this or not self._match_text_seq("TIMESERIES"):
-            return this
+            return self._promote_select_into(this)
 
         if this.args.get("timeseries"):
             self.raise_error("Found multiple TIMESERIES clauses")

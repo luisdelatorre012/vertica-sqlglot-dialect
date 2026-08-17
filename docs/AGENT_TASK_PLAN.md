@@ -51,7 +51,7 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   fails), and multi-target `DROP TABLE` lists do not parse.
 - Next eligible tasks are selected milestone-first: every Q task must be
   `DONE` before any P task is eligible.
-- Completed **Q01 — scoped temporary CTAS acceptance**. Q02 is the
+- Completed **Q02 — SELECT INTO TABLE clause conformance**. Q03 is the
   lowest-numbered remaining task.
 - On 2026-08-16 the embedded foreign-property `KeyError` gap recorded by
   Q01 was scheduled as new task Q05, and the acceptance gate was renumbered
@@ -184,7 +184,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
 | Q01 | DONE   | Scoped temporary CTAS acceptance              | —                   | `feat: accept scoped temporary ctas`                    |
-| Q02 | TODO   | SELECT INTO TABLE clause conformance          | —                   | `feat: model select into table targets`                 |
+| Q02 | DONE   | SELECT INTO TABLE clause conformance          | —                   | `feat: model select into table targets`                 |
 | Q03 | TODO   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
 | Q04 | TODO   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
 | Q05 | TODO   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
@@ -550,7 +550,7 @@ errors. Ruff, formatting, strict mypy, sdist/wheel build, clean force-install,
 `pip check`, and installed-wheel entry-point/scoped-temporary-CTAS round-trip
 smoke passed.
 
-### Q02 — SELECT INTO TABLE clause conformance — `TODO`
+### Q02 — SELECT INTO TABLE clause conformance — `DONE`
 
 **Outcome.** Make the documented `INTO TABLE` clause of `SELECT` parse and
 generate valid Vertica for permanent and temporary targets.
@@ -589,7 +589,66 @@ inherited path is the base `sqlglot.parser.Parser._parse_into`, called from
 `INTO TEMPORARY t`. The base generator method is `Generator.into_sql`. Add
 this family's own guaranteed-raise wrapper per the parser policy.
 
-**Completion record.** Pending.
+**Completion record.** Implemented both documented forms with a typed
+two-node contract: `vexp.IntoTableClause` (an `exp.Into` subclass holding
+the qualified target plus `temporary`/`spelling`/`scope`/`on_commit`) parsed
+by a new `_parse_into` override, and `vexp.SelectInto` (an `exp.Select`
+subclass, `TimeseriesSelect` precedent) that every SELECT carrying the
+clause is promoted to at the end of `_parse_query_modifiers`. The custom
+root is not optional styling: auditing base `Generator.select_sql` showed
+that any generator with `SUPPORTS_SELECT_INTO = False` — DuckDB, MySQL, and
+SQLite among the release-gate dialects — pops `Select.args["into"]` and
+structurally rewrites the whole statement into `CREATE [TEMPORARY] TABLE …
+AS …`, reading the popped node's args directly before per-node dispatch ever
+runs, so a typed clause child alone can never fail atomically; the custom
+root fails first (`ValueError`, `DropViews`-parity, at every
+`unsupported_level`, direct and nested). The page's own
+`SELECT * INTO LOCAL TEMP TABLE newTempTableLocal ON COMMIT PRESERVE ROWS
+FROM customer_dimension` example now parses and round-trips byte-identically.
+Scope, `TEMP`/`TEMPORARY` spelling, and `ON COMMIT` are preserved exactly as
+written (absence stays absence); the optional `TABLE` keyword is the
+deliberate canonicalization: it always regenerates, matching every worked
+example on the 26.2 page, and is therefore not stored in the AST. Re-opening
+the primary source found no material contradiction; recorded observation:
+the formal syntax gives the permanent form `{namespace.|database.}schema.`
+qualification but the temporary form only `[database.]schema.` — the two are
+syntactically indistinguishable three-part names, so both forms accept up to
+three identifier parts and the namespace/database distinction stays
+server-side. Recognized malformed and foreign members fail closed through a
+new `_raise_select_into_error` wrapper at all four error levels: scope
+without `TEMP[ORARY]` (`INTO GLOBAL TABLE`), permanent `ON COMMIT`,
+truncated/incorrect `ON COMMIT` tails, PL/pgSQL `INTO STRICT var`, Postgres
+`INTO UNLOGGED [TABLE] t` (previously accepted by inheritance as
+`unlogged=True` — a deliberate boundary change), comma-separated
+variable-list targets, CTAS-style column lists, and over-qualified
+(four-part) names. `STRICT`/`UNLOGGED`/`GLOBAL`/`LOCAL` stay contextual:
+each is rejected only in its recognizable foreign/malformed shape
+(lookahead-based) and still parses as an ordinary target name (`INTO local
+FROM x`), with unquoted-ASCII provenance so quoted `"PRESERVE"`/`"GLOBAL"`
+payloads never act as keywords. Canonical `exp.Into` from foreign-parsed
+trees still renders (unscoped forms are valid Vertica), but a new Vertica
+`into_sql` override rejects `unlogged`/`bulk_collect`/`expressions` with
+`UnsupportedError` instead of emitting invalid `INTO UNLOGGED t`. A
+`TimeseriesSelect` that also carries INTO keeps `TimeseriesSelect` as its
+root (one atomic root suffices; the typed clause child still regenerates) —
+covered by a dedicated test. Optimizer contract verified: `qualify`,
+`optimize`, and `lineage` preserve the root class, resolve source columns,
+and never treat the INTO target as a source relation. Two reusable
+discoveries recorded for future tasks: SQLGlot 30.13's generator dispatch
+(`_build_dispatch`) maps `<key>_sql` method names through canonical
+`exp.EXPR_CLASSES` only, so a custom node's generator method is silently
+unreachable until the class is registered in `TRANSFORMS` (both new nodes
+are wired there), and the bare-instantiation foreign sweep in
+`test_ast_safety.py` picks the two new classes up automatically. The focused
+`test_select_into.py` module passed 181 tests; neighboring dispatch families
+(query extensions, core statements, DML, CREATE TABLE, AST safety, hints,
+keywords, schema/view) passed 880. The default CPython 3.12.6 gate passed
+5070 tests at 93.30% branch coverage with Ruff, formatting, and strict mypy
+clean; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1 suites each passed 5070 tests, with 3.15 treating deprecations
+as errors. sdist/wheel build, clean force-install, `pip check`, and the
+installed-wheel `python -I` entry-point smoke (scoped temporary INTO
+round-trip returning `SelectInto`) passed.
 
 ### Q03 — DROP TABLE grammar completion — `TODO`
 

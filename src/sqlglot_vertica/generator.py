@@ -458,6 +458,8 @@ class VerticaGenerator(PostgresGenerator):
         vexp.InheritedPrivilegesProperty: lambda self, expression: (
             self.inheritedprivilegesproperty_sql(expression)
         ),
+        vexp.IntoTableClause: lambda self, expression: self.intotableclause_sql(expression),
+        vexp.SelectInto: lambda self, expression: self.selectinto_sql(expression),
         vexp.SchemaDiskQuotaAction: lambda self, expression: self.schemadiskquotaaction_sql(
             expression
         ),
@@ -5243,6 +5245,75 @@ class VerticaGenerator(PostgresGenerator):
             f"{self.seg('TIMESERIES')} {slice_name} AS {slice_interval} "
             f"OVER ({partition_by}{order})"
         )
+
+    def selectinto_sql(self, expression: vexp.SelectInto) -> str:
+        if not isinstance(expression.args.get("into"), vexp.IntoTableClause):
+            self.unsupported("SelectInto requires a typed INTO TABLE clause")
+            return ""
+        return self.select_sql(expression)
+
+    def into_sql(self, expression: exp.Into) -> str:
+        if any(expression.args.get(key) for key in ("unlogged", "bulk_collect", "expressions")):
+            self.unsupported("Vertica INTO supports only one plain table target")
+            return ""
+        return super().into_sql(expression)
+
+    def intotableclause_sql(self, expression: vexp.IntoTableClause) -> str:
+        if self._has_user_extras(
+            expression, {"this", "temporary", "spelling", "scope", "on_commit"}
+        ):
+            self.unsupported("IntoTableClause contains unsupported fields")
+            return ""
+
+        target = expression.args.get("this")
+        if (
+            not isinstance(target, exp.Table)
+            or self._has_user_extras(target, {"this", "db", "catalog"})
+            or not isinstance(target.this, exp.Identifier)
+            or any(
+                part is not None and not isinstance(part, exp.Identifier)
+                for part in (target.args.get("db"), target.args.get("catalog"))
+            )
+        ):
+            self.unsupported("INTO requires one table name with at most three qualifier parts")
+            return ""
+
+        temporary = expression.args.get("temporary")
+        spelling = expression.args.get("spelling")
+        scope = expression.args.get("scope")
+        on_commit = expression.args.get("on_commit")
+
+        if temporary is not None and not isinstance(temporary, bool):
+            self.unsupported("IntoTableClause temporary must be boolean")
+            return ""
+        if bool(temporary) != (spelling is not None):
+            self.unsupported("IntoTableClause temporary state and TEMP spelling must agree")
+            return ""
+        if spelling is not None and (
+            not isinstance(spelling, str) or spelling not in {"TEMP", "TEMPORARY"}
+        ):
+            self.unsupported("IntoTableClause spelling must be TEMP or TEMPORARY")
+            return ""
+        if scope is not None and (
+            not temporary or not isinstance(scope, str) or scope not in {"GLOBAL", "LOCAL"}
+        ):
+            self.unsupported("IntoTableClause scope requires GLOBAL or LOCAL on a temporary target")
+            return ""
+        if on_commit is not None and (
+            not temporary
+            or not isinstance(on_commit, str)
+            or on_commit not in {"DELETE", "PRESERVE"}
+        ):
+            self.unsupported(
+                "IntoTableClause ON COMMIT requires DELETE or PRESERVE on a temporary target"
+            )
+            return ""
+
+        keywords = " ".join(word for word in (scope, spelling, "TABLE") if word)
+        sql = f"{self.seg('INTO')} {keywords} {self.sql(expression, 'this')}"
+        if on_commit:
+            sql += f" ON COMMIT {on_commit} ROWS"
+        return sql
 
     def options_modifier(self, expression: exp.Expr) -> str:
         """Hide internal WITH materialization barriers from Vertica SQL."""

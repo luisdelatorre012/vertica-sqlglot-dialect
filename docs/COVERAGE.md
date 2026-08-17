@@ -40,6 +40,7 @@ Status meanings:
 | Feature | Status | Regression surface and remaining work |
 | --- | --- | --- |
 | `SELECT`, joins, subqueries, CTEs, set operations | Generic | Canonical SQLGlot AST; additional official-example corpus planned |
+| SELECT `INTO [TABLE]` targets | Semantic | Typed `SelectInto` root with an `IntoTableClause` target preserves `GLOBAL`/`LOCAL` scope, `TEMP`/`TEMPORARY` spelling, and `ON COMMIT` exactly, and always regenerates the optional `TABLE` keyword; permanent targets accept namespace/database qualification (the two are syntactically identical and resolved server-side); PostgreSQL `STRICT`/`UNLOGGED`/variable-list forms, scope without `TEMP`, permanent `ON COMMIT`, column lists, and over-qualified names fail closed at every error level; foreign generation fails atomically instead of inheriting SQLGlot's silent `SUPPORTS_SELECT_INTO` CTAS rewrite, while foreign-parsed canonical `exp.Into` still renders for the unscoped forms Vertica accepts |
 | Window functions and ordered aggregates | Partial | In-parentheses value-function null treatment and `PARTITION BEST`/`NODES`/`ROW`/`LEFT JOIN` are semantic; Vertica NULL default ordering is type-dependent and cannot be inferred without schema types |
 | `TIMESERIES` | Partial | Clause and TS null-treatment syntax are semantic; server-only projection/GROUP/HAVING and interval restrictions remain documented negatives |
 | Event-series `INTERPOLATE` joins | Partial | Predicate syntax is semantic; join-location and single-predicate semantic restrictions remain |

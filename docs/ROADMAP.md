@@ -31,7 +31,9 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   completion record), and an end-to-end acceptance gate with a lineage smoke
   (Q06). Q01 is complete: scoped temporary CTAS now shares the unscoped
   contract, including the LOCAL/`DISK_QUOTA` restriction extended from the
-  definition form. Q02–Q06 remain.
+  definition form. Q02 is complete: the SELECT `INTO [TABLE]` clause is a
+  typed contract for permanent and scoped temporary targets with preserved
+  scope/spelling/`ON COMMIT` and atomic foreign generation. Q03–Q06 remain.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

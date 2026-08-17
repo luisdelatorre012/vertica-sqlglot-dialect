@@ -128,3 +128,10 @@ plugin interface.
   form. Recorded a pre-existing, cross-cutting gap where custom Vertica table
   `Property` classes raise `KeyError` rather than `UnsupportedError` in
   foreign generation once embedded in a real `Properties` list.
+- Added the documented SELECT `INTO [TABLE]` clause as a typed contract:
+  permanent and `[GLOBAL | LOCAL] TEMP[ORARY]` targets with preserved scope,
+  `TEMP`/`TEMPORARY` spelling, and `ON COMMIT` state, deliberate
+  always-regenerated `TABLE` keyword canonicalization, fail-closed rejection
+  of PostgreSQL `STRICT`/`UNLOGGED`/variable-list forms and malformed tails at
+  every error level, and atomic foreign generation in place of SQLGlot's
+  silent `SUPPORTS_SELECT_INTO` CTAS rewrite.

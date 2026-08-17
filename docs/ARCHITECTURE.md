@@ -411,6 +411,29 @@ nodes; this lets schema qualification succeed when the source table correctly
 does not contain the synthetic name and gives the slice an explicit
 `TIMESTAMP` type.
 
+The SELECT `INTO [TABLE]` clause uses the same custom-Select-root pattern for
+a different structural reason. SQLGlot's base `select_sql` inspects
+`SUPPORTS_SELECT_INTO` before per-node dispatch ever runs: a generator with
+the flag unset (DuckDB, MySQL, and SQLite among the release-gate dialects)
+pops whatever node sits in `Select.args["into"]` and regenerates the whole
+statement as `CREATE [TEMPORARY] TABLE … AS …`, reading the popped node's
+args directly. Typing only the clause child therefore cannot make foreign
+generation atomic — the child is consumed structurally before it is ever
+dispatched, silently discarding Vertica's `GLOBAL`/`LOCAL` scope and
+`ON COMMIT` semantics. A query carrying the clause is instead promoted to
+`SelectInto`, an `exp.Select` subclass that fails atomically abroad before
+`select_sql` can run, and the clause itself is `IntoTableClause`, an
+`exp.Into` subclass preserving scope, `TEMP`/`TEMPORARY` spelling, and
+`ON COMMIT` exactly. The optional `TABLE` noise word is deliberately not
+stored: generation always emits the fully spelled documented form. A
+`TimeseriesSelect` that also carries an INTO clause keeps `TimeseriesSelect`
+as its root — one atomic custom root is sufficient, and the typed clause
+child still regenerates through its own transform. Canonical `exp.Into`
+nodes arriving from foreign-parsed trees still render because Vertica
+accepts the unscoped forms, but the Vertica generator rejects foreign-only
+fields such as `UNLOGGED` with `UnsupportedError` instead of emitting
+invalid Vertica.
+
 `ENABLE_WITH_CLAUSE_MATERIALIZATION` uses a serialized
 `MaterializedWithMarker` on each marked CTE query. This is a deliberate
 SQLGlot 30.13.x invariant:

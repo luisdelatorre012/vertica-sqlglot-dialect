@@ -1332,6 +1332,41 @@ class TimeseriesSelect(exp.Select):
     }
 
 
+class SelectInto(exp.Select):
+    """A SELECT whose Vertica ``INTO [TABLE]`` clause must never be dropped.
+
+    The canonical ``exp.Select`` root is unsafe for this clause: generators
+    with ``SUPPORTS_SELECT_INTO = False`` pop the ``into`` argument and
+    structurally rewrite the statement into ``CREATE [TEMPORARY] TABLE … AS``
+    before per-node dispatch runs, silently discarding Vertica scope and
+    ``ON COMMIT`` semantics. A custom root fails atomically first.
+    """
+
+    arg_types: t.ClassVar = {
+        **exp.Select.arg_types,
+        "into": True,
+    }
+
+
+class IntoTableClause(exp.Into):
+    """Typed target of Vertica's SELECT ``INTO [TABLE]`` clause.
+
+    ``spelling`` preserves the written ``TEMP``/``TEMPORARY`` keyword,
+    ``scope`` preserves an explicit ``GLOBAL``/``LOCAL`` prefix, and
+    ``on_commit`` preserves ``DELETE``/``PRESERVE``; each is present only
+    when written. The optional ``TABLE`` noise word is deliberately not
+    stored: generation always emits the fully spelled documented form.
+    """
+
+    arg_types: t.ClassVar = {
+        "this": True,
+        "temporary": False,
+        "spelling": False,
+        "scope": False,
+        "on_commit": False,
+    }
+
+
 class TimeseriesSlice(exp.Expression):
     """Reference to the synthetic timestamp column created by TIMESERIES."""
 
