@@ -24,6 +24,26 @@ expressions. `ListAgg` wraps a canonical `exp.GroupConcat` child, preserving
 aggregate discovery and column traversal without allowing a foreign generator
 to emit a fictitious `LIST_AGG` call.
 
+That exception is not limited to what a foreign dialect's ordinary per-node
+renderer would produce. Some dialect generators structurally rewrite a
+canonical class by `isinstance` before per-node dispatch ever runs: SQLite's
+CREATE TABLE generator detects a single-column `exp.PrimaryKey` table
+constraint and folds it into the column definition, rebuilding a fresh
+canonical `PrimaryKeyColumnConstraint` in the process. A Vertica subclass of
+`exp.PrimaryKey` is still an `exp.PrimaryKey` for that `isinstance` check, so
+its Vertica-only fields would be silently discarded instead of failing
+atomically. The standard "every custom expression fails explicitly in
+postgres" sweep does not catch this, because it only instantiates bare
+`vexp.*` classes with no arguments; it never constructs a canonical class
+carrying a new Vertica-only field value. The ordinary-constraint enforcement
+markers (`VerticaPrimaryKeyColumnConstraint`, `VerticaUniqueColumnConstraint`,
+`VerticaPrimaryKey`, `VerticaCheckColumnConstraint`) are therefore plain,
+detached custom expressions rather than canonical subclasses, even though
+their shape otherwise matches the canonical node exactly. Before reusing a
+canonical class to carry a new Vertica-specific field value, check whether any
+supported foreign dialect performs this kind of pre-dispatch structural
+rewrite on that class, not just what its ordinary per-node renderer emits.
+
 Function syntax follows the same wrapper pattern. `UsingParameters` and
 `StringUnit` retain the parsed function as `this` and store ordered parameter
 or unit children separately. Source-sensitive calls such as Vertica `EXPLODE`,
@@ -292,13 +312,11 @@ generates Postgres's unrelated `GENERATED ... AS IDENTITY` syntax.
 `DISABLED` marker is written, keeping bare constraints portable to other
 dialects; once a marker is present, parsing switches to a detached
 `VerticaPrimaryKeyColumnConstraint`/`VerticaUniqueColumnConstraint`/
-`VerticaPrimaryKey`/`VerticaCheckColumnConstraint`. These are deliberately not
-subclasses of the canonical constraint nodes: `exp.CheckColumnConstraint.enforced`
-already means MySQL `[NOT] ENFORCED`, and at least one foreign dialect
-generator (SQLite) structurally rewrites plain `exp.PrimaryKey` nodes by
-`isinstance` before per-node dispatch runs, so a subclass would let Vertica's
-enforcement marker either be reinterpreted as MySQL's or silently dropped
-instead of failing atomically. Table-level `PRIMARY KEY`/`FOREIGN KEY`/
+`VerticaPrimaryKey`/`VerticaCheckColumnConstraint`, per the canonical-subclass
+foreign-dispatch hazard described under AST policy above: `exp.CheckColumnConstraint.enforced`
+already means MySQL `[NOT] ENFORCED`, and SQLite's structural `isinstance`
+rewrite of `exp.PrimaryKey` is the concrete case that proved detachment was
+necessary rather than hypothetical. Table-level `PRIMARY KEY`/`FOREIGN KEY`/
 `UNIQUE`/`CHECK` dispatch (bare or `CONSTRAINT`-named) is a single custom
 `_parse_constraint` override that accepts exactly one of the four kinds, so a
 named constraint can no longer bundle multiple kinds under one name the way
@@ -387,6 +405,30 @@ reserved for administrative statement families that are explicitly marked
 Contextual words are parsed contextually wherever possible. Vertica uses many
 ordinary-looking words as clause starters, so globally reserving them can break
 valid column and table names.
+
+CREATE TABLE's definition-form-vs-CTAS-column-list disambiguation is
+speculative, and this has a real consequence for error messages inside the
+column/constraint grammar. `_parse_create_table` wraps its initial
+`_parse_schema(...)` attempt in `_try_parse`, which temporarily forces
+`ErrorLevel.IMMEDIATE`, catches any `ParseError` raised anywhere during that
+attempt, and retreats to try the CTAS column-name-list grammar instead if it
+fails. Any error raised while parsing a column definition or constraint —
+including a precise Vertica-specific validation message — is swallowed
+whenever the input does not end up looking like a valid column-definition
+schema, and the CTAS fallback path's own, more generic error (or a plain
+`Expecting )`) surfaces instead. Validation that runs only after the schema
+has already been accepted as definition-form (everything inside
+`_parse_create_table_definition` and the helpers it calls directly, as opposed
+to validation embedded in the column/table-constraint parsers that
+`_parse_schema` itself invokes) is not subject to this swallowing, because by
+that point the speculative attempt has already committed and the real,
+caller-requested `ErrorLevel` is back in effect. A new column/constraint
+validation added inside the speculative region should not assume its specific
+message will reach the caller; negative tests for such cases should assert
+that `ParseError` is raised, not necessarily match the exact message, unless
+the case has been confirmed to reach the non-speculative path. This is
+inherent to the existing form-disambiguation mechanism, not a defect to fix
+per statement.
 
 The parser performs syntax-level validation, such as mutually exclusive COPY
 options and required clause components. Restrictions that require catalog

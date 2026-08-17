@@ -143,6 +143,23 @@ These rules apply to every implementation task:
 - Recognized malformed Vertica syntax must raise `ParseError`; it must not fall
   back to `exp.Command`, truncate a tail, or emit a warning and partial AST at
   any `ErrorLevel`.
+- Plain `self.raise_error(...)` does not by itself satisfy the rule above: at
+  `ErrorLevel.RAISE` it only appends to `self.errors` (nothing raises until
+  something later calls `check_errors()`), and at `WARN`/`IGNORE` it neither
+  raises nor aggregates usefully, so unguarded downstream code can silently
+  continue with a `None`/default value, and code that assumes the statement
+  already failed (for example an `assert x is not None` placed right after)
+  can crash with `AssertionError` instead of `ParseError`. New validation must
+  go through a dedicated `_raise_<family>_error` wrapper: call `raise_error`,
+  then `check_errors()` when `error_level == RAISE`, then an unconditional
+  `raise ParseError(message)` when `error_level` is `IGNORE` or `WARN` (see
+  `_raise_schema_error`, `_raise_view_error`, `_raise_constraint_error`, and
+  siblings for the exact pattern). Add one such wrapper per new statement
+  family rather than reusing an unrelated family's wrapper. This has not been
+  retrofitted onto every pre-existing call site, so an existing bare
+  `self.raise_error(...)` elsewhere in the file is not proof the pattern is
+  safe to copy for new work; grep for `def _raise_.*_error` for the current
+  set of guaranteed-raise wrappers before adding a new one.
 - Keep contextual words contextual. Do not add tokenizer keywords unless primary
   grammar and collision tests prove it necessary. Require exact unquoted ASCII
   provenance for object/action keywords where Unicode case folding could change
