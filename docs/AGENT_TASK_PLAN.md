@@ -45,6 +45,45 @@ and must not be used to infer current runtime availability. Do not rewrite
 those records to match the current host; the table above and fresh `--version`
 checks are authoritative for new tasks.
 
+## Reading installed SQLGlot source
+
+Auditing "current SQLGlot parse/generate behavior" (required before every
+task) means reading the installed `sqlglot` package's actual source, not
+recalling an older version from memory. SQLGlot 30.13 restructured its
+internals into subpackages, so a guessed flat-file path can fail even though
+the file genuinely exists somewhere under the package — for example,
+`sqlglot/expressions.py` does not exist in 30.13; `sqlglot.expressions` is a
+package, and canonical expression classes are grouped by topic into
+submodules such as `sqlglot.expressions.constraints` (constraint-kind nodes)
+and `sqlglot.expressions.core` (`Expression`, `ColumnConstraintKind`, and
+other base machinery). The base `Parser`/`Generator` classes remain flat
+files at `sqlglot.parser`/`sqlglot.generator`, but each dialect's own parser
+and generator mixin lives in a separate per-dialect submodule instead:
+`sqlglot.parsers.<dialect>` / `sqlglot.generators.<dialect>` (for example
+`sqlglot.parsers.postgres.PostgresParser`, `sqlglot.generators.sqlite`).
+This is distinct from `sqlglot.dialects.<dialect>`, which holds only the
+`Dialect` subclass, tokenizer, and `EXPRESSION_METADATA`.
+`VerticaParser`/`VerticaGenerator` subclass the `sqlglot.parsers.postgres`/
+`sqlglot.generators.postgres` mixins (see the imports at the top of
+`src/sqlglot_vertica/parser.py` and `generator.py`), not
+`sqlglot.dialects.postgres.Postgres` directly.
+
+Rather than guessing a path, resolve the real submodule file with Python
+first, then read that resolved path normally with the ordinary file tools:
+
+```powershell
+.venv/Scripts/python.exe -c "import sqlglot.expressions.constraints as m; print(m.__file__)"
+```
+
+This also matters when checking whether a foreign dialect's generator has
+its own handling for a canonical node class (relevant to the foreign-dispatch
+hazard noted under AST policy in `ARCHITECTURE.md`): check both
+`sqlglot.generators.<dialect>` for a same-named render method and any
+dialect-level statement preprocessing that can run before per-node dispatch
+(for example SQLite's `_transform_create` in `sqlglot/generators/sqlite.py`,
+which structurally rewrites parts of a `CREATE TABLE` tree by `isinstance`
+before generation).
+
 ## Status dashboard
 
 Allowed states are `TODO`, `IN_PROGRESS`, `DONE`, and `BLOCKED`. At most one
@@ -224,7 +263,15 @@ Every feature task must complete all applicable checks:
 7. Full default-runtime suite with branch coverage at or above 90%, plus Ruff
    lint and formatting, strict mypy, and `git diff --check`. The release driver
    in step 8 runs all of these checks; do not repeat them separately unless
-   diagnosing a failure.
+   diagnosing a failure. A guaranteed-raise `_raise_<family>_error` wrapper's
+   final `if error_level in {IGNORE, WARN}: raise ParseError(...)` line will
+   show as a partially covered branch (`N->exit`) in the coverage report even
+   with a full `ErrorLevel` sweep tested: reaching that `if` at all already
+   proves `error_level` is `IGNORE` or `WARN` (`IMMEDIATE` raises earlier
+   inside `raise_error` itself; `RAISE` always raises from the preceding
+   `check_errors()` call), so the "condition is false" exit is unreachable
+   dead code, not a real gap. Every existing wrapper shows this same pattern;
+   do not add tests chasing it.
 
 8. Full tests on every installed supported runtime, CPython 3.9 through 3.15,
    plus the sdist/wheel build and clean installed-wheel smoke. Use the checked-in
@@ -235,6 +282,13 @@ Every feature task must complete all applicable checks:
        -SmokeSql "TASK-DISTINCTIVE SQL" `
        -ExpectedClass "ExpectedExpressionClass"
    ```
+
+   Sanity-check `-SmokeSql`/`-ExpectedClass` locally first with a plain
+   `parse_one(sql, read="vertica")` / `.sql(dialect="vertica")` round-trip and
+   an `isinstance` check against the expected class. A full run costs several
+   minutes (the default suite, all 7 isolated runtimes, and a clean sdist/wheel
+   build and install), so a typo or a clause-order mistake in the smoke SQL
+   itself is an expensive way to fail the last step.
 
    The script uses persistent ignored PRE_COMMIT/UV artifact caches, but creates
    isolated per-version environments and a unique clean wheel environment. It
