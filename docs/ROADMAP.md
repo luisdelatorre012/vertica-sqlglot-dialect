@@ -13,6 +13,26 @@ and pretty round trips, dump/load stability, malformed-clause regressions,
 optimizer or foreign-generation contracts where relevant, at least 90% branch
 coverage, strict typing, linting, and an isolated installed-wheel smoke test.
 
+## Milestones
+
+As of 2026-08-16 the remaining work is ordered by two major milestones:
+
+- **Milestone 1 — analysis parsing surface.** The first deliverable is
+  parsing, analyzing, and regenerating the statement classes an analysis
+  workload contains: `SELECT` queries (joins, subqueries, set operations),
+  common table expressions, and temporary-table creation and cleanup — no
+  database management. The completed phases already deliver most of this
+  surface; parser probes verified three remaining gaps, now tasks Q01–Q03
+  (scoped temporary CTAS, the `SELECT … INTO [TABLE]` clause including its
+  temporary/`ON COMMIT` forms, and multi-target `DROP TABLE`), followed by
+  the long-planned official query corpus (Q04) and an end-to-end acceptance
+  gate with a lineage smoke (Q05).
+- **Milestone 2 — administration and remaining DDL.** Everything listed under
+  "Remaining" in Phase 4 — flex tables and map functions, stored procedures
+  and SQL-expression functions, partition maintenance, library/UDx
+  alterations, and cluster, node, Eon, TLS, and cryptographic administration
+  (tasks P16–P35) — is deferred until Milestone 1 is certified.
+
 ## Phase 1 — core analytical SQL and physical design
 
 Implemented for the 0.2 rewrite:
@@ -123,7 +143,8 @@ Implemented catalog P0:
   temporary-table/single-SELECT restrictions, with CHECK expression content
   left as a named server-side residual.
 
-Remaining:
+Remaining (all Milestone 2, deferred behind the Milestone 1 analysis-surface
+tasks Q01–Q05):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);

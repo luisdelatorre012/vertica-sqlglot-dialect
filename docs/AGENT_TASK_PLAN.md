@@ -8,6 +8,21 @@ The architectural target remains OpenText Analytics Database 26.2, SQLGlot
 30.13.x, and Python 3.9 through 3.15. `docs/COVERAGE.md` defines the public
 coverage contract; this file defines implementation order.
 
+The backlog is organized into two major milestones:
+
+- **Milestone 1 — analysis parsing surface.** The project's first deliverable
+  is parsing, analyzing, and regenerating the statement classes an analysis
+  workload actually contains: `SELECT` queries (joins, subqueries, set
+  operations), common table expressions, and temporary-table creation and
+  cleanup. No database-management capability is required for this milestone.
+  Its tasks carry `Q` numbers.
+- **Milestone 2 — administration and remaining DDL.** Everything else —
+  flex tables, stored procedures and SQL functions, partition maintenance,
+  library/UDx alterations, and cluster/Eon/TLS/cryptographic administration —
+  is deferred until Milestone 1 is certified. Its tasks keep their original
+  `P` numbers; do not renumber them, because completion records and coverage
+  notes reference those IDs.
+
 ## Copy-paste prompt
 
 The repository-level `AGENTS.md` makes this prompt sufficient:
@@ -17,9 +32,24 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 
 ## Current state
 
-- Completed through **P15 — Ordinary constraint conformance**.
-- Next eligible tasks are selected by dependency and numeric order; P16 is the
-  lowest-numbered remaining task.
+- Completed through **P15 — Ordinary constraint conformance**. P01–P15 are the
+  completed foundation; their records below and in the archive are historical.
+- On 2026-08-16 the backlog was split into the two milestones above. Parser
+  probes against the installed development environment verified that the
+  Milestone 1 surface is already largely delivered by the completed
+  foundation: plain/multiple/recursive CTEs with materialization hints,
+  joins, subqueries, `MINUS`/`EXCEPT` set operations, `LIMIT … OVER`,
+  definition-form temporary tables with `ON COMMIT`/`NO PROJECTION`,
+  unscoped temporary CTAS, `INSERT … SELECT` (including target-following
+  `WITH`), and single-target `DROP TABLE [IF EXISTS] … [CASCADE]` all parse
+  and round-trip. The same probes confirmed three gaps inside the Milestone 1
+  scope, now tasks Q01–Q03: scoped temporary CTAS raises a deliberate
+  `ParseError`, the documented `SELECT … INTO [scope] TEMP[ORARY] [TABLE] …
+  [ON COMMIT …]` clause does not parse (the 26.2 doc page's own example
+  fails), and multi-target `DROP TABLE` lists do not parse.
+- Next eligible tasks are selected milestone-first: every Q task must be
+  `DONE` before any P task is eligible. Q01 is the lowest-numbered remaining
+  task.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Installed local Python runtimes
@@ -87,7 +117,9 @@ before generation).
 ## Status dashboard
 
 Allowed states are `TODO`, `IN_PROGRESS`, `DONE`, and `BLOCKED`. At most one
-task may be `IN_PROGRESS`.
+task may be `IN_PROGRESS` across all tables.
+
+### Completed foundation (pre-milestone)
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -106,6 +138,26 @@ task may be `IN_PROGRESS`.
 | P13 | DONE   | Administrative privilege targets              | P09                 | `feat: complete administrative privilege targets`       |
 | P14 | DONE   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | DONE   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
+
+### Milestone 1 — analysis parsing surface
+
+Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
+
+| ID  | Status | Task                                          | Required dependency | Commit title                                            |
+| --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
+| Q01 | TODO   | Scoped temporary CTAS acceptance              | —                   | `feat: accept scoped temporary ctas`                    |
+| Q02 | TODO   | SELECT INTO TABLE clause conformance          | —                   | `feat: model select into table targets`                 |
+| Q03 | TODO   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
+| Q04 | TODO   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
+| Q05 | TODO   | Milestone 1 acceptance gate                   | Q01–Q04             | `test: certify milestone one analysis surface`          |
+
+### Milestone 2 — administration and remaining DDL (deferred)
+
+Deferred until Q05 is `DONE`. Task numbering, dependencies, and
+specifications are intentionally unchanged from the prior plan revision.
+
+| ID  | Status | Task                                          | Required dependency | Commit title                                            |
+| --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
 | P16 | TODO   | Native flexible-table definition form         | P15                 | `feat: model native flexible table definitions`         |
 | P17 | TODO   | Flexible-table CTAS                           | P16                 | `feat: model flexible table ctas`                       |
 | P18 | TODO   | Flex map transform core                       | P16                 | `feat: model flex map transforms`                       |
@@ -131,9 +183,13 @@ task may be `IN_PROGRESS`.
 
 1. Read this entire file, the selected task, `docs/ARCHITECTURE.md`, and the
    relevant rows in `docs/COVERAGE.md` and `docs/ROADMAP.md`.
-2. If a task is `IN_PROGRESS`, resume it. Otherwise select the lowest-numbered
-   `TODO` task whose dependencies are all `DONE`, change it to `IN_PROGRESS` in
-   both the dashboard and its detail heading, and do no other task.
+2. If a task is `IN_PROGRESS`, resume it. Otherwise select the next eligible
+   task with milestone precedence: while any Milestone 1 (`Q`-series) task is
+   not `DONE`, only `Q` tasks are eligible; Milestone 2 (`P`-series) tasks
+   become eligible only after Q05 is `DONE`. Within the active milestone,
+   select the lowest-numbered `TODO` task whose dependencies are all `DONE`,
+   change it to `IN_PROGRESS` in both the dashboard and its detail heading,
+   and do no other task.
 3. Inspect `git status` and `git diff` before editing. Never discard or overwrite
    unrelated changes. If unexpected changes overlap the selected task, mark it
    `BLOCKED` with an exact explanation and stop.
@@ -306,11 +362,13 @@ Every feature task must complete all applicable checks:
    same permission boundary as hook installation. Commit hooks still run
    normally and must never be bypassed.
 
-## Detailed tasks
+## Detailed tasks — completed foundation
 
 Completed task specifications and completion records for P01–P08 are archived
 in [AGENT_TASK_PLAN_ARCHIVE.md](AGENT_TASK_PLAN_ARCHIVE.md). They are historical
-context and are not part of the mandatory active-plan read.
+context and are not part of the mandatory active-plan read. The P09–P15
+records below are likewise historical; the active backlog starts at the
+Milestone 1 section that follows them.
 
 ### P09 — AUTHENTICATION SET security boundary — `DONE`
 
@@ -621,6 +679,164 @@ at 93.24% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
 treating deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel
 build, clean force-install, `pip check`, and installed-wheel entry-point/
 CREATE TABLE constraint round-trip smoke passed.
+
+## Detailed tasks — Milestone 1: analysis parsing surface
+
+These five bounded tasks close the verified gaps between the completed
+foundation and the milestone goal: parsing, analyzing, and regenerating
+`SELECT`/CTE/temporary-table workloads. No database-management capability is
+in scope in this milestone.
+
+### Q01 — scoped temporary CTAS acceptance — `TODO`
+
+**Outcome.** Accept `CREATE { GLOBAL | LOCAL } TEMP[ORARY] TABLE … AS query`
+with the same typed contract as unscoped temporary CTAS, recording the
+documented grammar conflict.
+
+**Required work.** Remove the deliberate scope rejection in the
+temporary-CTAS dispatch (`_parse_create_table_ctas` raises "GLOBAL or LOCAL
+scope is not supported for temporary CTAS", pinned in `test_create_table.py`)
+and give scoped temporary CTAS exactly the unscoped contract: optional
+column-name list, `ON COMMIT { DELETE | PRESERVE } ROWS` before `AS`, hints,
+and the currently supported post-query clauses, with scope and
+`TEMP`/`TEMPORARY` spelling handled consistently with the definition form.
+Accept parenthesized query bodies (`AS (SELECT …)`) if any gap exists, since
+ecosystem tooling emits them. Record the source conflict: the 26.2 CREATE
+TEMPORARY TABLE page splits its formal syntax into a column-definition block
+(with scope) and an AS-query block (without scope), with no example either
+way, while working Vertica deployments and ecosystem tooling (for example the
+dbt-vertica adapter's `CREATE LOCAL TEMPORARY TABLE … ON COMMIT PRESERVE ROWS
+AS (SELECT …)` materializations) exercise scoped temporary CTAS routinely.
+This task explicitly authorizes preferring that operational evidence over the
+formal block split under protocol rule 4's server-fixture escape hatch;
+capture a concrete server fixture in the completion record if one is
+available. Keep every other existing temporary-table restriction (for
+example the definition-form `LOCAL … DISK_QUOTA` rejection) unchanged unless
+the re-opened source contradicts it. Test both scopes, both spellings, both
+`ON COMMIT` values, column lists, hints, parenthesized queries, unscoped
+regression parity, LIKE/definition-form dispatch neighbors, serialization,
+and foreign-generation policy consistent with the existing CTAS contract.
+
+**Explicit exclusions.** Flex temporary tables (Milestone 2), `SELECT … INTO`
+(Q02), catalog/session scope effects, and projection creation.
+
+**Primary sources.** [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/)
+and [Creating temporary tables](https://docs.vertica.com/26.2.x/en/admin/working-with-native-tables/creating-temporary-tables/).
+
+**Completion record.** Pending.
+
+### Q02 — SELECT INTO TABLE clause conformance — `TODO`
+
+**Outcome.** Make the documented `INTO TABLE` clause of `SELECT` parse and
+generate valid Vertica for permanent and temporary targets.
+
+**Required work.** Implement `INTO [TABLE]
+[[{namespace.|database.}]schema.]table` and `INTO [GLOBAL|LOCAL]
+TEMP[ORARY] [TABLE] [[database.]schema.]table [ON COMMIT {DELETE|PRESERVE}
+ROWS]` per the 26.2 INTO TABLE clause page. The page's own example —
+`SELECT * INTO LOCAL TEMP TABLE newTempTableLocal ON COMMIT PRESERVE ROWS
+FROM customer_dimension` — currently raises `ParseError`, and the unscoped
+forms that do parse ride the inherited PostgreSQL SELECT INTO path and drop
+the optional `TABLE` keyword as an accident rather than a contract. Type the
+target so scope, spelling, and `ON COMMIT` are preserved exactly; make
+`TABLE`-keyword canonicalization a deliberate, tested decision; keep the
+query traversable and the target reachable for lineage. Reject foreign forms
+(variable targets, PostgreSQL `STRICT`) and malformed tails atomically at
+every error level through a guaranteed-raise `_raise_<family>_error` wrapper.
+Test permanent/temporary targets, every scope/spelling combination,
+`ON COMMIT` placement, qualification shapes including namespace-qualified
+permanent targets, dispatch neighbors (`INSERT INTO`, CTAS), serialization,
+optimizer traversal, and foreign-generation policy.
+
+**Explicit exclusions.** Target existence/collision, projection creation,
+privileges, and load/export alternatives — server concerns.
+
+**Primary source.** [INTO TABLE clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/into-table-clause/).
+
+**Completion record.** Pending.
+
+### Q03 — DROP TABLE grammar completion — `TODO`
+
+**Outcome.** Complete Vertica `DROP TABLE`: ordered multi-target lists with
+`IF EXISTS` and `CASCADE`.
+
+**Required work.** Re-open the 26.2 DROP TABLE page and support `DROP TABLE
+[IF EXISTS] [[database.]schema.]table[,…] [CASCADE]`. Single-target
+statements currently parse through canonical generic `exp.Drop`, including
+`IF EXISTS`, qualification, and `CASCADE`; multi-target lists raise
+`ParseError`. Follow the established ordered multi-target precedent
+(`DropViews`/`DropSchemas`): retain canonical nodes where lossless and add an
+atomic ordered root only for demonstrated loss. Once DROP TABLE becomes a
+deliberate family, enforce exact modifier placement and reject modifiers the
+re-opened page does not document. Test list order, `IF EXISTS` scope over
+lists, `CASCADE` placement, temporary/permanent name shapes, dispatch
+neighbors (`DROP VIEW`, `DROP SCHEMA`, `DROP PROJECTION`), serialization, and
+atomic foreign failure for any custom node.
+
+**Explicit exclusions.** Catalog existence, dependency effects, and
+temporary-table auto-drop semantics.
+
+**Primary source.** [DROP TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-table/).
+
+**Completion record.** Pending.
+
+### Q04 — official query-corpus hardening — `TODO`
+
+**Outcome.** Back the Generic `SELECT`/CTE coverage rows with the
+long-planned official-example corpus and fix any mismatch it exposes.
+
+**Required work.** Walk the 26.2 SELECT statement family pages — SELECT,
+FROM/joins, WHERE, GROUP BY (including ROLLUP/CUBE/GROUPING SETS), HAVING,
+ORDER BY, LIMIT/OFFSET (including the `LIMIT ALL` losslessness question
+recorded in the coverage matrix), UNION/INTERSECT/EXCEPT/MINUS, subqueries,
+and the WITH clause pages (recursive plus materialization hints) — and add
+each documented example, adapted only where determinism requires, as
+parse → AST-shape → compact/pretty round-trip regressions. Expand the
+reserved-word collision corpus flagged in the lexical coverage row for query
+positions. Promote or demote coverage statuses only with AST evidence, and
+record named residuals rather than guessing.
+
+**Explicit exclusions.** TIMESERIES/MATCH/INTERPOLATE (already Partial with
+server-side residuals), structured hints (already covered), flex map
+functions (Milestone 2, P18), and any new statement family.
+
+**Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
+and its clause subpages, including the WITH clause documentation.
+
+**Completion record.** Pending.
+
+### Q05 — Milestone 1 acceptance gate — `TODO`
+
+**Outcome.** Prove the analysis surface end to end on realistic
+multi-statement workloads, update the contract documents, and certify
+Milestone 1.
+
+**Required work.** Add a workload-corpus test module of multi-statement
+analysis scripts combining CTEs (plain, recursive, hinted), scoped and
+unscoped temporary CTAS, definition-form temporary tables, `INSERT … SELECT`
+and `INSERT … WITH`, `SELECT … INTO` temporary targets, and `DROP TABLE`
+cleanup. Assert `sqlglot.parse` multi-statement boundaries, compact and
+pretty round-trips, `dump()`/`Expression.load()` stability, and optimizer
+traversal — qualification plus a column-level lineage smoke across
+CTE/temporary-table chains, because downstream analysis depends on it.
+Update `docs/COVERAGE.md` for every row Q01–Q04 changed (the SELECT/CTE
+row's corpus evidence, the INTO TABLE contract, DROP TABLE, and the
+scoped-temporary-CTAS boundary note), record the milestone in
+`docs/ROADMAP.md`, and mark Milestone 1 complete in this plan's Current
+state section.
+
+**Explicit exclusions.** No new grammar in this task; named residuals stay
+named; Milestone 2 families remain untouched.
+
+**Primary sources.** Re-open the Q01–Q04 pages as needed.
+
+**Completion record.** Pending.
+
+## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
+
+Every task below is deferred until Q05 is `DONE`. Specifications,
+dependencies, and numbering are intentionally unchanged from the prior plan
+revision; completion records and coverage notes reference these IDs.
 
 ### P16 — native flexible-table definition form — `TODO`
 
