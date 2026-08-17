@@ -13,9 +13,12 @@ non-overlapping chunks of at most 200 lines. Use a separate tool call for each
 chunk rather than combining all chunks into one large result. Cover every line
 from the first through the reported last line, and treat any truncation warning
 as an incomplete read that must be retried with a smaller chunk before editing.
-`docs/AGENT_TASK_PLAN_ARCHIVE.md` contains completed historical specifications
-and is not part of this mandatory read unless the selected task explicitly
-requires that history.
+`docs/AGENT_TASK_PLAN_ARCHIVE.md` contains completed historical
+specifications, and `docs/AGENT_TASK_PLAN_MILESTONE_2.md` contains the
+deferred Milestone 2 (P16–P35) detailed specifications. Neither is part of
+this mandatory read while Milestone 1 is active: open the Milestone 2 file
+only when a `P` task is selected (its specification lives there), and the
+archive only when the selected task explicitly requires that history.
 
 - Resume the single `IN_PROGRESS` task. If none exists, select with milestone
   precedence: while any Milestone 1 (`Q`-series) task is not `DONE`, only `Q`

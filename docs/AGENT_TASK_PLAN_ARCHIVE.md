@@ -289,3 +289,313 @@ coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15,
 deprecations as errors. Ruff, formatting, strict mypy, full pre-commit,
 sdist/wheel build, clean force-install, `pip check`, and installed-wheel
 entry-point/ALTER round-trip smoke passed.
+
+### P09 — AUTHENTICATION SET security boundary — `DONE`
+
+**Outcome.** Implement only a proved-safe non-secret parameter allowlist behind
+a generalized secret firewall.
+
+**Required work.** First audit every 26.2 parameter and classify it as safe,
+secret-bearing, or catalog/unknown. Add pre-AST sanitized rejection for
+`bind_password`, `client_secret`, and every unknown potentially sensitive name.
+Only then add typed SET support for the reviewed non-secret allowlist. Reuse and
+expand the USER sentinel harness across standard, escape, Unicode, national,
+dollar, bit, hex, and tokenizer-fallback literal forms at all error levels.
+
+**Stop condition.** If a complete safe allowlist cannot be established from
+primary sources, mark this task `BLOCKED` with the audit and do not implement a
+partial permissive parser.
+
+**Primary sources.** [ALTER AUTHENTICATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-authentication/)
+and [OAuth configuration](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/oauth-2-0-authentication/configuring-oauth-authentication/).
+
+**Completion record.** Audited the documented LDAP, Ident, Kerberos, and OAuth
+parameter surfaces and added ordered typed SET support only for the two
+non-secret parameters with closed 26.2 value domains: standard-string
+`validate_type` (`IDP`/`JWT`) and `jit_enabled` (`yes`/`no`). Explicit
+`bind_password`/`client_secret` values, every arbitrary or incompletely pinned
+documented parameter, unknown future names, out-of-domain allowlisted values,
+and standard, escape, Unicode, national, dollar, bit, hex, and raw-fallback
+literal payloads fail through the fixed pre-AST sanitizer at every error level.
+Serialization, copying, transformation, optimizer/type traversal, comments,
+multi-statement boundaries, strict programmatic mutation, and direct/nested
+foreign generation are covered. The source audit found one material scope
+contradiction: ALTER AUTHENTICATION says SET is required for LDAP, Ident, and
+OAuth, while the 26.2 Kerberos guide documents `SET REALM`; REALM remains
+fail-closed because its arbitrary string domain can carry unreviewed payloads.
+The OAuth parameter page labels `validate_hostname` Boolean without pinning
+accepted SET spellings, so it also remains fail-closed rather than guessed.
+Method compatibility, parameter combinations, record state, endpoints,
+identities, roles/claims, and runtime authentication effects remain catalog or
+server concerns. The default CPython 3.12.6 gate passed 3832 tests at 93.51%
+branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15,
+3.14.7, and 3.15.0rc1 suites each passed 3832 tests, with 3.15 treating
+deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel entry-point/SET round-trip smoke
+passed.
+
+### P10 — COMMENT ON family — `DONE`
+
+**Outcome.** Make the complete documented COMMENT ON family semantic, including
+comment removal with `NULL`.
+
+**Required work.** Cover aggregate, analytic, scalar and transform functions,
+column, constraint, library, node, projection, schema, sequence, table, and
+view targets. Reuse typed routine signatures and qualified object nodes. Test
+all target shapes, constraint-on-table and column ownership, quoted comments,
+NULL removal, malformed signatures/targets, serialization, and a deliberate
+foreign policy.
+
+**Explicit exclusions.** Catalog ownership/existence and the server's comment
+length/truncation behavior.
+
+**Primary source.** [COMMENT ON statements](https://docs.vertica.com/26.2.x/en/sql-reference/statements/comment-on-statements/).
+
+**Completion record.** Added an atomic `CommentOn` root for all 13 documented
+target forms. Aggregate, analytic, scalar, and transform functions reuse typed
+qualified `RoutineSignature` children; ordinary catalog objects use qualified
+tables, columns preserve their database/schema/object ownership path, and a
+dedicated constraint target retains both the constraint and owning table.
+Standard-string comments and explicit `NULL` removal round-trip distinctly;
+malformed target/signature/value shapes fail atomically at every error level,
+and direct or nested foreign generation rejects the Vertica nodes. The 26.2
+source consistently documents an 8192-character server limit with truncation
+and a message, so length enforcement remains deliberately server-side along
+with ownership and existence, as required by the task exclusion. The focused
+suite passed 130 tests. The default CPython 3.12.6 gate passed 3964 tests at
+93.48% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 3964 tests, with 3.15 treating
+deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel entry-point/COMMENT round-trip
+smoke passed.
+
+### P11 — VIEW lifecycle — `DONE`
+
+**Outcome.** Complete typed ALTER/DROP VIEW around the existing semantic CREATE
+VIEW implementation.
+
+**Required work.** Implement documented owner, schema, and inherited-privilege
+actions; equal-cardinality multi-view rename lists; and ordered multi-target
+`DROP VIEW [IF EXISTS]`. Re-audit whether 26.2 permits dependency modifiers and
+reject undocumented ones. Test qualified names, list cardinality, collision
+with TABLE and local temporary views, CREATE interoperability, and foreign
+atomicity.
+
+**Primary sources.** [ALTER VIEW](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-view/)
+and [DROP VIEW](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-view/).
+
+**Completion record.** Added atomic `AlterView` and `DropViews` roots around
+qualified, table-shaped names while retaining the existing canonical CREATE
+VIEW tree. ALTER supports exactly one typed owner transfer, schema move,
+INCLUDE/EXCLUDE/MATERIALIZE privilege action, or equal-cardinality ordered
+multi-view rename; rename targets remain unqualified. DROP preserves an ordered
+nonempty target list and postfix `IF EXISTS`. The re-opened 26.2 DROP syntax has
+no dependency modifier, consistent with the view-management documentation, so
+`CASCADE` and `RESTRICT` now fail closed rather than leaking through SQLGlot's
+generic DROP grammar. Name existence, uniqueness, ownership, current-database
+resolution, and dependency effects remain catalog/server checks. CREATE VIEW,
+TABLE lifecycle, and local-temporary-view dispatch remain separate. The focused
+schema/view suite passed 201 tests. The default CPython 3.12.6 gate passed 4149
+tests at 93.43% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 4149 tests, with
+3.15 treating deprecations as errors. Ruff, formatting, strict mypy,
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+entry-point/ALTER VIEW round-trip smoke passed.
+
+### P12 — SCHEMA lifecycle — `DONE`
+
+**Outcome.** Complete typed ALTER/DROP SCHEMA while preserving the existing
+CREATE SCHEMA extensions.
+
+**Required work.** Support default include/exclude schema privileges, owner
+transfer and documented cascade form, disk quota value/NULL reset, equal-length
+multi-schema renames, and ordered multi-drop with exact cascade/restrict rules.
+Test namespace/database qualification, quota shapes, action exclusivity,
+existing CREATE behavior, and collisions with compound CREATE SCHEMA.
+
+**Explicit exclusions.** Compound CREATE SCHEMA bodies remain separately
+planned; catalog namespace resolution and dependency effects stay server-side.
+
+**Primary sources.** [ALTER SCHEMA](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-schema/)
+and [DROP SCHEMA](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-schema/).
+
+**Completion record.** Added atomic `AlterSchema` and `DropSchemas` roots around
+SQLGlot's canonical database-reference-shaped schema names while retaining the
+existing canonical CREATE SCHEMA tree. ALTER supports exactly one typed default
+INCLUDE/EXCLUDE SCHEMA PRIVILEGES action, owner transfer with optional object
+CASCADE, quoted disk quota or `SET NULL` reset, or equal-cardinality ordered
+multi-schema rename. The disk-quota guide pins accepted values to unsigned
+integer strings with K/M/G/T units; units normalize to uppercase, zero and
+arbitrarily large digits remain lexical, and signs, decimals, spaces, other
+units, and nonstandard literal forms fail closed. Explicit source namespaces
+must be preserved by corresponding rename targets. DROP preserves ordered
+qualified targets, prefix `IF EXISTS`, and at most one postfix `CASCADE` or
+explicit `RESTRICT`; omission retains the server's default restrictive policy.
+Compound CREATE SCHEMA bodies remain separately planned and now fail atomically
+at every error level. Namespace/database mode, current-database resolution,
+ownership, object dependencies, quota relationships, and runtime effects remain
+catalog/server checks. The re-opened 26.2 sources had no material contradiction;
+the disk-quota guide clarifies the ALTER page's broad `value` placeholder. The
+focused schema/view suite passed 442 tests. The default CPython 3.12.6 gate
+passed 4396 tests at 93.36% branch coverage; isolated CPython 3.9.25, 3.10.20,
+3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 4396 tests,
+with 3.15 treating deprecations as errors. Ruff, formatting, strict mypy,
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+entry-point/ALTER SCHEMA round-trip smoke passed.
+
+### P13 — administrative privilege targets — `DONE`
+
+**Outcome.** Close the named remaining GRANT/REVOKE target gaps without
+regressing the current role, authentication, workload, resource-pool, routine,
+location, and object forms.
+
+**Required work.** Add official fixture matrices and exact privilege domains for
+KEY, LIBRARY, DATA LOADER, and TLS CONFIGURATION. Audit existing factory-UDx
+signature coverage before changing it. Enforce target-specific cardinality,
+`EXTEND`, grant/admin option, cascade, qualification, and principal rules in
+both parser and strict generator.
+
+**Primary sources.** [GRANT DATA LOADER](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-data-loader/),
+[GRANT KEY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-key/),
+[GRANT LIBRARY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-library/),
+and [GRANT TLS CONFIGURATION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/grant-statements/grant-tls-config/).
+
+**Completion record.** Added exact structured KEY, LIBRARY, DATA LOADER, and
+TLS CONFIGURATION targets to the canonical GRANT/REVOKE roots, including
+direction-specific privilege domains, target cardinality and qualification,
+`ALL [PRIVILEGES]`, grant-option, `EXTEND`, cascade, principal, and 128-byte
+identifier validation in both parser and strict generator. Single targets now
+retain `VerticaPrivilegeTarget`, so direct and nested foreign generation fails
+atomically instead of losing the Vertica object kind. The existing scalar,
+aggregate, analytic, transform, filter, parser, and source UDx grant signatures
+remain typed and unchanged. The re-opened 26.2 pages expose deliberate
+directional asymmetries: TLS grants do not accept ALL although TLS revokes do;
+LIBRARY grants accept DROP and optional ALL EXTEND while revokes accept only
+USAGE or ALL; and only DATA LOADER and LIBRARY revokes accept CASCADE. These
+formal syntax and parameter domains are enforced as documented. Ownership,
+object existence, principal user/role type, current-database resolution, and
+grant-chain effects remain catalog/server checks. The focused P13 suite passed
+97 tests. The default CPython 3.12.6 gate passed 4493 tests at 93.13% branch
+coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1 suites each passed 4493 tests, with 3.15 treating deprecations as
+errors. Ruff, formatting, strict mypy, sdist/wheel build, clean force-install,
+`pip check`, and installed-wheel entry-point/KEY GRANT round-trip smoke passed.
+
+### P14 — access-policy lifecycle — `DONE`
+
+**Outcome.** Add semantic CREATE/ALTER/DROP ACCESS POLICY roots with traversable
+targets and expressions.
+
+**Required work.** Model exact table/column targets, policy expression,
+enable/disable, replacement and drop modifiers, and each documented ALTER
+action. Prevent policy expressions from consuming trailing actions. Test
+expression traversal/type/optimizer behavior, dispatch collisions, malformed
+tails, serialization, and foreign atomicity.
+
+**Explicit exclusions.** Catalog target types, ownership, policy expression
+volatility, permissions, and runtime evaluation.
+
+**Primary sources.** [CREATE ACCESS POLICY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-access-policy/),
+[ALTER ACCESS POLICY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/alter-statements/alter-access-policy/),
+and [DROP ACCESS POLICY](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-access-policy/).
+
+**Completion record.** Added atomic `CreateAccessPolicy`, `AlterAccessPolicy`,
+and `DropAccessPolicy` roots around a shared row/column `AccessPolicyTarget`,
+with traversable policy expressions, explicit trust/state fields, a distinct
+COPY destination, exact table qualification, strict 128-byte identifier
+validation, serialization, optimizer/type traversal, and direct/nested atomic
+foreign failure. The parser prevents policy expressions from consuming
+trailing actions and rejects malformed tails, statement modifiers, quoted or
+non-ASCII compound object keywords, invalid expression shapes, and malformed
+programmatic nodes across strict parser/generator modes. Re-opened 26.2 sources
+contain two material conflicts: the ALTER prose/examples omit `GRANT TRUSTED`
+although the formal grammar requires it, and the management guide shows a
+schema-qualified COPY destination although the formal ALTER and DROP grammars
+use unqualified table targets. Per the plan's source policy, the formal grammar
+is enforced; catalog target type/existence, ownership, permissions, expression
+volatility and UDTF behavior, and runtime evaluation remain server checks. The
+focused P14 suite passed 169 tests. The default CPython 3.12.6 gate passed 4666
+tests at 93.16% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 4666 tests, with
+3.15 treating deprecations as errors. Ruff, formatting, strict mypy,
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+entry-point/CREATE ACCESS POLICY round-trip smoke passed.
+
+### P15 — ordinary constraint conformance — `DONE`
+
+**Outcome.** Turn the current Generic ordinary column/table constraint row into
+a documented Vertica contract, using canonical SQLGlot nodes wherever exact.
+
+**Required work.** Audit every 26.2 column/table constraint and current SQLGlot
+parse/generate behavior. Add a broad official positive corpus and deterministic
+Vertica negative restrictions for definition-form tables, CTAS/LIKE/temp/flex
+contexts, names, defaults, references, check expressions, and clause order.
+Only add custom nodes for demonstrable information loss. Update the coverage
+row to Semantic or Partial with named residuals.
+
+**Explicit exclusions.** Referential existence, type compatibility, uniqueness,
+volatility, enforcement state, and dependency checks.
+
+**Primary sources.** The [CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/)
+subpages for column definitions, column constraints, and table constraints.
+
+**Completion record.** Re-audited the column-definition, column-constraint,
+table-constraint, and admin constraints-guide pages against current canonical
+SQLGlot behavior. The prior "Generic" status understated both gaps and
+un-Vertica-documented Postgres leakage: `ENABLED`/`DISABLED` enforcement on
+`PRIMARY KEY`/`UNIQUE`/`CHECK`, `SET USING`, and `DEFAULT USING` did not parse
+at all; `AUTO_INCREMENT`/`IDENTITY` silently dropped its cache-size argument
+and generated Postgres's unrelated `GENERATED ... AS IDENTITY` syntax; and the
+inherited Postgres grammar accepted undocumented `ON DELETE`/`UPDATE`,
+`MATCH`, `DEFERRABLE`, `INCLUDE`, `GENERATED AS IDENTITY`, `CHARACTER SET`,
+`COLLATE`, `COMMENT`, `EXCLUDE`, `PERIOD`, multi-kind named table constraints,
+and interleaved column-definition/table-constraint order. `CONSTRAINT_PARSERS`
+is now an explicit allowlist (not spread from Postgres); every other inherited
+keyword fails through a natural leftover-token `ParseError`. New
+`VerticaIdentityColumnConstraint`, `SetUsingColumnConstraint`, and
+`DefaultUsingColumnConstraint` nodes model syntax with no canonical
+equivalent. `PRIMARY KEY`/`UNIQUE`/`CHECK` reuse their canonical nodes when no
+enforcement marker is written, keeping bare constraints portable to foreign
+dialects, and switch to detached (not subclassed) `VerticaPrimaryKeyColumnConstraint`/
+`VerticaUniqueColumnConstraint`/`VerticaPrimaryKey`/`VerticaCheckColumnConstraint`
+nodes once a marker is present; testing proved detachment necessary; because
+the canonical `CheckColumnConstraint.enforced` field already means MySQL
+`ENFORCED`, and because SQLite's generator structurally rewrites plain
+`exp.PrimaryKey` by `isinstance` before per-node dispatch, a subclass let a
+foreign generator reinterpret or silently drop Vertica's marker instead of
+failing atomically — a real, demonstrated leak, not a hypothetical one. Table-
+constraint dispatch is now an exclusive one-of-four parser; column-level
+`CONSTRAINT` naming is restricted to `CHECK`/`PRIMARY KEY`/`REFERENCES`/`UNIQUE`;
+column-level `REFERENCES` is capped at one column. A same-statement pass
+enforces column-definitions-before-table-constraints order, single
+`PRIMARY KEY`/`AUTO_INCREMENT`/`IDENTITY` cardinality, temporary-table
+exclusion of `AUTO_INCREMENT`/`IDENTITY`, `DEFAULT`/`SET USING`
+non-repetition and `DEFAULT USING` exclusivity, and the documented
+single-SELECT-statement/temporary-table-subquery limits on `DEFAULT`/
+`SET USING`/`DEFAULT USING`. Proving these restrictions at every `ErrorLevel`
+surfaced a latent, pre-existing defect: the CREATE TABLE definition/CTAS/LIKE
+dispatch called the plain, level-dependent `raise_error` immediately before an
+`assert ... is not None`, so at `RAISE`/`WARN`/`IGNORE` several negatives could
+reach the assert without having raised and crash with `AssertionError` instead
+of `ParseError`; every call site in that dispatch now uses the same
+guaranteed-raise wrapper already established for other statement families.
+The re-opened 26.2 column-constraint page's own formal grammar has an internal
+inconsistency: the `PRIMARY KEY`/`REFERENCES` alternative is missing the `|`
+that separates every other alternative in the same production, unlike the
+table-constraint page's clean four-way alternation; per the plan's source
+policy this is recorded rather than resolved by guessing, and `PRIMARY KEY`
+and `REFERENCES` are parsed as separate, independently optional pieces,
+consistent with the surrounding prose and every worked example. CHECK
+expression content restrictions (subqueries, aggregates, window functions,
+meta-functions, epoch-column/other-table references) and its Boolean-return
+requirement remain a named server-side residual per the task's own exclusions,
+along with referential existence, type compatibility (including
+collection-typed key columns), same-database name uniqueness, unspecified
+enforcement state, and dependency effects. Native flex-table definition
+parsing is unaffected and remains an opaque `Command` pending P16. The focused
+P15 suite passed 188 tests. The default CPython 3.12.6 gate passed 4861 tests
+at 93.24% branch coverage; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 4861 tests, with 3.15
+treating deprecations as errors. Ruff, formatting, strict mypy, sdist/wheel
+build, clean force-install, `pip check`, and installed-wheel entry-point/
+CREATE TABLE constraint round-trip smoke passed.
