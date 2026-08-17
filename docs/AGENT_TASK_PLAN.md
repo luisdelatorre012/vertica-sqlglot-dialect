@@ -53,6 +53,10 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   `DONE` before any P task is eligible.
 - Completed **Q01 — scoped temporary CTAS acceptance**. Q02 is the
   lowest-numbered remaining task.
+- On 2026-08-16 the embedded foreign-property `KeyError` gap recorded by
+  Q01 was scheduled as new task Q05, and the acceptance gate was renumbered
+  Q05 → Q06 before any gate work began; no completion record references the
+  old gate number.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Installed local Python runtimes
@@ -183,11 +187,12 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q02 | TODO   | SELECT INTO TABLE clause conformance          | —                   | `feat: model select into table targets`                 |
 | Q03 | TODO   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
 | Q04 | TODO   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
-| Q05 | TODO   | Milestone 1 acceptance gate                   | Q01–Q04             | `test: certify milestone one analysis surface`          |
+| Q05 | TODO   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
+| Q06 | TODO   | Milestone 1 acceptance gate                   | Q01–Q05             | `test: certify milestone one analysis surface`          |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred until Q05 is `DONE`. Task numbering, dependencies, and
+Deferred until Q06 is `DONE`. Task numbering, dependencies, and
 specifications are intentionally unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
@@ -223,7 +228,7 @@ specifications are intentionally unchanged from the prior plan revision.
 2. If a task is `IN_PROGRESS`, resume it. Otherwise select the next eligible
    task with milestone precedence: while any Milestone 1 (`Q`-series) task is
    not `DONE`, only `Q` tasks are eligible; Milestone 2 (`P`-series) tasks
-   become eligible only after Q05 is `DONE`. Within the active milestone,
+   become eligible only after Q06 is `DONE`. Within the active milestone,
    select the lowest-numbered `TODO` task whose dependencies are all `DONE`,
    change it to `IN_PROGRESS` in both the dashboard and its detail heading,
    and do no other task.
@@ -241,7 +246,13 @@ specifications are intentionally unchanged from the prior plan revision.
    already-documented behavior or fail closed when they are recognized members
    of the newly semantic family.
 6. Run the common release gate and all task-specific tests. Fix failures within
-   scope; do not begin the next task.
+   scope; do not begin the next task. If the gate is blocked by a defect in
+   shared release infrastructure that would block every task (as Q01 found
+   with the release driver's task-ID pattern), fix that infrastructure within
+   the task and record it. If testing exposes a cross-cutting product defect
+   beyond the task's scope, record it in the completion record and the
+   relevant policy or architecture notes, and propose it as its own bounded
+   task rather than expanding the current one.
 7. Update the coverage matrix, roadmap, sources, architecture, and changelog as
    applicable. Change this task to `DONE`, update the dashboard, and add a short
    completion record with test counts and any deliberate boundary.
@@ -297,7 +308,8 @@ These rules apply to every implementation task:
   do not treat the generic sweep as proof for a `Property` subclass, and do
   not assume `KeyError` from a new feature's foreign-generation test is a
   regression it introduced without first checking whether the same property
-  already crashes the same way in its pre-existing context.
+  already crashes the same way in its pre-existing context. Closing this gap
+  is scheduled as task Q05.
 - Recognized malformed Vertica syntax must raise `ParseError`; it must not fall
   back to `exp.Command`, truncate a tail, or emit a warning and partial AST at
   any `ErrorLevel`.
@@ -434,10 +446,11 @@ active backlog starts at the Milestone 1 section that follows.
 
 ## Detailed tasks — Milestone 1: analysis parsing surface
 
-These five bounded tasks close the verified gaps between the completed
-foundation and the milestone goal: parsing, analyzing, and regenerating
-`SELECT`/CTE/temporary-table workloads. No database-management capability is
-in scope in this milestone.
+These six bounded tasks close the verified gaps between the completed
+foundation and the milestone goal — parsing, analyzing, and regenerating
+`SELECT`/CTE/temporary-table workloads — and retire the one recorded
+cross-cutting policy violation inside that surface (Q05). No
+database-management capability is in scope in this milestone.
 
 ### Q01 — scoped temporary CTAS acceptance — `DONE`
 
@@ -628,8 +641,9 @@ positions. Promote or demote coverage statuses only with AST evidence, and
 record named residuals rather than guessing.
 
 **Explicit exclusions.** TIMESERIES/MATCH/INTERPOLATE (already Partial with
-server-side residuals), structured hints (already covered), flex map
-functions (Milestone 2, P18), and any new statement family.
+server-side residuals), structured hints (already covered), the INTO TABLE
+clause page (Q02's contract), flex map functions (Milestone 2, P18), and
+any new statement family.
 
 **Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
 and its clause subpages, including the WITH clause documentation.
@@ -644,7 +658,77 @@ row's reserved-word collision note.
 
 **Completion record.** Pending.
 
-### Q05 — Milestone 1 acceptance gate — `TODO`
+### Q05 — foreign embedded-property atomicity — `TODO`
+
+**Outcome.** Close the cross-cutting gap recorded by Q01: a custom Vertica
+table `Property` embedded in a real `exp.Properties` list must fail in
+foreign dialects with an intended, tested contract instead of raw
+`KeyError`, before the milestone gate certifies the temporary-table surface
+that exposes it.
+
+**Required work.** Audit every `exp.Property` subclass in
+`src/sqlglot_vertica/expressions.py` (15 as of 2026-08-16) against the four
+release-gate foreign dialects (PostgreSQL, DuckDB, MySQL, SQLite). Foreign
+generators copy `PROPERTIES_LOCATION` per class at class-creation time and
+SQLGlot lazy-loads dialect modules, so prove the chosen registration
+mechanism reaches every foreign generator under both import orders
+(Vertica-first and foreign-first). Deliver exactly one of two contracts and
+record the choice:
+
+- **All-level parity (preferred).** The established custom-node contract —
+  raised failure at `RAISE`, `WARN`, and `IGNORE`, nothing dropped, exactly
+  as `vexp.DropViews` already fails against foreign dialects — if
+  achievable without changing shared upstream machinery's behavior for
+  non-Vertica trees.
+- **Upstream property semantics (fallback).** Register
+  `exp.Properties.Location.UNSUPPORTED` in every foreign generator:
+  `UnsupportedError` at `RAISE`, warn-and-drop at `WARN`, silent drop at
+  `IGNORE`. If chosen, amend the custom-node policy bullet above to scope
+  its never-drop sentence and record the deviation as a deliberate
+  boundary.
+
+Registering a real location such as `POST_SCHEMA` is prohibited: the
+foreign generic property renderer then emits corrupt `None=` SQL at
+`WARN`/`IGNORE`. Update the pinned `KeyError` regressions (the
+`locate_properties` block in `tests/test_create_table.py` and any sibling
+pins) to the new contract. Add an introspective sweep that enumerates the
+`vexp` `Property` subclasses — so a future property cannot silently
+reintroduce the gap — plus embedded-context tests (definition form, CTAS,
+temporary tables) across all four dialects at every `unsupported_level`.
+Vertica-dialect generation must be byte-identical before and after. Update
+the AST-policy bullet in this file, `ARCHITECTURE.md`'s AST-policy section,
+and any coverage note that documents the `KeyError` behavior.
+
+**Stop condition.** If neither contract is deliverable plugin-side without
+patching upstream behavior for non-Vertica trees, mark this task `BLOCKED`
+with the audit evidence and keep the pinned `KeyError` tests; do not ship
+the corrupt-output registration or a partial dialect subset.
+
+**Explicit exclusions.** Canonical properties (for example
+`GlobalProperty`) keep their existing foreign behavior; no foreign
+rendering or safe lowering of Vertica properties; no SQLGlot dependency or
+vendoring changes; custom non-property nodes already satisfy the contract
+and must not change.
+
+**Primary sources.** The installed SQLGlot 30.13 sources —
+`sqlglot.generator.Generator.locate_properties` and the per-dialect
+`PROPERTIES_LOCATION` copies — read per this plan's source-reading section,
+plus `ARCHITECTURE.md`'s AST-policy section. No OpenText page governs this
+task.
+
+**Implementation pointers (non-normative, verified 2026-08-16).**
+Reproduction: generating `CREATE TABLE t INCLUDE PRIVILEGES AS SELECT 1 AS
+id` (parsed as Vertica) against `postgres` raises `KeyError` at every
+`unsupported_level`. The parity target: `DROP VIEW a, b`, whose
+`vexp.DropViews` root raises `ValueError("Unsupported expression type
+DropViews")` against foreign dialects at every level. The plugin's own
+registration precedent is the
+`PROPERTIES_LOCATION: t.ClassVar = {**PostgresGenerator.PROPERTIES_LOCATION,
+…}` spread near the top of `generator.py`.
+
+**Completion record.** Pending.
+
+### Q06 — Milestone 1 acceptance gate — `TODO`
 
 **Outcome.** Prove the analysis surface end to end on realistic
 multi-statement workloads, update the contract documents, and certify
@@ -658,9 +742,10 @@ cleanup. Assert `sqlglot.parse` multi-statement boundaries, compact and
 pretty round-trips, `dump()`/`Expression.load()` stability, and optimizer
 traversal — qualification plus a column-level lineage smoke across
 CTE/temporary-table chains, because downstream analysis depends on it.
-Update `docs/COVERAGE.md` for every row Q01–Q04 changed (the SELECT/CTE
-row's corpus evidence, the INTO TABLE contract, DROP TABLE, and the
-scoped-temporary-CTAS boundary note), record the milestone in
+Update `docs/COVERAGE.md` for every row Q01–Q05 changed (the SELECT/CTE
+row's corpus evidence, the INTO TABLE contract, DROP TABLE, the
+scoped-temporary-CTAS boundary note, and Q05's foreign-generation
+contract), record the milestone in
 `docs/ROADMAP.md`, and mark Milestone 1 complete in this plan's Current
 state section.
 
@@ -680,7 +765,7 @@ exact.
 
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 
-Every Milestone 2 task is deferred until Q05 is `DONE`. The detailed P16–P35
+Every Milestone 2 task is deferred until Q06 is `DONE`. The detailed P16–P35
 specifications — outcome, required work, exclusions, primary sources, and
 completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

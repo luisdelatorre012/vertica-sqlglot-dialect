@@ -25,10 +25,13 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   surface; parser probes verified three remaining gaps, now tasks Q01–Q03
   (scoped temporary CTAS, the `SELECT … INTO [TABLE]` clause including its
   temporary/`ON COMMIT` forms, and multi-target `DROP TABLE`), followed by
-  the long-planned official query corpus (Q04) and an end-to-end acceptance
-  gate with a lineage smoke (Q05). Q01 is complete: scoped temporary CTAS now
-  shares the unscoped contract, including the LOCAL/`DISK_QUOTA` restriction
-  extended from the definition form. Q02–Q05 remain.
+  the long-planned official query corpus (Q04), a fix making foreign
+  generation of embedded Vertica table properties fail with an intended
+  contract instead of raw `KeyError` (Q05, scheduled 2026-08-16 from Q01's
+  completion record), and an end-to-end acceptance gate with a lineage smoke
+  (Q06). Q01 is complete: scoped temporary CTAS now shares the unscoped
+  contract, including the LOCAL/`DISK_QUOTA` restriction extended from the
+  definition form. Q02–Q06 remain.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
@@ -146,7 +149,7 @@ Implemented catalog P0:
   left as a named server-side residual.
 
 Remaining (all Milestone 2, deferred behind the Milestone 1 analysis-surface
-tasks Q01–Q05):
+tasks Q01–Q06):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);

@@ -23,7 +23,7 @@ archive only when the selected task explicitly requires that history.
 - Resume the single `IN_PROGRESS` task. If none exists, select with milestone
   precedence: while any Milestone 1 (`Q`-series) task is not `DONE`, only `Q`
   tasks are eligible, and Milestone 2 (`P`-series) tasks become eligible only
-  after Q05 is `DONE`. Within the active milestone, take the lowest-numbered
+  after Q06 is `DONE`. Within the active milestone, take the lowest-numbered
   `TODO` task whose dependencies are `DONE`.
 - Complete exactly one task per invocation. Do not begin, research, or partially
   implement the following task.
