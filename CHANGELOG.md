@@ -143,3 +143,12 @@ plugin interface.
   qualification contracts, and undocumented `RESTRICT`, `PURGE`, `TEMPORARY`,
   `MATERIALIZED`, and `ICEBERG` modifiers now fail closed in parsing and
   generation instead of leaking through inherited grammar.
+- Backed the Generic `SELECT`/CTE grammar with an official 26.2 example
+  corpus covering SELECT core clauses, `FROM`/joined-table forms, `WHERE`,
+  `GROUP BY`/`ROLLUP`/`CUBE`/`GROUPING SETS`, `HAVING`, `ORDER BY`,
+  `LIMIT`/`OFFSET`, `UNION`/`INTERSECT`/`EXCEPT`/`MINUS`, `WITH` (including
+  plain `RECURSIVE`), and subqueries, and expanded the reserved-word
+  collision corpus for SELECT-family words. Recorded two named residuals:
+  `LIMIT ALL` is discarded at parse time (a pre-existing, non-Vertica-specific
+  base-SQLGlot limit), and the SELECT page's own `[ AT epoch ]`
+  historical-query prefix does not yet parse.

@@ -19,7 +19,7 @@ Status meanings:
 
 | Feature | Status | Regression surface and remaining work |
 | --- | --- | --- |
-| Quoted/unquoted identifiers and three-part names | Generic | Core query, projection, COPY, and table fixtures; reserved-word collision corpus is being expanded |
+| Quoted/unquoted identifiers and three-part names | Generic | Core query, projection, COPY, and table fixtures; reserved-word collision corpus covers MATCH/TIMESERIES/table-property words plus SELECT-family words (`AT`, `EPOCH`, `TIME`, `LATEST`, `ROLLUP`, `CUBE`, `SETS`, `GROUPING`, `OFFSET`) as column, table, and CTE identifiers |
 | Comments and optimizer hints | Partial | SELECT, WITH, table, JOIN, EXPLAIN, INSERT/UPDATE/DELETE/MERGE, and COPY hints are structured with exact-placement regressions; directed-query constant annotations are typed postfix wrappers with tokenizer provenance and fail-closed placement checks; ordinary comments remain best-effort |
 | String, numeric, Boolean, NULL, binary, and heredoc literals | Generic | COPY additionally covers `E'…'` record terminators |
 | Numeric, comparison, Boolean, bitwise, and concatenation operators | Semantic | Includes numeric `/`, integer `//`, prefix/postfix factorial, `@`, `|/`, and `||/` |
@@ -39,14 +39,14 @@ Status meanings:
 
 | Feature | Status | Regression surface and remaining work |
 | --- | --- | --- |
-| `SELECT`, joins, subqueries, CTEs, set operations | Generic | Canonical SQLGlot AST; additional official-example corpus planned |
+| `SELECT`, joins, subqueries, CTEs, set operations | Generic | Canonical SQLGlot AST backed by an official 26.2 example corpus covering SELECT core (`ALL`/`DISTINCT`/`MATCH_COLUMNS`/`FOR UPDATE`), `FROM`/`TABLESAMPLE`/joined-table forms (`INNER`/`LEFT`/`RIGHT`/`FULL [OUTER]`/`NATURAL`/`CROSS`), `WHERE`, `GROUP BY`/`ROLLUP`/`CUBE`/`GROUPING SETS`, `HAVING`, `ORDER BY`, `UNION`/`INTERSECT`/`EXCEPT`/`MINUS`, `WITH` (plain, multiple, and plain `RECURSIVE`), and WHERE/FROM/HAVING subqueries; the SELECT page's own `[ AT epoch ]` historical-query prefix has no worked example on any SELECT-family page and does not parse today, scheduled as Q06 |
 | SELECT `INTO [TABLE]` targets | Semantic | Typed `SelectInto` root with an `IntoTableClause` target preserves `GLOBAL`/`LOCAL` scope, `TEMP`/`TEMPORARY` spelling, and `ON COMMIT` exactly, and always regenerates the optional `TABLE` keyword; permanent targets accept namespace/database qualification (the two are syntactically identical and resolved server-side); PostgreSQL `STRICT`/`UNLOGGED`/variable-list forms, scope without `TEMP`, permanent `ON COMMIT`, column lists, and over-qualified names fail closed at every error level; foreign generation fails atomically instead of inheriting SQLGlot's silent `SUPPORTS_SELECT_INTO` CTAS rewrite, while foreign-parsed canonical `exp.Into` still renders for the unscoped forms Vertica accepts |
 | Window functions and ordered aggregates | Partial | In-parentheses value-function null treatment and `PARTITION BEST`/`NODES`/`ROW`/`LEFT JOIN` are semantic; Vertica NULL default ordering is type-dependent and cannot be inferred without schema types |
 | `TIMESERIES` | Partial | Clause and TS null-treatment syntax are semantic; server-only projection/GROUP/HAVING and interval restrictions remain documented negatives |
 | Event-series `INTERPOLATE` joins | Partial | Predicate syntax is semantic; join-location and single-predicate semantic restrictions remain |
 | `MATCH` event patterns | Partial | Partition/order/DEFINE/pattern/row mode and regex text are semantic; duplicate/undefined-event and query-shape validation remain |
 | Partitioned `LIMIT … OVER` | Semantic | Optimizer-visible `exp.Limit` subclass; `PARTITION BY` and `ORDER BY` required |
-| Ordinary `LIMIT`, `OFFSET`, and `FETCH` | Generic | `LIMIT ALL` spelling is not guaranteed to be lossless |
+| Ordinary `LIMIT`, `OFFSET`, and `FETCH` | Generic | Official-example corpus covers `OFFSET` and combined `LIMIT … OFFSET …`; `LIMIT ALL` parses but the clause is discarded at parse time (`args["limit"]` is `None`), reproduced identically under plain `postgres`, so this is a pre-existing base-SQLGlot limit rather than a Vertica-specific defect |
 | `INSERT` | Semantic | Canonical `exp.Insert`; mandatory `INTO`, table/column targets, `DEFAULT VALUES`, multi-row `VALUES`, query and target-following `WITH` sources, labels, and conflicting foreign clauses are validated |
 | `UPDATE` | Semantic | Canonical `exp.Update`; aliases, column aliases, `DEFAULT`, joins, `FROM`, and predicates are preserved; SET subqueries and foreign tail clauses are rejected; `FROM DEFAULT … JOIN` uses a non-table relation leaf |
 | `DELETE` | Semantic | Canonical `exp.Delete`; labels and subquery predicates are preserved while aliases, joined/`USING` targets, leading `WITH`, `RETURNING`, ordering, and limits are rejected |

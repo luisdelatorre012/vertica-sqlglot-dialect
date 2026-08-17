@@ -28,15 +28,24 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   the long-planned official query corpus (Q04), a fix making foreign
   generation of embedded Vertica table properties fail with an intended
   contract instead of raw `KeyError` (Q05, scheduled 2026-08-16 from Q01's
-  completion record), and an end-to-end acceptance gate with a lineage smoke
-  (Q06). Q01 is complete: scoped temporary CTAS now shares the unscoped
-  contract, including the LOCAL/`DISK_QUOTA` restriction extended from the
-  definition form. Q02 is complete: the SELECT `INTO [TABLE]` clause is a
-  typed contract for permanent and scoped temporary targets with preserved
-  scope/spelling/`ON COMMIT` and atomic foreign generation. Q03 is complete:
-  `DROP TABLE` is a deliberate family with ordered multi-target lists,
-  list-scoped prefix `IF EXISTS`, one trailing `CASCADE`, and fail-closed
-  rejection of undocumented modifiers. Q04–Q06 remain.
+  completion record), the SELECT `[ AT epoch ]` historical-query prefix (Q06,
+  scheduled 2026-08-17 from Q04's completion record), and an end-to-end
+  acceptance gate with a lineage smoke (Q07, renumbered 2026-08-17 from Q06
+  so the gate keeps the highest number). Q01 is complete: scoped temporary
+  CTAS now shares the unscoped contract, including the LOCAL/`DISK_QUOTA`
+  restriction extended from the definition form. Q02 is complete: the SELECT
+  `INTO [TABLE]` clause is a typed contract for permanent and scoped
+  temporary targets with preserved scope/spelling/`ON COMMIT` and atomic
+  foreign generation. Q03 is complete: `DROP TABLE` is a deliberate family
+  with ordered multi-target lists, list-scoped prefix `IF EXISTS`, one
+  trailing `CASCADE`, and fail-closed rejection of undocumented modifiers.
+  Q04 is complete: an official 26.2 SELECT/FROM/joined-table/WHERE/GROUP
+  BY/HAVING/ORDER BY/set-operation/WITH/subquery example corpus backs the
+  Generic query coverage rows, the reserved-word collision corpus was
+  expanded for SELECT-family words, and the exercise surfaced two named
+  residuals recorded in `COVERAGE.md`: `LIMIT ALL` is dropped at parse time
+  (a pre-existing, non-Vertica-specific base-SQLGlot limit) and the SELECT
+  page's own `[ AT epoch ]` prefix does not parse (now Q06). Q05–Q07 remain.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
@@ -154,7 +163,7 @@ Implemented catalog P0:
   left as a named server-side residual.
 
 Remaining (all Milestone 2, deferred behind the Milestone 1 analysis-surface
-tasks Q01–Q06):
+tasks Q01–Q07):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);

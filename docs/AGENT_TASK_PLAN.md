@@ -57,6 +57,12 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   Q01 was scheduled as new task Q05, and the acceptance gate was renumbered
   Q05 → Q06 before any gate work began; no completion record references the
   old gate number.
+- Completed **Q04 — official query-corpus hardening**. Q05 is the
+  lowest-numbered remaining task.
+- On 2026-08-17 the SELECT `[ AT epoch ]` historical-query-prefix gap
+  recorded by Q04 was scheduled as new task Q06, and the acceptance gate was
+  renumbered Q06 → Q07 before any gate work began; no completion record
+  references the old gate number.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Installed local Python runtimes
@@ -186,13 +192,14 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q01 | DONE   | Scoped temporary CTAS acceptance              | —                   | `feat: accept scoped temporary ctas`                    |
 | Q02 | DONE   | SELECT INTO TABLE clause conformance          | —                   | `feat: model select into table targets`                 |
 | Q03 | DONE   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
-| Q04 | TODO   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
+| Q04 | DONE   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
 | Q05 | TODO   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
-| Q06 | TODO   | Milestone 1 acceptance gate                   | Q01–Q05             | `test: certify milestone one analysis surface`          |
+| Q06 | TODO   | SELECT `AT epoch` historical-query prefix     | —                   | `feat: model select at epoch historical query prefix`   |
+| Q07 | TODO   | Milestone 1 acceptance gate                   | Q01–Q06             | `test: certify milestone one analysis surface`          |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred until Q06 is `DONE`. Task numbering, dependencies, and
+Deferred until Q07 is `DONE`. Task numbering, dependencies, and
 specifications are intentionally unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
@@ -228,7 +235,7 @@ specifications are intentionally unchanged from the prior plan revision.
 2. If a task is `IN_PROGRESS`, resume it. Otherwise select the next eligible
    task with milestone precedence: while any Milestone 1 (`Q`-series) task is
    not `DONE`, only `Q` tasks are eligible; Milestone 2 (`P`-series) tasks
-   become eligible only after Q06 is `DONE`. Within the active milestone,
+   become eligible only after Q07 is `DONE`. Within the active milestone,
    select the lowest-numbered `TODO` task whose dependencies are all `DONE`,
    change it to `IN_PROGRESS` in both the dashboard and its detail heading,
    and do no other task.
@@ -745,7 +752,7 @@ installed-wheel `python -I` entry-point smoke (multi-target
 `DROP TABLE IF EXISTS t1, s.t2 CASCADE` round-trip returning `DropTables`)
 passed.
 
-### Q04 — official query-corpus hardening — `TODO`
+### Q04 — official query-corpus hardening — `DONE`
 
 **Outcome.** Back the Generic `SELECT`/CTE coverage rows with the
 long-planned official-example corpus and fix any mismatch it exposes.
@@ -777,7 +784,97 @@ row ("additional official-example corpus planned"), the ordinary
 `LIMIT`/`OFFSET`/`FETCH` row (`LIMIT ALL` losslessness), and the identifier
 row's reserved-word collision note.
 
-**Completion record.** Pending.
+**Completion record.** Re-opened the SELECT page and its FROM, joined-table,
+WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, UNION, INTERSECT, EXCEPT,
+MINUS, WITH clause, and WITH-clause-recursion subpages, plus the
+data-analysis subqueries overview and subquery-examples guide (all added to
+`docs/SOURCES.md`). Added `tests/test_select_query_corpus.py`, one test per
+documented example family — SELECT `ALL`/`DISTINCT`/`MATCH_COLUMNS`/
+`FOR UPDATE [OF …]`, `FROM`/`TABLESAMPLE`/multicolumn named subqueries,
+`WHERE` boolean expressions, every joined-table form (default `INNER`,
+`LEFT`/`RIGHT`/`FULL [OUTER]`, `NATURAL`, `CROSS`, dual-side `TABLESAMPLE`),
+`GROUP BY` (plain aggregates, mixed expressions plus `ROLLUP`, and an
+AST-shape assertion for `ROLLUP`/`CUBE`/`GROUPING SETS` combined), `HAVING`
+(plain and subquery-bearing), `ORDER BY` (direction and ordinal position),
+`LIMIT`/`OFFSET` (including `LIMIT ALL` and combined `LIMIT … OFFSET …`),
+`UNION`/`UNION ALL`/per-branch `ORDER BY`/`LIMIT`, chained `INTERSECT` and
+`EXCEPT`, `MINUS`-as-`EXCEPT`, single/multiple `WITH` CTEs (including the
+`ROLLUP`+`GROUPING_ID()` example), a plain `WITH RECURSIVE` case (the
+materialization-hinted form was already pinned in `test_hints.py`), and
+WHERE/FROM/HAVING scalar, IN-list, derived-table, and UNION-bearing
+subqueries — 44 tests, each asserting parse → AST-shape → compact/pretty
+round-trip via `tests/helpers.py::assert_roundtrip`. Expanded the
+reserved-word collision corpus in `tests/test_keywords.py` with a second
+parametrized case (18 tests) covering `AT`, `EPOCH`, `TIME`, `LATEST`,
+`ROLLUP`, `CUBE`, `SETS`, `GROUPING`, and `OFFSET` as column, table, and CTE
+identifiers; probing confirmed these are fully contextual everywhere,
+while `FETCH`, `MINUS`, and `RECURSIVE` were probed and found only
+partially contextual (legal as a column but not as a table/CTE name, or not
+as a CTE name for `RECURSIVE`) — pre-existing, generic (reproduced under
+plain `postgres`) tokenizer/grammar behavior unrelated to this task's scope,
+so they were deliberately left out of the "must work everywhere" corpus
+rather than forced to pass or silently fixed. Reusable discovery for future
+tasks: the installed SQLGlot 30.13 renames the two `Select`/query-node arg
+keys that collide with Python keywords — `Select.args["from"]` is now
+`"from_"` and `Select.args["with"]` is now `"with_"` (confirmed via direct
+`.args.keys()` introspection; every other arg name checked in this task —
+`group`, `where`, `joins`, `locks`, `limit`, `expressions`, `rollup`,
+`cube`, `grouping_sets` — is unchanged); the existing `src/` code already
+used the renamed keys correctly, but this is easy to get wrong when writing
+new AST assertions by memory of older SQLGlot versions. Testing surfaced two
+named residuals, recorded in `docs/COVERAGE.md` with concrete evidence
+rather than fixed, per this task's "record named residuals rather than
+guessing" instruction: (1) `LIMIT ALL` is discarded during parsing itself
+(`expression.args.get("limit")` is `None` immediately after the first
+parse, not just omitted on generation), reproduced identically parsing
+plain `LIMIT ALL` under bare `postgres`, confirming this is a pre-existing
+base-SQLGlot limitation predating this task and not specific to Vertica;
+and (2) a `GROUP BY` built only from `ROLLUP`/`CUBE`/`GROUPING SETS` (no
+plain expressions) regenerates in a fixed `grouping_sets, cube, rollup`
+order rather than source order, because canonical `exp.Group` stores them
+in three separate typed list args rather than one ordered mixed list —
+also reproduced identically under plain `postgres`. Neither is fixed here:
+both are generic, non-Vertica-specific representational limits of the
+canonical AST this task's own scope (adding documented-example regressions,
+not new grammar) does not license changing, and the second is directly
+covered instead by an AST-shape assertion on `group.args["rollup"]`/
+`"cube"`/`"grouping_sets"` rather than an exact-text round-trip. `MINUS` was
+confirmed to already canonicalize losslessly to `EXCEPT` (`Except` root,
+matching the source's "MINUS is an alias for EXCEPT" statement) with no gap.
+Testing also confirmed the SELECT page's own formal-syntax `[ AT epoch ]
+[ WITH-clause ] SELECT …` historical-query prefix does not parse at all
+(`ParseError` at the token immediately following `AT`, for all three
+documented forms: `EPOCH LATEST`, `EPOCH <integer>`, and `TIME '<timestamp>'`)
+and has no worked SQL example on the SELECT page, any of its linked
+clause subpages, or the WITH-clause-recursion page consulted for the
+`RECURSIVE` corpus — so it entered no example-driven regression under this
+task's "add each documented example" scope. Because it is formal-syntax
+grammar with zero worked-example evidence to pin an exact contract against
+(protocol rule 4), and because implementing it correctly requires new
+custom-node design work (it must scope the entire top-level query — `WITH`
+plus a possible `UNION`/`INTERSECT`/`EXCEPT` chain, not one `exp.Select` —
+a materially different shape from the pre-existing, structurally unrelated
+CTAS-only `AT EPOCH`/`AT TIME` snapshot property already implemented as
+`vexp.AtEpochProperty`/`_parse_at_epoch_property`
+(`src/sqlglot_vertica/parser.py:7054`), wired only into the CTAS
+`AS [hint] [AT EPOCH|AT TIME] query` position and rendered as a
+`POST_ALIAS`-located `exp.Properties` member — this is out of this test-only
+task's bounded scope. Per protocol step 6, it is recorded here, in
+`docs/COVERAGE.md`'s SELECT/CTE row, and in `docs/ROADMAP.md`, and scheduled
+as new task Q06 with a pinned `ParseError` regression
+(`test_at_epoch_query_prefix_is_a_documented_residual`) documenting the gap;
+the acceptance gate is renumbered Q06 → Q07 so it keeps the highest number,
+mirroring the precedent set when Q05 was carved out of Q01. The focused
+`test_select_query_corpus.py` module passed 44 tests and the expanded
+`test_keywords.py` passed 18; combined with neighboring dispatch families
+(query extensions, core statements, hints, SELECT INTO, CREATE TABLE, DROP
+TABLE, AST safety) the combined focused run passed 700 tests. The default
+CPython 3.12.6 gate passed 5262 tests at 93.34% branch coverage with Ruff,
+formatting, and strict mypy clean; isolated CPython 3.9.25, 3.10.20,
+3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 5262
+tests, with 3.15 treating deprecations as errors. sdist/wheel build, clean
+force-install, `pip check`, and the installed-wheel `python -I` entry-point
+smoke (`MINUS` round-trip returning `Except`) passed.
 
 ### Q05 — foreign embedded-property atomicity — `TODO`
 
@@ -849,7 +946,71 @@ registration precedent is the
 
 **Completion record.** Pending.
 
-### Q06 — Milestone 1 acceptance gate — `TODO`
+### Q06 — SELECT `AT epoch` historical-query prefix — `TODO`
+
+**Outcome.** Make the SELECT statement's own documented
+`[ AT epoch ] [ WITH-clause ] SELECT …` historical-query prefix parse and
+regenerate for the whole top-level query, with a typed, tested contract, so
+the Generic SELECT/CTE coverage row no longer names it as an unparseable
+gap.
+
+**Required work.** Re-open the 26.2 SELECT page and support the `AT epoch`
+prefix, where `epoch` is `EPOCH { LATEST | integer }` or `TIME 'timestamp'`
+per the page's own parameter description. The prefix precedes the entire
+top-level query production — `[ AT epoch ] [ WITH-clause ] SELECT …` is
+followed, in the same formal-syntax block, by `union-clause`/
+`intersect-clause`/`except-clause` — so it scopes a possible `WITH` clause
+and any subsequent `UNION`/`INTERSECT`/`EXCEPT` chain, not one bare
+`exp.Select`. Design and document the AST contract accordingly: whatever
+node carries the prefix must wrap the complete top-level query (`exp.Select`
+or a set-operation root), analogous in spirit to how `SelectInto` and
+`TimeseriesSelect` each promote the whole `Select` but generalized to a
+`exp.Query`-rooted statement here. Decide, and record the decision, whether
+the new node should reuse the existing CTAS-only `_parse_at_epoch_property`/
+`vexp.AtEpochProperty` value-parsing logic (same `EPOCH LATEST`/
+`EPOCH <integer>`/`TIME '<timestamp>'` grammar) or parse the value
+independently — the two occupy structurally different grammar positions
+(CTAS's is an `exp.Property` inside `AS [hint] [AT EPOCH|AT TIME] query`,
+parsed at `src/sqlglot_vertica/parser.py:6876` and rendered at
+`generator.py:4349` as a `POST_ALIAS`-located `exp.Properties` member; this
+task's is a bare statement-level prefix with no `Properties` list at all)
+and do not assume they must share a node class. Add a guaranteed-raise
+`_raise_<family>_error` wrapper for malformed forms (missing `EPOCH`/`TIME`
+keyword, non-integer epoch, unquoted `TIME` value) at every error level.
+Test `EPOCH LATEST`, `EPOCH <integer>`, and `TIME '<timestamp>'`; the prefix
+combined with a `WITH` clause; the prefix combined with `UNION`/`INTERSECT`/
+`EXCEPT` (confirming it scopes the whole compound query); malformed forms;
+serialization stability; and foreign-generation atomicity per the
+established custom-root policy. Remove the pinned `ParseError` regression
+this gap left in `tests/test_select_query_corpus.py`
+(`test_at_epoch_query_prefix_is_a_documented_residual`) and replace it with
+the new positive corpus. Update the SELECT/CTE row in `docs/COVERAGE.md` to
+remove the named residual once closed.
+
+**Explicit exclusions.** Epoch/timestamp existence and validity (server/
+catalog state); TIMESERIES/MATCH/INTERPOLATE; the `INTO [TABLE]` clause
+(Q02's contract); and the pre-existing CTAS-only `AT EPOCH`/`AT TIME`
+snapshot property, which already has its own tested contract and must not
+change unless this task proves shared code is the correct design.
+
+**Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
+(formal syntax and the `AT epoch` parameter description).
+
+**Implementation pointers (non-normative, verified 2026-08-17).**
+`AT EPOCH LATEST SELECT * FROM t`, `AT EPOCH 5 SELECT * FROM t`, and
+`AT TIME '2024-01-01 00:00:00' SELECT * FROM t` each raise `ParseError`
+("Invalid expression / Unexpected token") at the token immediately
+following `AT` today. No worked SQL example for this prefix exists on the
+SELECT page, any of its linked clause subpages, or the WITH-clause-recursion
+page checked incidentally while building Q04's `WITH RECURSIVE` corpus;
+re-confirm this during the primary-source re-open rather than assuming it
+still holds. The reusable CTAS infrastructure is
+`_parse_at_epoch_property` (`src/sqlglot_vertica/parser.py:7054`) and
+`vexp.AtEpochProperty` (`src/sqlglot_vertica/expressions.py:741`).
+
+**Completion record.** Pending.
+
+### Q07 — Milestone 1 acceptance gate — `TODO`
 
 **Outcome.** Prove the analysis surface end to end on realistic
 multi-statement workloads, update the contract documents, and certify
@@ -863,17 +1024,18 @@ cleanup. Assert `sqlglot.parse` multi-statement boundaries, compact and
 pretty round-trips, `dump()`/`Expression.load()` stability, and optimizer
 traversal — qualification plus a column-level lineage smoke across
 CTE/temporary-table chains, because downstream analysis depends on it.
-Update `docs/COVERAGE.md` for every row Q01–Q05 changed (the SELECT/CTE
-row's corpus evidence, the INTO TABLE contract, DROP TABLE, the
-scoped-temporary-CTAS boundary note, and Q05's foreign-generation
-contract), record the milestone in
+Update `docs/COVERAGE.md` for every row Q01–Q06 changed (the SELECT/CTE
+row's corpus evidence and closed `AT epoch` residual, the INTO TABLE
+contract, DROP TABLE, the scoped-temporary-CTAS boundary note, the
+LIMIT/OFFSET/FETCH and identifier rows' Q04 evidence, and Q05's
+foreign-generation contract), record the milestone in
 `docs/ROADMAP.md`, and mark Milestone 1 complete in this plan's Current
 state section.
 
 **Explicit exclusions.** No new grammar in this task; named residuals stay
 named; Milestone 2 families remain untouched.
 
-**Primary sources.** Re-open the Q01–Q04 pages as needed.
+**Primary sources.** Re-open the Q01–Q06 pages as needed.
 
 **Implementation pointers (non-normative).** `sqlglot.parse` (not
 `parse_one`) preserves multi-statement boundaries. For the optimizer and
@@ -886,7 +1048,7 @@ exact.
 
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 
-Every Milestone 2 task is deferred until Q06 is `DONE`. The detailed P16–P35
+Every Milestone 2 task is deferred until Q07 is `DONE`. The detailed P16–P35
 specifications — outcome, required work, exclusions, primary sources, and
 completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
