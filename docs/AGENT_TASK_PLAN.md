@@ -75,6 +75,9 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   than a guaranteed-raise wrapper. This gap was scheduled as new task Q07,
   and the acceptance gate was renumbered Q07 → Q08 before any gate work
   began; no completion record references the old gate number.
+- Completed **Q07 — CTAS historical-snapshot guaranteed-raise conformance**.
+  Q08 is the lowest-numbered remaining task, and is the Milestone 1
+  acceptance gate.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Installed local Python runtimes
@@ -207,7 +210,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q04 | DONE   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
 | Q05 | DONE   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
 | Q06 | DONE   | SELECT `AT epoch` historical-query prefix     | —                   | `feat: model select at epoch historical query prefix`   |
-| Q07 | TODO   | CTAS historical-snapshot guaranteed-raise conformance | —            | `fix: harden ctas at epoch guaranteed raise`            |
+| Q07 | DONE   | CTAS historical-snapshot guaranteed-raise conformance | —            | `fix: harden ctas at epoch guaranteed raise`            |
 | Q08 | TODO   | Milestone 1 acceptance gate                   | Q01–Q07             | `test: certify milestone one analysis surface`          |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
@@ -1267,7 +1270,7 @@ at 93.38% branch coverage with Ruff, formatting, strict mypy, and
 `pip check`, and the installed-wheel `python -I` entry-point smoke
 (`AT EPOCH LATEST SELECT 1` round-trip returning `AtEpochQuery`) passed.
 
-### Q07 — CTAS historical-snapshot guaranteed-raise conformance — `TODO`
+### Q07 — CTAS historical-snapshot guaranteed-raise conformance — `DONE`
 
 **Outcome.** Make the CTAS-only `AT EPOCH`/`AT TIME` historical-snapshot
 property (`_parse_at_epoch_property`/`vexp.AtEpochProperty`) fail with
@@ -1316,7 +1319,88 @@ added an unrelated method earlier in `parser.py`, shifting it).
 established guaranteed-raise wrapper already used throughout the surrounding
 CTAS clause list for sibling malformed-clause cases.
 
-**Completion record.** Pending.
+**Completion record.** Confirmed the reported gap still held before touching
+code, and went further: probing all three malformed forms at all four error
+levels directly against the installed, unmodified package (rather than
+reasoning about it) showed the pre-fix defect was not one uniform failure but
+three different raw-Python outcomes, all wrong but each wrong differently,
+because `value` and `kind` end up in different binding states depending on
+which of the three `if`/`elif`/`else` branches runs and how far its own
+value-parser got before the bare `self.raise_error(...)` call: (1)
+`AT EPOCH 1.5` (`_parse_number()` still returns a bound, non-`None`
+non-integer `Literal`) raised `ParseError` correctly at `IMMEDIATE`/`RAISE`
+(the `RAISE` case only because a later top-level `check_errors()` call
+happens to catch the aggregated error before anything reads the stale
+`value`), but at `WARN`/`IGNORE` fell all the way through to a `return`,
+silently building an `AtEpochProperty` from the invalid `1.5` literal with no
+exception at all; (2) `AT TIME now` (`_parse_string()` returns bound `None`
+because `now` is not a string token) raised `ParseError` at `IMMEDIATE` but
+`AssertionError` at `RAISE`, `WARN`, and `IGNORE` alike, since
+`assert value is not None` fails synchronously the instant it runs,
+regardless of error level; (3) `AT SNAPSHOT 1` (the `else` branch assigns
+neither `value` nor `kind` at all) raised `ParseError` at `IMMEDIATE` but raw
+`UnboundLocalError` at `RAISE`/`WARN`/`IGNORE`, matching the plan's own
+implementation-pointers example exactly. Routed all three call sites through
+`_raise_create_table_error` (unconditional `self.raise_error(message)` then
+`check_errors()` at `RAISE` then an explicit `raise ParseError(message)` at
+`IGNORE`/`WARN`) exactly as the required work specified; no other change to
+the method. Because the wrapper never returns control to its caller at any
+error level (`IMMEDIATE` raises inside `raise_error` itself; `RAISE` raises
+from `check_errors()`; `IGNORE`/`WARN` raise from the wrapper's own trailing
+statement), none of the three post-call fall-through paths — the silent
+`return`, the `AssertionError`-raising `assert`, or the `UnboundLocalError`-
+raising read — can execute any more, independent of which binding state
+`value`/`kind` were left in; re-running the identical probe after the change
+showed all three malformed forms raising plain `ParseError` at all four
+levels, confirmed both standalone and, per the required work's explicit
+CTAS-position scope, across permanent, unscoped-temporary, and
+scoped-temporary (`LOCAL TEMPORARY`) CTAS (48 combinations: 3 forms × 4
+positions-inclusive-of-permanent × 4 levels, counting the standalone probe
+plus the position sweep). Added
+`test_ctas_at_epoch_malformed_forms_fail_closed_at_every_error_level` to
+`test_create_table.py`, a 36-case matrix (3 malformed forms × 3 CTAS
+positions [permanent, unscoped temporary, `LOCAL TEMPORARY`] × 4 error
+levels) asserting `ParseError` with the expected message at every cell,
+mirroring `test_at_epoch_query.py`'s own stacked-`parametrize` pattern for
+its sibling family's guaranteed-raise sweep
+(`test_recognized_invalid_at_epoch_query_fails_closed`). Confirmed the three
+pre-existing positive `AtEpochProperty` regressions (`EPOCH LATEST`,
+`EPOCH <integer>`, `TIME '<timestamp>'`, already covered across permanent,
+unscoped-temporary, and scoped-temporary CTAS by
+`test_create_table_as_historical_epoch_forms`,
+`test_create_table_as_full_physical_design`,
+`test_create_temporary_table_as`, and
+`test_create_scoped_temporary_table_as_full_physical_design`) still pass
+unmodified, and separately confirmed byte-identical Vertica generation for
+all three valid forms across all three CTAS positions by direct round-trip.
+Confirmed Q06's independent `AtEpochQuery` statement-level prefix — a
+structurally unrelated node with its own `_raise_at_epoch_query_error`
+wrapper — is untouched: its positive round-trip, its `properties`-vs-root
+dispatch-neighbor distinction from `AtEpochProperty`
+(`test_dispatch_neighbors_unchanged`), and its own malformed-prefix
+guaranteed-raise behavior at `WARN` all still hold. Updated the
+`CREATE TABLE AS`/temporary-tables and SELECT `[ AT epoch ]` rows in
+`docs/COVERAGE.md`, the Milestone 1 paragraph in `docs/ROADMAP.md`, added a
+paragraph to `docs/ARCHITECTURE.md` next to the existing `AtEpochQuery`/
+`AtEpochProperty` distinction documenting the fix and its precedent (P15's
+identical-shaped `AssertionError`-instead-of-`ParseError` fix for the CREATE
+TABLE definition/CTAS/LIKE dispatch), and added a `CHANGELOG.md` entry. No
+OpenText primary source governs this task (confirmed in the required-work
+text); `ARCHITECTURE.md`'s AST-policy section and this file's own
+guaranteed-raise policy bullet already specified the target contract and
+needed no correction, only conformance. The focused `test_create_table.py`
+module passed 122 tests (86 pre-existing plus the 36 new); combined with
+neighboring dispatch families (`test_at_epoch_query.py`, `test_ast_safety.py`,
+`test_select_query_corpus.py`, `test_foreign_property_atomicity.py`,
+`test_select_into.py`, `test_drop_table.py`, `test_schema_view.py`) the
+combined focused run passed 1,608. The default CPython 3.12.6 gate passed
+5,808 tests at 93.38% branch coverage with Ruff, formatting, strict mypy, and
+`git diff --check` clean; isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 5,808 tests, with 3.15
+treating deprecations as errors. sdist/wheel build, clean force-install,
+`pip check`, and the installed-wheel `python -I` entry-point smoke
+(`CREATE TABLE t AS AT EPOCH LATEST SELECT 1 AS id` round-trip returning
+canonical `Create`) passed.
 
 ### Q08 — Milestone 1 acceptance gate — `TODO`
 

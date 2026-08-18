@@ -157,6 +157,32 @@ instead of this wrapping pattern when full optimizer/lineage parity matters
 and the clause is genuinely `exp.Select`-only, as `SelectInto`'s own
 `test_optimizer_qualification_and_lineage` regression requires.
 
+The pre-existing, structurally unrelated CTAS-only `AtEpochProperty` snapshot
+property (`_parse_at_epoch_property`, wired only into the CTAS
+`AS [hint] [AT EPOCH|AT TIME] query` position) shares the same `EPOCH
+LATEST`/`EPOCH <integer>`/`TIME '<timestamp>'` value grammar as `AtEpochQuery`
+but not its parsing method, node class, or guaranteed-raise wrapper. Task Q07
+found and fixed a latent defect in that method's three malformed-value
+branches, the same shape P15 already fixed once for the CREATE TABLE
+definition/CTAS/LIKE dispatch (see the column-constraint discussion below):
+each branch called plain, level-dependent `self.raise_error(...)` and then
+fell through to `kind`/`value` usage, so at `RAISE`, `WARN`, and `IGNORE` a
+malformed value did not reliably become `ParseError` — depending on which
+branch, the method instead silently returned an `AtEpochProperty` built from
+an invalid value (`AT EPOCH 1.5` at `WARN`/`IGNORE`, since `value` stayed
+bound to the non-integer literal), raised `AssertionError` (`AT TIME` with an
+unquoted value, since `_parse_string()` left `value` bound to `None`), or
+raised `UnboundLocalError` (a missing `EPOCH`/`TIME` keyword, since neither
+`kind` nor `value` was assigned at all in that branch). All three call sites
+now route through the CTAS family's own `_raise_create_table_error`
+guaranteed-raise wrapper, matching the established pattern: control never
+returns to the fall-through code once a malformed value is recognized, so
+every branch fails with `ParseError` at every error level regardless of
+whether `value` would otherwise have been bound, `None`, or unbound.
+`AtEpochProperty`'s `arg_types`, valid-input parsing, and rendering are
+unchanged, and `AtEpochQuery`'s own, separate guaranteed-raise wrapper
+(`_raise_at_epoch_query_error`) was untouched.
+
 `VerticaParser._parse_statement`'s own custom dispatch (the `elif` chain
 handling `PROFILE`, `SAVE QUERY`, `AT epoch`, and siblings) is reentered by
 every call sqlglot makes through `self._parse_statement()`, not only the true

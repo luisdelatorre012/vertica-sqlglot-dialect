@@ -215,6 +215,42 @@ def test_create_table_as_historical_epoch_forms(epoch: str) -> None:
     assert isinstance(expression.find(vexp.AtEpochProperty), vexp.AtEpochProperty)
 
 
+CTAS_AT_EPOCH_POSITIONS = [
+    "CREATE TABLE t AS {clause} SELECT 1",
+    "CREATE TEMPORARY TABLE t AS {clause} SELECT 1",
+    "CREATE LOCAL TEMPORARY TABLE t AS {clause} SELECT 1",
+]
+
+
+@pytest.mark.parametrize(
+    ("clause", "message"),
+    [
+        ("AT EPOCH 1.5", "AT EPOCH requires LATEST or an integer"),
+        ("AT TIME now", "AT TIME requires a quoted timestamp"),
+        ("AT SNAPSHOT 1", "AT requires EPOCH or TIME"),
+    ],
+)
+@pytest.mark.parametrize("position", CTAS_AT_EPOCH_POSITIONS)
+@pytest.mark.parametrize(
+    "error_level",
+    [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE],
+)
+def test_ctas_at_epoch_malformed_forms_fail_closed_at_every_error_level(
+    error_level: ErrorLevel, position: str, clause: str, message: str
+) -> None:
+    """``_parse_at_epoch_property``'s three malformed-value branches route through
+    the CTAS family's guaranteed-raise wrapper (``_raise_create_table_error``)
+    and must raise ``ParseError`` -- never ``UnboundLocalError``,
+    ``AssertionError``, or silent acceptance of an invalid value -- at every
+    error level and CTAS position (permanent, unscoped temporary, scoped
+    temporary).
+    """
+
+    sql = position.format(clause=clause)
+    with pytest.raises(ParseError, match=message):
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
 @pytest.mark.parametrize(
     "option",
     [

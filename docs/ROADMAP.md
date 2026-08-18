@@ -64,7 +64,19 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   `DropViews`/`DropTables` custom-root contract. That same property's value
   grammar was found, while confirming Q06 must not touch it, to crash with
   raw `UnboundLocalError` instead of `ParseError` at `WARN`/`IGNORE` on
-  malformed input, scheduled as Q07. Q07–Q08 remain.
+  malformed input, scheduled as Q07. Q07 is complete: the CTAS-only
+  `AtEpochProperty` value grammar's three malformed-value branches now route
+  through the CTAS family's existing `_raise_create_table_error`
+  guaranteed-raise wrapper instead of a plain `self.raise_error(...)` call, so
+  a malformed `AT EPOCH`/`AT TIME` value in any CTAS position (permanent,
+  unscoped temporary, scoped temporary) fails with `ParseError` at every error
+  level; before the fix, non-`IMMEDIATE` levels instead produced three
+  different raw-Python failures depending on the malformed form — silent
+  acceptance of an invalid value (`AT EPOCH 1.5` at `WARN`/`IGNORE`),
+  `AssertionError` (`AT TIME` with an unquoted value), or `UnboundLocalError`
+  (a missing `EPOCH`/`TIME` keyword). `AtEpochProperty`'s `arg_types` and
+  rendering, and the independent Q06 `AtEpochQuery` statement-level prefix,
+  are unchanged. Q08 remains.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

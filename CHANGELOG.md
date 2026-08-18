@@ -170,3 +170,12 @@ plugin interface.
   at every error level through a dedicated guaranteed-raise wrapper, and
   foreign generation fails atomically, matching the `DropViews`/`DropTables`
   custom-root contract.
+- Fixed the pre-existing, structurally unrelated CTAS-only `AT EPOCH`/
+  `AT TIME` historical-snapshot property (`AtEpochProperty`): its three
+  malformed-value branches now route through the CTAS family's existing
+  guaranteed-raise wrapper, so a malformed value fails with `ParseError` at
+  every error level and CTAS position (permanent, unscoped temporary, scoped
+  temporary) instead of, depending on the malformed form and error level,
+  silently building a property from an invalid value, raising
+  `AssertionError`, or raising `UnboundLocalError`. The property's
+  `arg_types`, valid-input parsing, and rendering are unchanged.

@@ -7119,15 +7119,15 @@ class VerticaParser(PostgresParser):
             else:
                 value = self._parse_number()
                 if not value or not value.is_int:
-                    self.raise_error("AT EPOCH requires LATEST or an integer")
+                    self._raise_create_table_error("AT EPOCH requires LATEST or an integer")
             kind = exp.var("EPOCH")
         elif self._match_text_seq("TIME"):
             value = self._parse_string()
             if not value:
-                self.raise_error("AT TIME requires a quoted timestamp")
+                self._raise_create_table_error("AT TIME requires a quoted timestamp")
             kind = exp.var("TIME")
         else:
-            self.raise_error("AT requires EPOCH or TIME")
+            self._raise_create_table_error("AT requires EPOCH or TIME")
 
         assert value is not None
         return self.expression(vexp.AtEpochProperty(this=value, kind=kind))
