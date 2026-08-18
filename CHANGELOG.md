@@ -179,3 +179,15 @@ plugin interface.
   silently building a property from an invalid value, raising
   `AssertionError`, or raising `UnboundLocalError`. The property's
   `arg_types`, valid-input parsing, and rendering are unchanged.
+- Certified Milestone 1, the analysis parsing surface, with an end-to-end
+  workload-corpus test module combining plain, recursive, and
+  materialization-hinted CTEs, scoped and unscoped temporary CTAS,
+  definition-form temporary tables, `INSERT ... SELECT` and
+  `INSERT ... WITH`, `SELECT ... INTO` temporary targets, and multi-target
+  `DROP TABLE` cleanup into realistic multi-statement analysis scripts.
+  Verified `sqlglot.parse` multi-statement boundaries, compact/pretty
+  round-trips, `dump()`/`load()` stability, and optimizer traversal,
+  including a column-level `lineage` smoke tracing a `SELECT ... INTO`
+  target's column through a temporary CTAS's own CTE down to a
+  definition-form temporary table's declared schema. No new grammar was
+  introduced.

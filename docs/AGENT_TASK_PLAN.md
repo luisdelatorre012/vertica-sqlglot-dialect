@@ -78,6 +78,11 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 - Completed **Q07 — CTAS historical-snapshot guaranteed-raise conformance**.
   Q08 is the lowest-numbered remaining task, and is the Milestone 1
   acceptance gate.
+- Completed **Q08 — Milestone 1 acceptance gate** on 2026-08-17. **Milestone 1
+  (the analysis parsing surface) is certified.** All Q01–Q08 tasks are `DONE`;
+  Milestone 2 (administration and remaining DDL, tasks P16–P35, specified in
+  [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md)) is now
+  eligible. P16 is the lowest-numbered remaining task overall.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Installed local Python runtimes
@@ -211,7 +216,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q05 | DONE   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
 | Q06 | DONE   | SELECT `AT epoch` historical-query prefix     | —                   | `feat: model select at epoch historical query prefix`   |
 | Q07 | DONE   | CTAS historical-snapshot guaranteed-raise conformance | —            | `fix: harden ctas at epoch guaranteed raise`            |
-| Q08 | TODO   | Milestone 1 acceptance gate                   | Q01–Q07             | `test: certify milestone one analysis surface`          |
+| Q08 | DONE   | Milestone 1 acceptance gate                   | Q01–Q07             | `test: certify milestone one analysis surface`          |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
@@ -1402,7 +1407,7 @@ treating deprecations as errors. sdist/wheel build, clean force-install,
 (`CREATE TABLE t AS AT EPOCH LATEST SELECT 1 AS id` round-trip returning
 canonical `Create`) passed.
 
-### Q08 — Milestone 1 acceptance gate — `TODO`
+### Q08 — Milestone 1 acceptance gate — `DONE`
 
 **Outcome.** Prove the analysis surface end to end on realistic
 multi-statement workloads, update the contract documents, and certify
@@ -1435,7 +1440,105 @@ lineage smoke, `sqlglot.optimizer.qualify.qualify` plus
 corpus statements deterministic so compact and pretty round-trips stay
 exact.
 
-**Completion record.** Pending.
+**Completion record.** Re-read `docs/ARCHITECTURE.md`, `docs/COVERAGE.md`, and
+`docs/ROADMAP.md` per protocol step 1; no primary source re-open was required
+beyond that, since this task introduces no new grammar and its own primary
+sources are "the Q01–Q07 pages as needed." Added `tests/test_workload_corpus.py`
+with two realistic multi-statement analysis scripts. The staging pipeline
+combines a definition-form `LOCAL TEMPORARY TABLE` populated by
+`INSERT ... SELECT`, a scoped (`LOCAL`) temporary CTAS whose own query carries
+a plain CTE, a `SELECT ... INTO LOCAL TEMP TABLE` target, and ordered
+multi-target `DROP TABLE` cleanup (no `IF EXISTS`). The recursive-archive
+pipeline combines an unscoped temporary CTAS built from a plain CTE, a second
+unscoped temporary CTAS built from a `WITH RECURSIVE` CTE, an archival
+`INSERT ... WITH` carrying an `ENABLE_WITH_CLAUSE_MATERIALIZATION` hint (the
+`WithHint` root, confirming the hinted-CTE family composes with `INSERT`'s
+target-following `WITH` form), and `DROP TABLE ... IF EXISTS` multi-target
+cleanup — together exercising every family the required work lists (plain,
+recursive, and hinted CTEs; scoped and unscoped temporary CTAS; definition-form
+temporary tables; `INSERT ... SELECT` and `INSERT ... WITH`;
+`SELECT ... INTO` temporary targets; and `DROP TABLE` cleanup). Added a shared
+`assert_script_roundtrip` helper to `tests/helpers.py`, mirroring the existing
+`assert_roundtrip` single-statement contract but for a `sqlglot.parse`-produced
+statement list: it asserts the exact expected type sequence (multi-statement
+boundaries), then, per statement, non-`Command` status, compact generation and
+reparse equality, pretty generation and reparse equality, and
+`dump()`/`Expr.load()` stability. Both scripts pass through it, and a
+dedicated shape test per script asserts representative AST facts (property
+list order and identity on the definition-form table; the `with_` node type
+and `filtered`/`cutoff` CTE aliases; `recursive=True` and the inner `Union`
+body on the `RECURSIVE` CTE; `IntoTableClause`'s `scope`/`on_commit`; ordered
+`DropTables` targets and `exists` state). A third test confirms a leading
+comment on the closing `DROP TABLE` statement of a two-statement script
+survives the statement boundary (`"pipeline cleanup" in drop_t.sql(...)`),
+closing a combination gap no single-family module could exercise on its own.
+For optimizer traversal, one test calls `qualify()` on the staging pipeline's
+`SelectInto` against `customer_totals`'s own schema and asserts both columns
+resolve to `customer_totals` and the `SelectInto`/`IntoTableClause` contract
+survives `dump()`/`load()`; a second calls `optimize()` over the same
+statement with a two-table schema and asserts root-class and `dump()`/`load()`
+stability, mirroring `test_select_into.py`'s own optimizer-stability
+regression. The column-level lineage smoke traces `"customer_id"` from the
+`SelectInto` target through `customer_totals`'s real CTAS query (passed via
+`lineage()`'s `sources` mapping, which internally calls `exp.expand` before
+qualifying — `qualify()` itself has no `sources` parameter, confirmed by
+inspecting `sqlglot.optimizer.qualify.qualify`'s signature) down to the
+`filtered` CTE inside that query, and finally to the definition-form
+`staging_orders` table's declared schema entry: the returned node's
+`{downstream.name for downstream in node.walk()}` set contains
+`"customer_totals.customer_id"`, `"filtered.customer_id"`, and
+`"staging_orders.customer_id"`, proving downstream lineage tooling can follow
+a chain built entirely from Milestone 1's statement families through both a
+temporary-table boundary and a nested CTE. `vexp.AtEpochQuery` (Q06) was
+deliberately not included in either script: it is not named in this task's
+required-work statement-family list, and `ARCHITECTURE.md` already records
+that it degrades `qualify`/`lineage` behavior in ways orthogonal to what this
+gate certifies, so including it would have conflated two unrelated residuals
+rather than proving the combination the task actually specifies.
+
+Updated `docs/COVERAGE.md`'s SELECT/CTE, `INTO [TABLE]`,
+`CREATE TABLE AS`/temporary-tables, and `DROP TABLE` rows with this corpus's
+evidence. The LIMIT/OFFSET/FETCH row, the identifier row's Q04 reserved-word
+corpus, Q05's foreign-generation contract, and Q06's `AtEpochQuery` row were
+re-read and left unchanged: this task's corpus contains no `LIMIT`/`OFFSET`/
+`FETCH` clause, introduces no new identifier corpus, exercises no additional
+foreign-dialect surface beyond what Q05's own exhaustive sweep already covers
+for the property classes this corpus's `CREATE TABLE`/CTAS statements embed,
+and deliberately excludes `AtEpochQuery` for the reason above — recording this
+explicitly rather than padding those four rows with text that would overstate
+what changed. Updated `docs/ROADMAP.md`'s Milestone 1 paragraph to record Q08
+complete and Milestone 1 certified on 2026-08-17, updated the "Remaining"
+introduction to reflect that Q01–Q08 no longer defer Milestone 2, and updated
+`CHANGELOG.md` with a milestone-certification entry. Updated this plan's
+Current state section to record Milestone 1 as certified and P16 as the
+lowest-numbered remaining task overall. Also corrected a stale cross-reference
+found while re-reading the mandatory task-selection documents: `AGENTS.md`'s
+milestone-precedence bullet still said Milestone 2 becomes eligible "after Q06
+is `DONE`", left over from before the acceptance gate was renumbered Q06 → Q07
+→ Q08 across Q04's and Q06's completion records; corrected to "after Q08 is
+`DONE`" so a future agent's very first mandatory read does not misstate the
+condition this task makes live.
+
+The focused `test_workload_corpus.py` module passed 8 tests; combined with
+neighboring dispatch families (`test_select_into.py`, `test_create_table.py`,
+`test_drop_table.py`, `test_at_epoch_query.py`, `test_dml.py`, `test_hints.py`,
+`test_select_query_corpus.py`, `test_keywords.py`, `test_ast_safety.py`,
+`test_query_extensions.py`, `test_foreign_property_atomicity.py`,
+`test_schema_view.py`, `test_core_statements.py`) the combined focused run
+passed 1,807. The default CPython 3.12.6 gate passed 5,816 tests (5,808 plus
+this task's 8) at 93.38% branch coverage with Ruff, formatting, strict mypy,
+and `git diff --check` clean; isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 5,816 tests, with
+3.15 treating deprecations as errors. sdist/wheel build, clean force-install,
+`pip check`, and the installed-wheel `python -I` entry-point smoke
+(`SELECT customer_id, total_amount INTO LOCAL TEMP TABLE top_customers ON
+COMMIT PRESERVE ROWS FROM customer_totals WHERE total_amount > 1000`
+round-trip returning `SelectInto`) passed. No new grammar was introduced;
+every named residual recorded by Q01–Q07 (`LIMIT ALL` discarded at parse
+time, the `GROUP BY` grouping-construct ordering limit, `AtEpochQuery`'s
+partial `qualify`/`lineage` support, and the CTE-body dispatch-reentry
+observation) remains named and unchanged. **Milestone 1 — the analysis
+parsing surface — is certified.**
 
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 

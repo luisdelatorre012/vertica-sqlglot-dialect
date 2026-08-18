@@ -76,12 +76,35 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   `AssertionError` (`AT TIME` with an unquoted value), or `UnboundLocalError`
   (a missing `EPOCH`/`TIME` keyword). `AtEpochProperty`'s `arg_types` and
   rendering, and the independent Q06 `AtEpochQuery` statement-level prefix,
-  are unchanged. Q08 remains.
+  are unchanged. Q08 is complete, certifying Milestone 1 on 2026-08-17: a
+  workload-corpus test module (`tests/test_workload_corpus.py`) combines the
+  statement families Q01–Q07 delivered into two realistic multi-statement
+  analysis scripts — a staging pipeline (a definition-form temporary table,
+  `INSERT ... SELECT`, a scoped `LOCAL` temporary CTAS built from a plain CTE,
+  a `SELECT ... INTO` temporary target, and ordered multi-target `DROP TABLE`
+  cleanup) and a recursive-archive pipeline (two unscoped temporary CTAS
+  statements, one from a plain CTE and one from a `RECURSIVE` CTE, an
+  archival `INSERT ... WITH` carrying a materialization hint, and
+  `DROP TABLE ... IF EXISTS` cleanup) — and proves `sqlglot.parse`
+  multi-statement boundaries, compact/pretty round-trips, `dump()`/`load()`
+  stability, a comment surviving a multi-statement script boundary, and
+  optimizer traversal: `qualify`/`optimize` stability plus a column-level
+  `lineage` smoke that traces a `SELECT ... INTO` target's column through a
+  temporary CTAS's own CTE down to a definition-form temporary table's
+  declared schema. No new grammar was introduced; `docs/COVERAGE.md`'s
+  SELECT/CTE, INTO TABLE, `CREATE TABLE AS`/temporary-tables, and DROP TABLE
+  rows were updated with this corpus evidence, and the LIMIT/OFFSET/FETCH,
+  identifier, Q05 foreign-generation, and Q06 `AtEpochQuery` rows were
+  re-reviewed and left unchanged because the corpus does not exercise
+  `LIMIT`/`OFFSET`/`FETCH`, new identifiers, additional foreign-dialect
+  surface, or the `AT epoch` query prefix (deliberately outside this task's
+  documented statement-family list).
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — is deferred until Milestone 1 is certified.
+  (tasks P16–P35) — was deferred until Milestone 1 was certified and is now
+  eligible.
 
 ## Phase 1 — core analytical SQL and physical design
 
@@ -193,8 +216,8 @@ Implemented catalog P0:
   temporary-table/single-SELECT restrictions, with CHECK expression content
   left as a named server-side residual.
 
-Remaining (all Milestone 2, deferred behind the Milestone 1 analysis-surface
-tasks Q01–Q07):
+Remaining (all Milestone 2; the Milestone 1 analysis-surface tasks Q01–Q08
+that previously deferred this work are complete):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);
