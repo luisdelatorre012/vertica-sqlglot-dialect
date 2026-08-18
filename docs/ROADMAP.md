@@ -29,9 +29,12 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   generation of embedded Vertica table properties fail with an intended
   contract instead of raw `KeyError` (Q05, scheduled 2026-08-16 from Q01's
   completion record), the SELECT `[ AT epoch ]` historical-query prefix (Q06,
-  scheduled 2026-08-17 from Q04's completion record), and an end-to-end
-  acceptance gate with a lineage smoke (Q07, renumbered 2026-08-17 from Q06
-  so the gate keeps the highest number). Q01 is complete: scoped temporary
+  scheduled 2026-08-17 from Q04's completion record), a guaranteed-raise fix
+  for the pre-existing, structurally unrelated CTAS-only `AT EPOCH`/`AT TIME`
+  snapshot property (Q07, scheduled 2026-08-17 from Q06's completion record),
+  and an end-to-end acceptance gate with a lineage smoke (Q08, renumbered
+  twice — 2026-08-17 from Q06, then again from Q07 — so the gate keeps the
+  highest number each time). Q01 is complete: scoped temporary
   CTAS now shares the unscoped contract, including the LOCAL/`DISK_QUOTA`
   restriction extended from the definition form. Q02 is complete: the SELECT
   `INTO [TABLE]` clause is a typed contract for permanent and scoped
@@ -52,7 +55,16 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   custom root already raises, at every `unsupported_level`, instead of a raw
   `KeyError`; the registered set is introspected from `sqlglot_vertica.expressions`
   rather than hand-maintained, so a future property is covered automatically.
-  Q06–Q07 remain.
+  Q06 is complete: the SELECT statement's own `[ AT epoch ]` prefix now
+  parses through a typed `AtEpochQuery` root that wraps the entire top-level
+  query production (a `WITH` clause and any following `UNION`/`INTERSECT`/
+  `EXCEPT` chain, not one bare `SELECT`), independent of the pre-existing
+  CTAS-only `AtEpochProperty` snapshot property; malformed forms fail closed
+  at every error level and foreign generation fails atomically, matching the
+  `DropViews`/`DropTables` custom-root contract. That same property's value
+  grammar was found, while confirming Q06 must not touch it, to crash with
+  raw `UnboundLocalError` instead of `ParseError` at `WARN`/`IGNORE` on
+  malformed input, scheduled as Q07. Q07–Q08 remain.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

@@ -321,6 +321,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.VerticaPrimaryKey: lambda self, expression: self.verticaprimarykey_sql(expression),
         vexp.AccessPolicyTarget: lambda self, expression: self.accesspolicytarget_sql(expression),
         vexp.AtEpochProperty: lambda self, expression: self.atepochproperty_sql(expression),
+        vexp.AtEpochQuery: lambda self, expression: self.atepochquery_sql(expression),
         vexp.AuthenticationGrant: lambda self, expression: self.authenticationgrant_sql(expression),
         vexp.AuthenticationRevoke: lambda self, expression: self.authenticationrevoke_sql(
             expression
@@ -4348,6 +4349,37 @@ class VerticaGenerator(PostgresGenerator):
 
     def atepochproperty_sql(self, expression: vexp.AtEpochProperty) -> str:
         return f"AT {self.sql(expression, 'kind')} {self.sql(expression, 'this')}"
+
+    def atepochquery_sql(self, expression: vexp.AtEpochQuery) -> str:
+        kind = expression.args.get("kind")
+        kind_name = kind.name if isinstance(kind, exp.Var) else None
+        value = expression.args.get("value")
+
+        if kind_name == "EPOCH":
+            valid_value = (isinstance(value, exp.Var) and value.name == "LATEST") or (
+                isinstance(value, exp.Literal) and value.is_int
+            )
+        elif kind_name == "TIME":
+            valid_value = isinstance(value, exp.Literal) and value.is_string
+        else:
+            valid_value = False
+
+        if not valid_value:
+            self.unsupported(
+                "AtEpochQuery requires kind EPOCH with LATEST or an integer, "
+                "or kind TIME with a quoted timestamp"
+            )
+            return ""
+
+        query = expression.args.get("this")
+        if not isinstance(query, exp.Query):
+            self.unsupported("AtEpochQuery requires a SELECT or set-operation query")
+            return ""
+
+        return (
+            f"AT {self.sql(expression, 'kind')} {self.sql(expression, 'value')} "
+            f"{self.sql(expression, 'this')}"
+        )
 
     def tablepartitionproperty_sql(self, expression: vexp.TablePartitionProperty) -> str:
         sql = f"PARTITION BY {self.sql(expression, 'this')}"

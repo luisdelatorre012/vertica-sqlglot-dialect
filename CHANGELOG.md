@@ -160,3 +160,13 @@ plugin interface.
   contract every other custom Vertica root already gives, while canonical
   properties and non-Vertica `Property` subclasses keep today's behavior
   unchanged.
+- Closed the residual recorded above where the SELECT statement's own
+  `[ AT epoch ]` historical-query prefix did not parse: a typed `AtEpochQuery`
+  root now covers `EPOCH LATEST`, `EPOCH <integer>`, and `TIME '<timestamp>'`,
+  wrapping the complete top-level query production (an optional `WITH` clause
+  and any following `UNION`/`INTERSECT`/`EXCEPT` chain, not one bare
+  `SELECT`), independent of the pre-existing, structurally unrelated
+  CTAS-only `AtEpochProperty` snapshot property. Malformed forms fail closed
+  at every error level through a dedicated guaranteed-raise wrapper, and
+  foreign generation fails atomically, matching the `DropViews`/`DropTables`
+  custom-root contract.

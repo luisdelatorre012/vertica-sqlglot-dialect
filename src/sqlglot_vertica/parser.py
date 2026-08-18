@@ -756,6 +756,8 @@ class VerticaParser(PostgresParser):
             if not self._match_text_seq("DIRECTED", "QUERY"):
                 self.raise_error("DEACTIVATE must be followed by DIRECTED QUERY")
             expression = self._parse_directed_query_action("DEACTIVATE")
+        elif self._match_text_seq("AT"):
+            expression = self._parse_at_epoch_query(comments=profile_comments)
         else:
             expression = super()._parse_statement()
 
@@ -1109,6 +1111,61 @@ class VerticaParser(PostgresParser):
                 where=where,
             )
         )
+
+    def _parse_at_epoch_query(self, comments: list[str]) -> vexp.AtEpochQuery:
+        """Parse the SELECT statement's ``[ AT epoch ] [ WITH-clause ] SELECT ...`` prefix.
+
+        The prefix scopes the entire top-level query production that follows
+        it in the same formal-syntax block -- a possible ``WITH`` clause and
+        any subsequent ``UNION``/``INTERSECT``/``EXCEPT`` chain -- not one bare
+        ``SELECT``. Delegating the remainder to the superclass statement
+        parser (rather than a lower-level SELECT-only entry point) parses that
+        whole production exactly as an ordinary top-level query would, so
+        ``query`` below is already the correct ``exp.Query`` root regardless
+        of how deep any ``WITH``/set-operation nesting goes. Value parsing is
+        independent of the structurally unrelated CTAS-only
+        ``_parse_at_epoch_property``/``vexp.AtEpochProperty`` (an
+        ``exp.Property`` embedded in a ``CREATE TABLE AS`` clause list, not a
+        bare statement-level prefix); this method uses its own guaranteed-raise
+        wrapper instead of that helper's plain ``raise_error`` calls.
+        """
+
+        value: exp.Expr | None
+        if self._match_text_seq("EPOCH"):
+            if self._match_text_seq("LATEST"):
+                value = exp.var("LATEST")
+            else:
+                value = self._parse_number()
+                if not value or not value.is_int:
+                    self._raise_at_epoch_query_error("AT EPOCH requires LATEST or an integer")
+            kind = exp.var("EPOCH")
+        elif self._match_text_seq("TIME"):
+            value = self._parse_string()
+            if not value:
+                self._raise_at_epoch_query_error("AT TIME requires a quoted timestamp")
+            kind = exp.var("TIME")
+        else:
+            self._raise_at_epoch_query_error("AT requires EPOCH or TIME")
+
+        assert value is not None
+        query = super()._parse_statement()
+        if not isinstance(query, exp.Query):
+            self._raise_at_epoch_query_error(
+                "AT epoch requires a SELECT query, optionally preceded by WITH and "
+                "followed by UNION/INTERSECT/EXCEPT"
+            )
+        assert isinstance(query, exp.Query)
+
+        return self.expression(
+            vexp.AtEpochQuery(this=query, kind=kind, value=value), comments=comments
+        )
+
+    def _raise_at_epoch_query_error(self, message: str) -> None:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
+            raise ParseError(message)
 
     def _structure_directed_constant_hints(self, expression: exp.Expr | None) -> exp.Expr | None:
         if not expression:

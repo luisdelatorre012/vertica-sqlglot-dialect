@@ -65,6 +65,16 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   references the old gate number.
 - Completed **Q05 — foreign embedded-property atomicity**. Q06 is the
   lowest-numbered remaining task.
+- Completed **Q06 — SELECT `AT epoch` historical-query prefix**. Q07 is the
+  lowest-numbered remaining task.
+- On 2026-08-17, while confirming Q06 must not touch the structurally
+  unrelated CTAS-only `AtEpochProperty` value-parsing helper, testing that
+  helper's existing malformed-`AT` path directly (not merely reasoning about
+  it) showed it crashes with raw `UnboundLocalError` instead of `ParseError`
+  at `WARN`/`IGNORE`, because it uses plain `self.raise_error(...)` rather
+  than a guaranteed-raise wrapper. This gap was scheduled as new task Q07,
+  and the acceptance gate was renumbered Q07 → Q08 before any gate work
+  began; no completion record references the old gate number.
 - There is intentionally no Git remote. Make local commits only; never push.
 
 ## Installed local Python runtimes
@@ -196,12 +206,13 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q03 | DONE   | DROP TABLE grammar completion                 | —                   | `feat: complete drop table grammar`                     |
 | Q04 | DONE   | Official query-corpus hardening               | —                   | `test: add official query corpus`                       |
 | Q05 | DONE   | Foreign embedded-property atomicity           | —                   | `fix: close embedded property foreign atomicity gap`    |
-| Q06 | TODO   | SELECT `AT epoch` historical-query prefix     | —                   | `feat: model select at epoch historical query prefix`   |
-| Q07 | TODO   | Milestone 1 acceptance gate                   | Q01–Q06             | `test: certify milestone one analysis surface`          |
+| Q06 | DONE   | SELECT `AT epoch` historical-query prefix     | —                   | `feat: model select at epoch historical query prefix`   |
+| Q07 | TODO   | CTAS historical-snapshot guaranteed-raise conformance | —            | `fix: harden ctas at epoch guaranteed raise`            |
+| Q08 | TODO   | Milestone 1 acceptance gate                   | Q01–Q07             | `test: certify milestone one analysis surface`          |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred until Q07 is `DONE`. Task numbering, dependencies, and
+Deferred until Q08 is `DONE`. Task numbering, dependencies, and
 specifications are intentionally unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
@@ -237,7 +248,7 @@ specifications are intentionally unchanged from the prior plan revision.
 2. If a task is `IN_PROGRESS`, resume it. Otherwise select the next eligible
    task with milestone precedence: while any Milestone 1 (`Q`-series) task is
    not `DONE`, only `Q` tasks are eligible; Milestone 2 (`P`-series) tasks
-   become eligible only after Q07 is `DONE`. Within the active milestone,
+   become eligible only after Q08 is `DONE`. Within the active milestone,
    select the lowest-numbered `TODO` task whose dependencies are all `DONE`,
    change it to `IN_PROGRESS` in both the dashboard and its detail heading,
    and do no other task.
@@ -1060,7 +1071,7 @@ build, clean force-install, `pip check`, and the installed-wheel `python -I`
 entry-point smoke (`CREATE LOCAL TEMPORARY TABLE t AS SELECT 1 AS id`
 round-trip returning canonical `Create`) passed.
 
-### Q06 — SELECT `AT epoch` historical-query prefix — `TODO`
+### Q06 — SELECT `AT epoch` historical-query prefix — `DONE`
 
 **Outcome.** Make the SELECT statement's own documented
 `[ AT epoch ] [ WITH-clause ] SELECT …` historical-query prefix parse and
@@ -1122,9 +1133,192 @@ still holds. The reusable CTAS infrastructure is
 `_parse_at_epoch_property` (`src/sqlglot_vertica/parser.py:7054`) and
 `vexp.AtEpochProperty` (`src/sqlglot_vertica/expressions.py:741`).
 
+**Completion record.** Re-opened the 26.2 SELECT page; the formal syntax and
+the `epoch` parameter description reproduced exactly as Q04 recorded them
+(`[ AT epoch ] [ WITH-clause ] SELECT … [ union-clause ] [ intersect-clause ]
+[ except-clause ] …`, with `EPOCH LATEST`/`EPOCH integer`/`TIME 'timestamp'`
+each documented and no worked SQL example anywhere on the page), confirming
+the gap still held before implementation began.
+
+Delivered a single wrapper node, `vexp.AtEpochQuery(exp.Expression)`
+(`arg_types = {"this": True, "kind": True, "value": True}`), rather than the
+`SelectInto`/`TimeseriesSelect`-style promotion this task's own text raised
+as the analogous precedent. Promotion needs the wrapper to literally *become*
+the concrete root it decorates by cloning its args (`vexp.Foo(**this.args,
+extra=…)`), which works for those two families because their clause only
+ever attaches to a bare `exp.Select`. This prefix scopes the *entire*
+top-level query production — a possible `WITH` clause and any following
+`UNION`/`INTERSECT`/`EXCEPT` chain — so the concrete root it must wrap can be
+`exp.Select` or any `exp.SetOperation`, shapes with materially different
+`arg_types`; promotion would have needed four parallel classes
+(`AtEpochSelect`/`AtEpochUnion`/`AtEpochIntersect`/`AtEpochExcept`) each with
+their own generator dispatch entry. Empirical probes confirmed a single
+typed `this` avoids that entirely and loses nothing: parsing
+`SELECT 1 UNION SELECT 2` under `vertica` already yields a bare `exp.Union`
+root, and parsing `WITH cte AS (SELECT 1) SELECT * FROM cte UNION SELECT *
+FROM cte` attaches `with_` to that same outer `Union`, not to the first
+branch — so whatever `super()._parse_statement()` returns after the prefix
+is consumed is already the exact, correctly-shaped `exp.Query` to store
+unmodified. This also sidesteps a hazard the wrapper design doesn't share
+with promotion: because `AtEpochQuery` is never itself an `exp.Select`, no
+foreign dialect's `isinstance`-gated structural pre-dispatch rewrite (the
+exact mechanism `SelectInto` was built to survive) ever runs on it — it fails
+first, atomically, through the plain unregistered-custom-root fallback.
+Reused the CTAS-only `AtEpochProperty`'s value grammar (`EPOCH LATEST`/
+`EPOCH <integer>`/`TIME '<timestamp>'`) but not its parsing method or node
+class, per this task's explicit "do not assume they must share a node class"
+instruction: the two occupy structurally different grammar positions (a
+`POST_ALIAS` `Properties` member inside CTAS's `AS […] query` versus a bare
+statement-level prefix with no `Properties` list at all), and — discovered
+while auditing the existing helper before deciding — sharing its parsing
+method would have also imported a live bug (below) into the new family.
+
+Parsing hooks into the existing `VerticaParser._parse_statement` override
+(already a dispatch chain for `PROFILE`/`SAVE QUERY`/`GET DIRECTED QUERY`/
+`ACTIVATE`/`DEACTIVATE DIRECTED QUERY`) with one new `elif
+self._match_text_seq("AT"): expression =
+self._parse_at_epoch_query(comments=profile_comments)` branch; `AT` cannot
+collide with any of those or with `STATEMENT_PARSERS`, so branch order is
+immaterial. `_parse_at_epoch_query` parses the value grammar, then delegates
+the remainder to `super()._parse_statement()` (the base-class implementation,
+not the family dispatch chain, matching how `_parse_profile_statement`
+already delegates its own body) so the trailing `WITH`/`SELECT`/set-operation
+chain parses exactly as an ordinary top-level query would, and wraps
+whatever `exp.Query` instance results. A new guaranteed-raise wrapper,
+`_raise_at_epoch_query_error`, rejects a missing/invalid `EPOCH`/`TIME` value
+and a missing or non-`exp.Query` trailing statement at every error level.
+Generation (`atepochquery_sql`) validates `kind`/`value`/`this` shape before
+rendering and calls `self.unsupported(...)` on any mismatch, matching this
+file's "validate programmatic ASTs before rendering" policy; foreign
+generation reaches the plain "no dispatch, not a `Func`/`Property`" fallback
+in `Generator.sql()` and raises `ValueError("Unsupported expression type
+AtEpochQuery")` — the exact `DropViews`/`DropTables` contract — confirmed for
+all 4 release-gate dialects × 3 `unsupported_level`s, both for a bare
+detached instance and for the node embedded as a CTE body (below).
+
+Testing surfaced four points worth recording precisely rather than assuming:
+
+1. **Leading comments need explicit threading.** `self.expression(instance,
+   comments=…)` alone does not preserve a comment attached before a keyword
+   this method's own `elif` branch already consumed via `_match_text_seq`;
+   `_parse_at_epoch_query` therefore accepts and forwards the same
+   `profile_comments` snapshot the outer method already captures before
+   dispatch, mirroring `_parse_profile_statement`'s identical `comments`
+   parameter exactly. (Also matching that precedent: the comment lands after
+   the generated SQL, not before it — `test_leading_comment_is_retained`
+   asserts containment, not position, matching `test_select_into.py`'s own
+   convention for the same reason.)
+2. **`_parse_statement`'s custom dispatch is reentered by CTE bodies**, not
+   only genuine per-script top-level statements: base
+   `Parser._parse_select_query` calls `self._parse_statement()` right after
+   parsing a CTE list's parenthesized body, and `self` always resolves to the
+   concrete `VerticaParser`, so `WITH cte AS (AT EPOCH LATEST SELECT 1)
+   SELECT * FROM cte` parses. Confirmed pre-existing and not specific to this
+   family or task: `WITH cte AS (PROFILE SELECT 1) SELECT * FROM cte` parses
+   identically on the unmodified, pre-Q06 codebase. Documented in
+   `ARCHITECTURE.md` rather than fixed — closing it is a cross-cutting change
+   spanning every family in that dispatch chain, not a Q06-scoped one — and
+   pinned as observed (not endorsed) behavior in
+   `test_cte_body_may_carry_its_own_prefix`. The complementary malformed
+   case — a CTE list arriving *after* one of these roots
+   (`WITH cte AS (...) AT EPOCH LATEST SELECT ...`) — already fails closed
+   with a clean `ParseError` ("`atepochquery` does not support CTE"),
+   identical to `PROFILE`'s own failure message shape, because neither root
+   declares a `with_` arg for the generic CTE-attaching code to find.
+3. **`qualify`/`optimize` run but do not fully qualify through the
+   wrapper.** Both accept `AtEpochQuery` without error and preserve it as the
+   root (satisfying the common release gate's "optimizer stability"
+   requirement), but neither requires its input to already be an
+   `exp.Query`, and their scope-building does not treat the wrapped `this` as
+   a normal top-level scope: previously unqualified SELECT-list columns come
+   back identifier-quoted only (`column.table == ""`), not resolved to their
+   source table, unlike the identical query without the prefix. This is a
+   documented residual, not corruption — a control case confirmed
+   already-qualified references (a JOIN condition written `t1.a = t2.b`)
+   pass through unaffected, and no column is ever resolved to the *wrong*
+   table. `sqlglot.lineage.lineage` is stricter and simply raises
+   ("Cannot build lineage, sql must be SELECT") against the wrapper
+   directly; callers must pass `expression.this`. None of this closes fully
+   — Q07 (the acceptance gate)'s own multi-statement corpus does not include
+   the `AT epoch` prefix, so full lineage/qualify parity was never a
+   requirement this task carried.
+4. **The reused CTAS value grammar's existing malformed-`AT` handling has a
+   live bug**, found while confirming it must stay untouched: `AT FOO SELECT
+   1` inside `CREATE TABLE t AS …` — an inherited-property call still built on
+   plain `self.raise_error(...)`, not a guaranteed-raise wrapper — crashes
+   with raw `UnboundLocalError` instead of `ParseError` at `WARN`/`IGNORE`,
+   confirmed directly against the installed package rather than inferred.
+   Out of scope here (this task's own exclusions bar changing
+   `AtEpochProperty`), so scheduled as new task Q07 per protocol step 6, and
+   the acceptance gate renumbered Q07 → Q08 before any gate work began; no
+   completion record references the old gate number.
+
+The focused `test_at_epoch_query.py` module passed 176 tests and the edited
+`test_select_query_corpus.py` (one pinned `ParseError` residual replaced by
+five documented-grammar positive cases) passed 48; combined with neighboring
+dispatch families (`test_keywords.py`'s reserved-word corpus, CREATE TABLE,
+SELECT INTO, DROP TABLE, schema/view, AST safety, foreign property
+atomicity, core statements, hints, query extensions, DML) the combined
+focused run passed 1,763. The default CPython 3.12.6 gate passed 5,772 tests
+at 93.38% branch coverage with Ruff, formatting, strict mypy, and
+`git diff --check` clean; isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 suites each passed 5,772 tests, with
+3.15 treating deprecations as errors. sdist/wheel build, clean force-install,
+`pip check`, and the installed-wheel `python -I` entry-point smoke
+(`AT EPOCH LATEST SELECT 1` round-trip returning `AtEpochQuery`) passed.
+
+### Q07 — CTAS historical-snapshot guaranteed-raise conformance — `TODO`
+
+**Outcome.** Make the CTAS-only `AT EPOCH`/`AT TIME` historical-snapshot
+property (`_parse_at_epoch_property`/`vexp.AtEpochProperty`) fail with
+`ParseError` at every error level when its value grammar is malformed,
+matching this file's guaranteed-raise policy, instead of crashing with raw
+`UnboundLocalError` at `WARN`/`IGNORE`.
+
+**Required work.** Route `_parse_at_epoch_property`'s three
+`self.raise_error(...)` call sites (missing `EPOCH`/`TIME` keyword, a
+non-`LATEST`/non-integer epoch value, and a missing quoted `TIME` value)
+through the CTAS family's existing `_raise_create_table_error`
+guaranteed-raise wrapper instead. The method's `else` branch currently
+leaves `kind`/`value` unassigned before an unconditional
+`assert value is not None`; because plain `raise_error` only raises
+immediately at `IMMEDIATE` and only aggregates for a later `check_errors()`
+call at `RAISE`, that `assert` is reached with `value` never bound at
+`WARN`/`IGNORE`, producing `UnboundLocalError` instead of `ParseError`. Test
+all three malformed forms at `IMMEDIATE`, `RAISE`, `WARN`, and `IGNORE`, for
+both the temporary (scoped and unscoped) and permanent CTAS positions,
+confirming `ParseError` — never `UnboundLocalError` or any other raw Python
+exception — at every level. Confirm byte-identical Vertica generation and the
+existing positive `AtEpochProperty` regressions (`EPOCH LATEST`,
+`EPOCH <integer>`, `TIME '<timestamp>'`) are unaffected.
+
+**Explicit exclusions.** The independent, structurally unrelated Q06
+`AtEpochQuery` statement-level prefix, which already has its own
+guaranteed-raise wrapper and must not change; `vexp.AtEpochProperty`'s
+`arg_types` or rendering; any other pre-existing bare `self.raise_error(...)`
+call site outside this one method (`ARCHITECTURE.md`'s AST-policy section
+already records that the guaranteed-raise pattern "has not been retrofitted
+onto every pre-existing call site," and this task does not change that).
+
+**Primary sources.** None beyond this repository: `ARCHITECTURE.md`'s
+AST-policy section and this file's own guaranteed-raise policy bullet already
+specify the required contract; no OpenText page governs internal
+error-handling mechanics.
+
+**Implementation pointers (non-normative, verified 2026-08-17).**
+`_parse_at_epoch_property` reproduces
+`UnboundLocalError: cannot access local variable 'value' where it is not
+associated with a value` for `CREATE TABLE t AS AT FOO SELECT 1` at
+`error_level={WARN,IGNORE}`, confirmed directly against the installed
+package (grep `def _parse_at_epoch_property` for its current line — Q06
+added an unrelated method earlier in `parser.py`, shifting it).
+`_raise_create_table_error` (grep `def _raise_create_table_error`) is the
+established guaranteed-raise wrapper already used throughout the surrounding
+CTAS clause list for sibling malformed-clause cases.
+
 **Completion record.** Pending.
 
-### Q07 — Milestone 1 acceptance gate — `TODO`
+### Q08 — Milestone 1 acceptance gate — `TODO`
 
 **Outcome.** Prove the analysis surface end to end on realistic
 multi-statement workloads, update the contract documents, and certify
@@ -1138,18 +1332,17 @@ cleanup. Assert `sqlglot.parse` multi-statement boundaries, compact and
 pretty round-trips, `dump()`/`Expression.load()` stability, and optimizer
 traversal — qualification plus a column-level lineage smoke across
 CTE/temporary-table chains, because downstream analysis depends on it.
-Update `docs/COVERAGE.md` for every row Q01–Q06 changed (the SELECT/CTE
-row's corpus evidence and closed `AT epoch` residual, the INTO TABLE
-contract, DROP TABLE, the scoped-temporary-CTAS boundary note, the
-LIMIT/OFFSET/FETCH and identifier rows' Q04 evidence, and Q05's
-foreign-generation contract), record the milestone in
-`docs/ROADMAP.md`, and mark Milestone 1 complete in this plan's Current
-state section.
+Update `docs/COVERAGE.md` for every row Q01–Q07 changed (the SELECT/CTE
+row's corpus evidence, the INTO TABLE contract, DROP TABLE, the
+scoped-temporary-CTAS boundary note, the LIMIT/OFFSET/FETCH and identifier
+rows' Q04 evidence, Q05's foreign-generation contract, and Q06's
+`AtEpochQuery` row), record the milestone in `docs/ROADMAP.md`, and mark
+Milestone 1 complete in this plan's Current state section.
 
 **Explicit exclusions.** No new grammar in this task; named residuals stay
 named; Milestone 2 families remain untouched.
 
-**Primary sources.** Re-open the Q01–Q06 pages as needed.
+**Primary sources.** Re-open the Q01–Q07 pages as needed.
 
 **Implementation pointers (non-normative).** `sqlglot.parse` (not
 `parse_one`) preserves multi-statement boundaries. For the optimizer and
@@ -1162,7 +1355,7 @@ exact.
 
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 
-Every Milestone 2 task is deferred until Q07 is `DONE`. The detailed P16–P35
+Every Milestone 2 task is deferred until Q08 is `DONE`. The detailed P16–P35
 specifications — outcome, required work, exclusions, primary sources, and
 completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

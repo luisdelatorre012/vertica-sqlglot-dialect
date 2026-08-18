@@ -1358,6 +1358,27 @@ class SelectInto(exp.Select):
     }
 
 
+class AtEpochQuery(exp.Expression):
+    """A top-level query preceded by Vertica's ``AT epoch`` historical-query prefix.
+
+    The SELECT statement's own formal syntax is
+    ``[ AT epoch ] [ WITH-clause ] SELECT ... [ union-clause ] [ intersect-clause ]
+    [ except-clause ] ...``: the prefix precedes a possible ``WITH`` clause and
+    any trailing ``UNION``/``INTERSECT``/``EXCEPT`` chain, not one bare
+    ``exp.Select``. ``this`` therefore holds the complete top-level query
+    exactly as ordinary query parsing produced it (``exp.Select`` or
+    ``exp.SetOperation``), unmodified, rather than promoting via an args-spread
+    clone the way ``SelectInto``/``TimeseriesSelect`` do -- a single
+    query-typed ``this`` slot covers every concrete root shape without one
+    parallel class per shape, and it also keeps this node outside any foreign
+    dialect's Select-specific structural pre-dispatch rewrites (the exact
+    hazard ``SelectInto`` was introduced to avoid), since this node is never
+    itself an ``exp.Select``.
+    """
+
+    arg_types: t.ClassVar = {"this": True, "kind": True, "value": True}
+
+
 class IntoTableClause(exp.Into):
     """Typed target of Vertica's SELECT ``INTO [TABLE]`` clause.
 

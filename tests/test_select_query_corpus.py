@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 from sqlglot import exp
-from sqlglot.errors import ParseError
 
 from tests.helpers import assert_roundtrip
 
@@ -444,8 +443,44 @@ def test_subquery_with_union_in_where() -> None:
     )
 
 
-def test_at_epoch_query_prefix_is_a_documented_residual() -> None:
-    # SELECT's own [ AT epoch ] prefix (26.2 formal syntax, no worked example
-    # on any SELECT-family page) does not parse; scheduled as its own task.
-    with pytest.raises(ParseError):
-        assert_roundtrip("AT EPOCH LATEST SELECT * FROM t")
+def test_at_epoch_query_prefix_epoch_latest() -> None:
+    # SELECT's own [ AT epoch ] prefix (26.2 formal syntax; no worked example
+    # exists on any SELECT-family page). See tests/test_at_epoch_query.py for
+    # the family's full contract, including malformed forms and foreign
+    # generation.
+    assert_roundtrip(
+        "AT EPOCH LATEST SELECT * FROM t",
+        "AT EPOCH LATEST SELECT * FROM t",
+    )
+
+
+def test_at_epoch_query_prefix_epoch_integer() -> None:
+    assert_roundtrip(
+        "AT EPOCH 5 SELECT * FROM t",
+        "AT EPOCH 5 SELECT * FROM t",
+    )
+
+
+def test_at_epoch_query_prefix_time_literal() -> None:
+    assert_roundtrip(
+        "AT TIME '2024-01-01 00:00:00' SELECT * FROM t",
+        "AT TIME '2024-01-01 00:00:00' SELECT * FROM t",
+    )
+
+
+def test_at_epoch_query_prefix_scopes_a_with_clause() -> None:
+    assert_roundtrip(
+        "AT EPOCH LATEST WITH cte AS (SELECT 1) SELECT * FROM cte",
+        "AT EPOCH LATEST WITH cte AS (SELECT 1) SELECT * FROM cte",
+    )
+
+
+def test_at_epoch_query_prefix_scopes_a_union_chain() -> None:
+    # The prefix precedes the whole union-clause/intersect-clause/except-clause
+    # production, not one bare SELECT, so it must wrap the entire compound
+    # query rather than only its first branch.
+    expression = assert_roundtrip(
+        "AT EPOCH LATEST SELECT 1 UNION SELECT 2",
+        "AT EPOCH LATEST SELECT 1 UNION SELECT 2",
+    )
+    assert isinstance(expression.this, exp.Union)

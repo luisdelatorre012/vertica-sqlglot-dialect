@@ -128,6 +128,55 @@ The following invariants apply to every custom node:
    tested.
 5. Public class names are treated as serialized-AST compatibility surface.
 
+A clause that scopes an entire top-level query rather than one `exp.Select`
+needs a different shape than the "promote by becoming" pattern `SelectInto`/
+`TimeseriesSelect` use (re-instantiating the same concrete class with the
+clause added to its own `arg_types`): the SELECT statement's `[ AT epoch ]`
+prefix precedes an optional `WITH` clause and any following `UNION`/
+`INTERSECT`/`EXCEPT` chain, so its wrapped content can be an `exp.Select` or
+any `exp.SetOperation`, shapes with materially different `arg_types`. Task
+Q06's `AtEpochQuery` instead wraps the already-fully-parsed top-level query
+unmodified as a typed `this` child (`exp.Expression`, not a promoted
+`exp.Select`/`exp.Query` subclass), alongside the prefix's own `kind`/`value`
+fields. This sidesteps needing one parallel promoted class per concrete root
+shape, and it also keeps the node outside any foreign dialect's
+Select-specific structural pre-dispatch rewrites (the exact hazard
+`SelectInto` was introduced to avoid): since `AtEpochQuery` is never itself
+an `exp.Select`, no foreign generator's `isinstance`-based CREATE-rewrite or
+INTO-popping logic ever runs on it, and it fails atomically through the same
+unregistered-custom-root fallback as `DropViews`/`DropTables`. The trade-off
+is that optimizer entry points requiring their input to already be an
+`exp.Query` degrade or fail against the wrapper: `sqlglot.lineage.lineage`
+raises immediately and must instead be called against `expression.this`, and
+`qualify`/`optimize` run without error and preserve the root, but their
+scope-building does not treat the wrapped query as a normal top-level scope,
+so previously unqualified columns are identifier-quoted only, not resolved to
+their source table (already-qualified references are unaffected, and no
+column is ever resolved to the wrong table). Choose the promotion pattern
+instead of this wrapping pattern when full optimizer/lineage parity matters
+and the clause is genuinely `exp.Select`-only, as `SelectInto`'s own
+`test_optimizer_qualification_and_lineage` regression requires.
+
+`VerticaParser._parse_statement`'s own custom dispatch (the `elif` chain
+handling `PROFILE`, `SAVE QUERY`, `AT epoch`, and siblings) is reentered by
+every call sqlglot makes through `self._parse_statement()`, not only the true
+per-script top-level entry: base `Parser._parse_select_query`, for instance,
+calls `self._parse_statement()` immediately after parsing a leading `WITH`
+clause's CTE list to parse each CTE body, and `self` is always the concrete
+`VerticaParser` instance regardless of which class's method body is
+executing. A CTE body can therefore independently carry any of these
+custom top-level prefixes (`WITH cte AS (AT EPOCH LATEST SELECT 1) SELECT *
+FROM cte` parses) even though no 26.2 source documents that position for any
+of them; this predates Q06 (`WITH cte AS (PROFILE SELECT 1) SELECT * FROM
+cte` already parsed identically before it) and is a property of the shared
+dispatch mechanism rather than any one family's grammar, so no single family
+should try to close it alone. It fails safely rather than silently in the one
+case that would otherwise be ambiguous: a CTE list arriving *after* one of
+these custom roots (`WITH cte AS (...) AT EPOCH LATEST SELECT ...` or the
+`PROFILE` equivalent) raises a clean `ParseError` ("`<node>` does not support
+CTE") instead of silently dropping the list, because none of these roots
+declare a `with_` arg for the generic CTE-attaching code to find.
+
 The same distinction applies to external loading. Executable `COPY` remains an
 `exp.Copy` subclass, while the reusable body inside `CREATE EXTERNAL TABLE` is
 an `ExternalCopyDefinition`: a targetless node that shares structured source,
