@@ -31,9 +31,23 @@ runtime does not currently guarantee custom-dialect subclass compatibility.
 
 ## Installation
 
+This package is not yet published to PyPI. Install it directly from the
+private GitHub repository. This requires GitHub read access to
+[`luisdelatorre012/vertica-sqlglot-dialect`](https://github.com/luisdelatorre012/vertica-sqlglot-dialect)
+and a git client authenticated for that access — either an SSH key registered
+with GitHub, or an HTTPS credential helper (`gh auth login`, or Git Credential
+Manager):
+
 ```console
-pip install vertica-sqlglot-dialect
+# HTTPS, using your cached GitHub credentials / credential helper
+pip install git+https://github.com/luisdelatorre012/vertica-sqlglot-dialect.git
+
+# SSH
+pip install git+ssh://git@github.com/luisdelatorre012/vertica-sqlglot-dialect.git
 ```
+
+Pin to a branch, tag, or commit for a reproducible install by appending
+`@<ref>` to the URL, e.g. `...vertica-sqlglot-dialect.git@master`.
 
 SQLGlot discovers the dialect through the package entry point:
 
