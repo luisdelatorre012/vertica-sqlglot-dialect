@@ -5388,6 +5388,7 @@ class VerticaGenerator(PostgresGenerator):
         )
 
     def partitionedlimit_sql(self, expression: vexp.PartitionedLimit) -> str:
+        self._validate_partitioned_limit(expression)
         count = self.sql(expression, "expression")
         partition_by = self.expressions(expression, key="partition_by", flat=True)
         partition_by = f"PARTITION BY {partition_by} " if partition_by else ""
@@ -5543,8 +5544,151 @@ class VerticaGenerator(PostgresGenerator):
         options_sql = self.expressions(sqls=options)
         return f" {options_sql}" if options_sql else ""
 
+    @staticmethod
+    def _is_row_count(expression: exp.Expr | None) -> bool:
+        return (
+            isinstance(expression, exp.Literal)
+            and not expression.is_string
+            and isinstance(expression.this, str)
+            and expression.this.isdigit()
+        ) or (isinstance(expression, exp.Placeholder) and expression.args == {"jdbc": True})
+
+    def _validate_select_qualifier(self, expression: exp.Select) -> None:
+        distinct = expression.args.get("distinct")
+        if distinct is not None and (
+            type(distinct) is not exp.Distinct
+            or distinct.args.get("on") is not None
+            or "expressions" in distinct.args
+            or self._has_user_extras(distinct, {"on", "expressions"})
+        ):
+            self.unsupported("Vertica SELECT supports only plain DISTINCT")
+
+        if (
+            expression.args.get("kind") is not None
+            or expression.args.get("operation_modifiers") is not None
+        ):
+            self.unsupported("Vertica SELECT supports only ALL or DISTINCT modifiers")
+
+    def _validate_limit(self, expression: exp.Limit) -> None:
+        if type(expression) is not exp.Limit:
+            self.unsupported("Vertica ordinary LIMIT requires a canonical Limit node")
+            return
+        if self._has_user_extras(
+            expression, {"this", "expression", "offset", "limit_options", "expressions"}
+        ) or any(
+            expression.args.get(key) is not None
+            for key in ("this", "offset", "limit_options", "expressions")
+        ):
+            self.unsupported("Vertica LIMIT contains unsupported fields")
+            return
+        if not self._is_row_count(expression.args.get("expression")):
+            self.unsupported("Vertica LIMIT requires a nonnegative integer or JDBC placeholder")
+
+    def _validate_offset(self, expression: exp.Offset) -> None:
+        if type(expression) is not exp.Offset:
+            self.unsupported("Vertica OFFSET requires a canonical Offset node")
+            return
+        if self._has_user_extras(expression, {"this", "expression", "expressions"}) or any(
+            expression.args.get(key) is not None for key in ("this", "expressions")
+        ):
+            self.unsupported("Vertica OFFSET contains unsupported fields")
+            return
+        if not self._is_row_count(expression.args.get("expression")):
+            self.unsupported("Vertica OFFSET requires a nonnegative integer or JDBC placeholder")
+
+    def _validate_lock(self, expression: exp.Lock) -> None:
+        if type(expression) is not exp.Lock or self._has_user_extras(
+            expression, {"update", "expressions", "wait", "key"}
+        ):
+            self.unsupported("Vertica FOR UPDATE requires a canonical Lock node")
+            return
+
+        tables = expression.args.get("expressions")
+        if (
+            expression.args.get("update") is not True
+            or expression.args.get("wait") is not None
+            or expression.args.get("key") is not None
+            or (
+                tables is not None
+                and (
+                    not isinstance(tables, list)
+                    or not tables
+                    or any(not isinstance(table, exp.Table) for table in tables)
+                )
+            )
+        ):
+            self.unsupported("Vertica supports only FOR UPDATE with an optional table list")
+
+    def _validate_select_tail(self, expression: exp.Expr) -> None:
+        limit = expression.args.get("limit")
+        if isinstance(limit, vexp.PartitionedLimit):
+            self._validate_partitioned_limit(limit)
+        elif isinstance(limit, exp.Limit):
+            self._validate_limit(limit)
+        elif limit is not None:
+            self.unsupported("Vertica SELECT does not support FETCH or non-LIMIT row tails")
+
+        offset = expression.args.get("offset")
+        if isinstance(offset, exp.Offset):
+            self._validate_offset(offset)
+        elif offset is not None:
+            self.unsupported("Vertica SELECT requires a canonical OFFSET clause")
+
+        locks = expression.args.get("locks")
+        if locks is not None:
+            if not isinstance(locks, list) or len(locks) != 1:
+                self.unsupported("Vertica SELECT accepts at most one FOR UPDATE clause")
+            elif isinstance(locks[0], exp.Lock):
+                self._validate_lock(locks[0])
+            else:
+                self.unsupported("Vertica SELECT requires a canonical FOR UPDATE lock")
+
+    def _validate_partitioned_limit(self, expression: vexp.PartitionedLimit) -> None:
+        count = expression.args.get("expression")
+        partition_by = expression.args.get("partition_by")
+        order = expression.args.get("order")
+        if (
+            self._has_user_extras(expression, {"expression", "partition_by", "order"})
+            or not isinstance(count, exp.Literal)
+            or not self._is_row_count(count)
+            or count.this.strip("0") == ""
+            or not isinstance(partition_by, list)
+            or not partition_by
+            or any(not isinstance(item, exp.Expr) for item in partition_by)
+            or not isinstance(order, exp.Order)
+            or not order.expressions
+        ):
+            self.unsupported(
+                "Partitioned LIMIT requires a positive integer, PARTITION BY, and ORDER BY"
+            )
+
+    def select_sql(self, expression: exp.Select) -> str:
+        self._validate_select_qualifier(expression)
+        return super().select_sql(expression)
+
+    def fetch_sql(self, expression: exp.Fetch) -> str:
+        self.unsupported("Vertica SELECT does not support FETCH")
+        return ""
+
+    def limit_sql(self, expression: exp.Limit, top: bool = False) -> str:
+        if top:
+            self.unsupported("Vertica SELECT does not support TOP")
+            return ""
+        self._validate_limit(expression)
+        return super().limit_sql(expression)
+
+    def offset_sql(self, expression: exp.Offset) -> str:
+        self._validate_offset(expression)
+        return super().offset_sql(expression)
+
+    def lock_sql(self, expression: exp.Lock) -> str:
+        self._validate_lock(expression)
+        return super().lock_sql(expression)
+
     def query_modifiers(self, expression: exp.Expr, *sqls: str) -> str:
         """Emit TIMESERIES in Vertica's position after WHERE and before GROUP BY."""
+
+        self._validate_select_tail(expression)
 
         limit = expression.args.get("limit")
         if self.LIMIT_FETCH == "LIMIT" and isinstance(limit, exp.Fetch):

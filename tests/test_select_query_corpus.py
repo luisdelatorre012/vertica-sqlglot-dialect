@@ -216,10 +216,9 @@ def test_order_by_ordinal_positions() -> None:
     )
 
 
-def test_limit_all_drops_at_parse_time() -> None:
-    # Named residual: base SQLGlot's LIMIT ALL grammar discards the clause
-    # during parsing itself (args["limit"] is None), reproduced identically
-    # under plain postgres; matches the COVERAGE.md LIMIT/OFFSET/FETCH note.
+def test_limit_all_canonicalizes_to_clause_absence() -> None:
+    # Q11 makes this an explicit semantic-no-op canonicalization rather than
+    # the accidental base-SQLGlot loss originally recorded by Q04.
     expression = assert_roundtrip(
         "SELECT * FROM t ORDER BY a LIMIT ALL", "SELECT * FROM t ORDER BY a"
     )

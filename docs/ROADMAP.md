@@ -116,7 +116,14 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   reject inherited name-matching/correspondence modifiers at every parser
   error level, and validate nested/programmatic trees before generation while
   preserving left association, branch tails, analysis traversal, and lineage.
-  Q11 is the next eligible task.
+  Q11 is complete: ordinary SELECT qualifiers are restricted to omitted or
+  explicit `ALL` and plain `DISTINCT`; numeric/JDBC-placeholder LIMIT and
+  OFFSET tails, deliberate `LIMIT ALL` no-op canonicalization, and the sole
+  `FOR UPDATE [OF ...]` lock form are validated in parsing and generation.
+  TOP, FETCH, foreign limit options/lock strengths/waits, duplicate or
+  misordered tails, and malformed programmatic fields fail atomically, while
+  compound-query locks own the set root rather than SQLGlot's right SELECT
+  branch. Q12 is the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

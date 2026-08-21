@@ -101,6 +101,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   lowest-numbered remaining task.
 - Completed **Q10 — set-operation modifier conformance**. Q11 is the
   lowest-numbered remaining task.
+- Completed **Q11 — SELECT modifier, row-limit, and lock-tail conformance**.
+  Q12 is the lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -238,7 +240,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q08 | DONE   | Milestone 1 acceptance gate                   | Q01–Q07             | `test: certify milestone one analysis surface`          |
 | Q09 | DONE   | Ordered multilevel GROUP BY losslessness      | Q08                 | `feat: preserve ordered multilevel group by`             |
 | Q10 | DONE   | Set-operation modifier conformance            | Q09                 | `fix: enforce Vertica set operation modifiers`           |
-| Q11 | TODO   | SELECT modifier, row-limit, and lock-tail conformance | Q10           | `fix: enforce Vertica select modifiers`                  |
+| Q11 | DONE   | SELECT modifier, row-limit, and lock-tail conformance | Q10           | `fix: enforce Vertica select modifiers`                  |
 | Q12 | TODO   | Joined-table formal grammar                   | Q11                 | `fix: enforce Vertica joined table grammar`              |
 | Q13 | TODO   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
 | Q14 | TODO   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
@@ -1766,7 +1768,7 @@ treating deprecations as errors. The sdist/wheel build, clean force-install,
 `pip check`, and installed-wheel `python -I` smoke (`SELECT 1 UNION ALL SELECT
 2 INTERSECT SELECT 3`, returning `Intersect`) passed.
 
-### Q11 — SELECT modifier, row-limit, and lock-tail conformance — `TODO`
+### Q11 — SELECT modifier, row-limit, and lock-tail conformance — `DONE`
 
 **Outcome.** Own the ordinary SELECT-level qualifier and tail grammar so
 foreign SQLGlot modifiers cannot parse, partially survive, or regenerate as
@@ -1811,6 +1813,63 @@ semantic lowerings for unrelated non-Vertica input, such as the existing
 [LIMIT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/limit-clause/),
 [OFFSET clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/offset-clause/),
 and [SQLSTATE 42601 messages](https://docs.vertica.com/26.2.x/en/error-messages/sql-state-list/messages-associated-with-sqlstate-42601/).
+
+**Completion record.** Re-opened all four 26.2 primary sources and audited
+installed SQLGlot 30.13's SELECT qualifier/TOP parser, query-modifier loop,
+LIMIT/FETCH/OFFSET/lock parsers, canonical `Distinct`/`Limit`/`LimitOptions`/
+`Fetch`/`Offset`/`Lock` fields, generator ordering, set-operation modifier
+promotion, scope traversal, qualification, optimization, and lineage. The
+sources confirm only omitted/explicit `ALL`, plain `DISTINCT`, ordinary and
+partitioned LIMIT, OFFSET, and `FOR UPDATE [OF table-name[, ...]]`; the error
+catalog independently pins comma-form LIMIT plus duplicate LIMIT, OFFSET, and
+FOR UPDATE as syntax errors. Two editorial contradictions were recorded rather
+than guessed away. First, the current LIMIT formal block displays only
+`num-rows OVER (...) | ALL`, accidentally omitting the ordinary numeric branch
+that the same page's prose and worked `LIMIT 10` example exercise. Second,
+SELECT's formal block places OFFSET before LIMIT, while the official
+set-operation pages and existing official-example corpus use LIMIT before
+OFFSET. Both relative source orders are therefore accepted and canonicalized
+to stable `LIMIT ... OFFSET ...`; ORDER must precede either and FOR UPDATE must
+follow both.
+
+Added `_raise_select_modifier_error` and a Vertica-owned query-modifier loop so
+recognized duplicate or misordered SELECT tails raise `ParseError` at
+IMMEDIATE, RAISE, WARN, and IGNORE instead of returning a partial AST. SELECT
+qualifiers are closed to omitted/explicit ALL (canonical absence) and plain
+`exp.Distinct`; DISTINCT ON, duplicate qualifiers, SELECT kinds/operation
+modifiers, and contextual unquoted-ASCII TOP fail closed. Ordinary LIMIT and
+OFFSET remain canonical nodes and accept lexically nonnegative integer
+literals, including zero and arbitrarily large digits without `int()`
+conversion, plus SQLGlot's anonymous JDBC placeholder. Negative, decimal,
+string, expression, and named-placeholder counts fail closed, as do FETCH,
+comma-form LIMIT, PERCENT, ROW/ROWS, WITH TIES, and BY fields. `LIMIT ALL` is
+now a deliberate semantic-no-op canonicalization: a private parse-only marker
+keeps subsequent OFFSET/FOR UPDATE parsing and comments intact, then is removed
+before the AST escapes. The independent `PartitionedLimit` path remains typed
+and now pins a positive literal count plus nonempty PARTITION BY and ORDER BY.
+
+FOR UPDATE remains one canonical `exp.Lock`; SHARE/KEY SHARE/NO KEY UPDATE,
+NOWAIT/WAIT/SKIP LOCKED, empty OF lists, and duplicates fail closed. Auditing
+set tails found SQLGlot promotes ORDER/LIMIT/OFFSET from the right SELECT to the
+compound root but omits `locks`, producing invalid `right SELECT FOR UPDATE
+ORDER BY ...` on generation. Vertica now promotes that trailing lock too, so
+the documented tail owns the whole compound query. Strict generator validation
+checks direct and nested qualifier/limit/offset/lock nodes, every installed
+field including falsey extras, and foreign/programmatic trees before returning
+SQL; valid foreign-parsed canonical trees still render. Updated architecture,
+coverage, roadmap, source inventory, changelog, and Q04's former LIMIT ALL
+residual regression. Catalog table existence, transaction permissions, and
+lock effects remain server concerns.
+
+The focused `test_select_modifiers.py` module passed 222 tests; the combined
+focused query/set/group/workload/hint/AST suites passed 1,080. The default
+CPython 3.12.6 release gate passed 6,259 tests at 93.13% branch coverage with
+Ruff lint/formatting, strict mypy, and diff checks clean. Isolated CPython
+3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed
+6,259 tests, with 3.15 treating deprecations as errors. The sdist/wheel build,
+clean force-install, `pip check`, and installed-wheel `python -I` smoke
+(`SELECT DISTINCT a FROM t ORDER BY a LIMIT 2 OFFSET 1 FOR UPDATE`, returning
+`Select`) passed.
 
 ### Q12 — joined-table formal grammar — `TODO`
 

@@ -26,6 +26,11 @@ plugin interface.
   default/explicit DISTINCT and `ALL`, while `INTERSECT`, `EXCEPT`, and
   canonicalized `MINUS` reject `ALL` and inherited name-matching modifiers in
   source and programmatic trees.
+- Enforced SELECT qualifier and tail grammar: only `ALL`/`DISTINCT`, ordinary
+  integer/JDBC-placeholder `LIMIT`/`OFFSET`, deliberate `LIMIT ALL`
+  canonicalization, and `FOR UPDATE [OF ...]` survive; TOP, FETCH, foreign row
+  options, lock strengths/waits, invalid ordering, and malformed AST fields
+  fail atomically.
 - Added exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE TABLE
   semantics, including both MERGE filter spellings, strict foreign-clause
   rejection, and a lineage-safe UPDATE `FROM DEFAULT` relation.

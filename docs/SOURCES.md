@@ -38,6 +38,7 @@ called out in code review.
 - [MATCH](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/match-clause/)
 - [LIMIT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/limit-clause/)
 - [OFFSET clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/offset-clause/)
+- [SQLSTATE 42601 syntax-error messages](https://docs.vertica.com/26.2.x/en/error-messages/sql-state-list/messages-associated-with-sqlstate-42601/)
 - [UNION clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/union-clause/)
 - [INTERSECT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/intersect-clause/)
 - [EXCEPT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/except-clause/)

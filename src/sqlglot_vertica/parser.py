@@ -1181,6 +1181,12 @@ class VerticaParser(PostgresParser):
             self.check_errors()
         raise ParseError(message)
 
+    def _raise_select_modifier_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
     def parse_set_operation(
         self, this: exp.Expr | None, consume_pipe: bool = False
     ) -> exp.Expr | None:
@@ -1199,6 +1205,17 @@ class VerticaParser(PostgresParser):
                 f"Vertica {operation.key.upper()} does not support name-matching modifiers"
             )
 
+        return expression
+
+    def _parse_set_operations(self, this: exp.Expr | None) -> exp.Expr | None:
+        expression = super()._parse_set_operations(this)
+        if isinstance(expression, exp.SetOperation):
+            right = expression.expression
+            locks = right.args.get("locks") if isinstance(right, exp.Query) else None
+            if locks:
+                if expression.args.get("locks"):
+                    self._raise_select_modifier_error("Multiple FOR UPDATE clauses are not allowed")
+                expression.set("locks", right.args.pop("locks"))
         return expression
 
     def _parse_vertica_grouping_construct(
@@ -1496,12 +1513,23 @@ class VerticaParser(PostgresParser):
         parse_subquery_alias: bool = True,
         parse_set_operation: bool = True,
     ) -> exp.Expr | None:
+        self._validate_select_qualifier_prefix()
         expression = super()._parse_select_query(
             nested=nested,
             table=table,
             parse_subquery_alias=parse_subquery_alias,
             parse_set_operation=parse_set_operation,
         )
+        if isinstance(expression, exp.Select):
+            distinct = expression.args.get("distinct")
+            if isinstance(distinct, exp.Distinct) and distinct.args.get("on") is not None:
+                self._raise_select_modifier_error("Vertica SELECT does not support DISTINCT ON")
+            if expression.args.get("kind") is not None or expression.args.get(
+                "operation_modifiers"
+            ):
+                self._raise_select_modifier_error(
+                    "Vertica SELECT supports only ALL or DISTINCT as SELECT modifiers"
+                )
         if isinstance(
             expression, (exp.Delete, exp.Insert, exp.Merge, exp.Update)
         ) and expression.args.get("with_"):
@@ -1509,6 +1537,18 @@ class VerticaParser(PostgresParser):
                 f"Vertica {expression.key.upper()} does not support a leading WITH clause"
             )
         return expression
+
+    def _validate_select_qualifier_prefix(self) -> None:
+        if not self._match(TokenType.SELECT, advance=False):
+            return
+
+        first = seq_get(self._tokens, self._index + 1)
+        second = seq_get(self._tokens, self._index + 2)
+        qualifiers = {TokenType.ALL, TokenType.DISTINCT}
+        if first and second and first.token_type in qualifiers and second.token_type in qualifiers:
+            self._raise_select_modifier_error(
+                "Vertica SELECT accepts at most one ALL or DISTINCT qualifier"
+            )
 
     def _parse_table(
         self,
@@ -7794,6 +7834,87 @@ class VerticaParser(PostgresParser):
         result.meta.update(this.meta)
         return t.cast("E", result)
 
+    def _parse_base_query_modifiers(self, this: E | None) -> E | None:
+        if isinstance(this, self.MODIFIABLES):
+            for join in self._parse_joins():
+                this.append("joins", join)
+            for lateral in iter(self._parse_lateral, None):
+                this.append("laterals", lateral)
+
+            tail_rank = (
+                3
+                if this.args.get("locks")
+                else 2
+                if this.args.get("limit") or this.args.get("offset")
+                else 1
+                if this.args.get("order")
+                else 0
+            )
+            tail_ranks = {
+                TokenType.ORDER_BY: 1,
+                TokenType.LIMIT: 2,
+                TokenType.FETCH: 2,
+                TokenType.OFFSET: 2,
+                TokenType.FOR: 3,
+                TokenType.LOCK: 3,
+            }
+
+            while self._match_set(self.QUERY_MODIFIER_PARSERS, advance=False):
+                modifier_token = self._curr
+                modifier_rank = tail_ranks.get(modifier_token.token_type, 0)
+                if tail_rank and (not modifier_rank or modifier_rank < tail_rank):
+                    self._raise_select_modifier_error(
+                        f"{modifier_token.text.upper()} appears after a SELECT tail clause"
+                    )
+
+                parser: t.Callable[[t.Any], tuple[str, exp.Expression | None]] = (
+                    self.QUERY_MODIFIER_PARSERS[modifier_token.token_type]
+                )
+                key, expression = parser(self)
+                if not expression:
+                    break
+
+                if this.args.get(key):
+                    if key in {"limit", "offset", "locks", "order"}:
+                        self._raise_select_modifier_error(
+                            f"Found multiple '{modifier_token.text.upper()}' clauses"
+                        )
+                    self.raise_error(
+                        f"Found multiple '{modifier_token.text.upper()}' clauses",
+                        token=modifier_token,
+                    )
+
+                this.set(key, expression)
+                if key == "limit":
+                    offset = expression.args.get("offset")
+                    expression.set("offset", None)
+                    if offset:
+                        offset = exp.Offset(expression=offset)
+                        this.set("offset", offset)
+                        limit_by_expressions = expression.expressions
+                        expression.set("expressions", None)
+                        offset.set("expressions", limit_by_expressions)
+
+                tail_rank = max(tail_rank, modifier_rank)
+
+        if self.SUPPORTS_IMPLICIT_UNNEST and this and this.args.get("from_"):
+            this = self._implicit_unnests_to_explicit(this)
+        return this
+
+    @staticmethod
+    def _is_limit_all_marker(expression: exp.Expr | None) -> bool:
+        return (
+            isinstance(expression, exp.Limit) and expression.meta.get("vertica_limit_all") is True
+        )
+
+    def _discard_limit_all(self, this: E | None) -> E | None:
+        if this and self._is_limit_all_marker(this.args.get("limit")):
+            limit = this.args["limit"]
+            if limit.comments:
+                this.add_comments(limit.pop_comments())
+            this.set("limit", None)
+        return this
+
     @t.overload
     def _parse_query_modifiers(self, this: E) -> E: ...
 
@@ -7801,16 +7922,19 @@ class VerticaParser(PostgresParser):
     def _parse_query_modifiers(self, this: None) -> None: ...
 
     def _parse_query_modifiers(self, this: E | None) -> E | None:
-        this = super()._parse_query_modifiers(this)
+        this = self._parse_base_query_modifiers(this)
         if not this or not self._match_text_seq("TIMESERIES"):
-            return self._promote_select_into(this)
+            return self._promote_select_into(self._discard_limit_all(this))
+
+        if any(this.args.get(key) for key in ("order", "limit", "offset", "locks")):
+            self._raise_select_modifier_error("TIMESERIES must precede SELECT tail clauses")
 
         if this.args.get("timeseries"):
             self.raise_error("Found multiple TIMESERIES clauses")
 
         timeseries = self._parse_timeseries()
         this.set("timeseries", timeseries)
-        this = super()._parse_query_modifiers(this)
+        this = self._parse_base_query_modifiers(this)
 
         if not isinstance(this, exp.Select):
             self.raise_error("TIMESERIES requires a SELECT query")
@@ -7822,7 +7946,7 @@ class VerticaParser(PostgresParser):
         )
         result.meta.update(this.meta)
         self._rewrite_timeseries_slice_refs(result, timeseries.this.name)
-        return t.cast("E", result)
+        return t.cast("E", self._discard_limit_all(result))
 
     def _rewrite_timeseries_slice_refs(self, query: vexp.TimeseriesSelect, slice_name: str) -> None:
         """Mark references to the synthetic slice column in this SELECT scope.
@@ -7904,20 +8028,65 @@ class VerticaParser(PostgresParser):
         top: bool = False,
         skip_limit_token: bool = False,
     ) -> exp.Expr | None:
-        limit = super()._parse_limit(this=this, top=top, skip_limit_token=skip_limit_token)
-        if top or not isinstance(limit, exp.Limit) or not self._match(TokenType.OVER):
+        if top:
+            if self._match(TokenType.TOP, advance=False) or (
+                self._curr is not None
+                and self._curr.token_type == TokenType.VAR
+                and self._curr.text.isascii()
+                and self._curr.text.upper() == "TOP"
+            ):
+                self._raise_select_modifier_error("Vertica SELECT does not support TOP")
+            return this
+
+        if self._match(TokenType.FETCH, advance=False):
+            self._raise_select_modifier_error("Vertica SELECT does not support FETCH")
+        if not (skip_limit_token or self._match(TokenType.LIMIT)):
+            return this
+
+        comments = self._prev_comments
+        if self._match(TokenType.ALL):
+            if self._match(TokenType.OVER, advance=False):
+                self._raise_select_modifier_error("LIMIT ALL does not support OVER")
+            limit_all = self.expression(exp.Limit(expression=exp.var("ALL")), comments=comments)
+            limit_all.meta["vertica_limit_all"] = True
+            return limit_all
+
+        expression = self._parse_term()
+        if not self._is_row_count(expression):
+            self._raise_select_modifier_error(
+                "Vertica LIMIT requires a nonnegative integer or JDBC placeholder"
+            )
+
+        if self._match(TokenType.COMMA, advance=False):
+            self._raise_select_modifier_error("Vertica does not support LIMIT offset, count")
+        if self._match_set(
+            (TokenType.PERCENT, TokenType.MOD, TokenType.ROW, TokenType.ROWS), advance=False
+        ):
+            self._raise_select_modifier_error(
+                "Vertica LIMIT does not support PERCENT, ROW, or ROWS options"
+            )
+        if self._match_text_seq("WITH", "TIES", advance=False):
+            self._raise_select_modifier_error("Vertica LIMIT does not support WITH TIES")
+        if self._match_text_seq("BY", advance=False):
+            self._raise_select_modifier_error("Vertica LIMIT does not support BY")
+
+        limit = self.expression(exp.Limit(expression=expression), comments=comments)
+        if not self._match(TokenType.OVER):
             return limit
 
-        if limit.args.get("offset") or limit.args.get("limit_options"):
-            self.raise_error("Partitioned LIMIT does not support offset or limit options")
+        if not self._is_positive_integer(expression):
+            self._raise_select_modifier_error(
+                "Partitioned LIMIT requires a positive integer row count"
+            )
+
         if not self._match(TokenType.L_PAREN):
-            self.raise_error("Expected ( after LIMIT ... OVER")
+            self._raise_select_modifier_error("Expected ( after LIMIT ... OVER")
 
         partition_by, order = self._parse_partition_and_order()
         if not partition_by:
-            self.raise_error("Partitioned LIMIT requires PARTITION BY")
+            self._raise_select_modifier_error("Partitioned LIMIT requires PARTITION BY")
         if not order:
-            self.raise_error("Partitioned LIMIT requires ORDER BY")
+            self._raise_select_modifier_error("Partitioned LIMIT requires ORDER BY")
         self._match_r_paren()
 
         return self.expression(
@@ -7926,8 +8095,85 @@ class VerticaParser(PostgresParser):
                 partition_by=partition_by,
                 order=order,
             ),
-            comments=limit.comments,
+            comments=limit.pop_comments(),
         )
+
+    @staticmethod
+    def _is_row_count(expression: exp.Expr | None) -> bool:
+        return (
+            isinstance(expression, exp.Literal)
+            and not expression.is_string
+            and isinstance(expression.this, str)
+            and expression.this.isdigit()
+        ) or (isinstance(expression, exp.Placeholder) and expression.args == {"jdbc": True})
+
+    @classmethod
+    def _is_positive_integer(cls, expression: exp.Expr | None) -> bool:
+        return (
+            cls._is_row_count(expression)
+            and isinstance(expression, exp.Literal)
+            and expression.this.strip("0") != ""
+        )
+
+    def _parse_offset(self, this: exp.Expr | None = None) -> exp.Expr | None:
+        if not self._match(TokenType.OFFSET):
+            return this
+
+        comments = self._prev_comments
+        expression = self._parse_term()
+        if not self._is_row_count(expression):
+            self._raise_select_modifier_error(
+                "Vertica OFFSET requires a nonnegative integer or JDBC placeholder"
+            )
+        if self._match_set((TokenType.ROW, TokenType.ROWS), advance=False):
+            self._raise_select_modifier_error("Vertica OFFSET does not support ROW or ROWS")
+        if self._match_text_seq("BY", advance=False):
+            self._raise_select_modifier_error("Vertica OFFSET does not support BY")
+        return self.expression(exp.Offset(expression=expression), comments=comments)
+
+    def _can_parse_limit_or_offset(self) -> bool:
+        if self._match(TokenType.OFFSET, advance=False) and self._next.token_type in {
+            TokenType.COLON,
+            TokenType.DASH,
+            TokenType.L_PAREN,
+            TokenType.NUMBER,
+            TokenType.PARAMETER,
+            TokenType.PLACEHOLDER,
+            TokenType.PLUS,
+            TokenType.STRING,
+        }:
+            return True
+        return super()._can_parse_limit_or_offset()
+
+    def _parse_locks(self) -> list[exp.Lock]:
+        if not self._match_text_seq("FOR", "UPDATE"):
+            if self._match(TokenType.FOR, advance=False) or self._match(
+                TokenType.LOCK, advance=False
+            ):
+                self._raise_select_modifier_error("Vertica SELECT supports only FOR UPDATE locking")
+            return []
+
+        expressions: list[exp.Expr] | None = None
+        if self._match_text_seq("OF"):
+            expressions = []
+            while True:
+                table = self._parse_table(schema=True)
+                if not isinstance(table, exp.Table) or not isinstance(table.this, exp.Identifier):
+                    self._raise_select_modifier_error("FOR UPDATE OF requires table names")
+                expressions.append(table)
+                if not self._match(TokenType.COMMA):
+                    break
+
+        if self._match_texts(("NOWAIT", "WAIT"), advance=False) or self._match_text_seq(
+            "SKIP", "LOCKED", advance=False
+        ):
+            self._raise_select_modifier_error("Vertica FOR UPDATE does not support wait options")
+        if self._match(TokenType.FOR, advance=False) or self._match(TokenType.LOCK, advance=False):
+            self._raise_select_modifier_error("Multiple FOR UPDATE clauses are not allowed")
+
+        return [
+            self.expression(exp.Lock(update=True, expressions=expressions, wait=None, key=None))
+        ]
 
     def _parse_vertica_match(self) -> vexp.Match:
         if not self._match(TokenType.MATCH_RECOGNIZE):

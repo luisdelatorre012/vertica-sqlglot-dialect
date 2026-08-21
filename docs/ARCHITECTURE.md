@@ -161,6 +161,36 @@ Canonical nesting retains SQLGlot's left-associated tree, parentheses,
 branch-local modifiers, whole-compound tails, scope traversal, qualification,
 optimization, and lineage behavior.
 
+Ordinary SELECT qualifiers and tails also stay canonical, but are now a
+closed Vertica contract. Omitted/explicit `ALL` both use the canonical absence
+of `Select.args["distinct"]`; plain `DISTINCT` uses `exp.Distinct`, while
+`DISTINCT ON`, SELECT kinds/operation modifiers, and recognized `TOP` forms
+fail through the SELECT family's guaranteed-raise path. Ordinary `LIMIT` and
+`OFFSET` retain canonical `exp.Limit`/`exp.Offset` children whose value is an
+unsigned integer literal (validated lexically, including arbitrarily large
+digits) or the canonical anonymous JDBC placeholder. `LIMIT ALL` is a
+deliberate semantic-no-op canonicalization to clause absence, rather than an
+untracked parser loss; an internal parse-only marker lets following OFFSET and
+lock clauses parse before the marker is removed. The independent
+`PartitionedLimit` extension requires a positive literal plus nonempty
+`PARTITION BY` and `ORDER BY` children. FETCH, comma-form LIMIT, PERCENT,
+ROW/ROWS, WITH TIES, LIMIT BY, and non-row-count values fail closed.
+
+`FOR UPDATE [OF table[, ...]]` remains one canonical `exp.Lock`; every other
+strength and wait option is rejected. SQLGlot attaches a trailing lock to the
+right SELECT branch before promoting ORDER/LIMIT/OFFSET to an enclosing set
+operation, so the Vertica parser promotes that lock as well. This makes the
+documented tail own the entire compound query and prevents generation such as
+`right_branch FOR UPDATE ORDER BY ...`. Strict generation validates every
+canonical qualifier/limit/offset/lock field, including falsey programmatic
+extras, before returning SQL. The 26.2 pages conflict editorially on two
+points: the current LIMIT syntax block omits the ordinary numeric alternative
+that its own prose and `LIMIT 10` example exercise, and SELECT places OFFSET
+before LIMIT while official set-operation syntax/examples use LIMIT before
+OFFSET. Both relative LIMIT/OFFSET source orders are therefore accepted and
+canonicalized to stable `LIMIT ... OFFSET ...`; ORDER must precede either and
+FOR UPDATE must follow both.
+
 A clause that scopes an entire top-level query rather than one `exp.Select`
 needs a different shape than the "promote by becoming" pattern `SelectInto`/
 `TimeseriesSelect` use (re-instantiating the same concrete class with the
