@@ -40,6 +40,11 @@ plugin interface.
   concrete SELECT/UNION/INTERSECT/EXCEPT query subclasses, preserving scope,
   qualification, optimization, source expansion, lineage, serialization, and
   atomic foreign-generation contracts without caller-side unwrapping.
+- Enforced WITH/CTE query-expression and placement boundaries: CTE bodies are
+  side-effect-free SELECT/set-operation queries, invalid dispatcher roots and
+  inherited modifiers fail at every parser error level, documented subordinate,
+  recursive, hinted, and target-following INSERT forms remain supported, and
+  strict generation validates the complete With/CTE tree.
 - Added exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE TABLE
   semantics, including both MERGE filter spellings, strict foreign-clause
   rejection, and a lineage-safe UPDATE `FROM DEFAULT` relation.

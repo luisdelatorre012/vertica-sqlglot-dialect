@@ -269,27 +269,31 @@ whether `value` would otherwise have been bound, `None`, or unbound.
 unchanged, and the historical query family's own, separate guaranteed-raise
 wrapper (`_raise_at_epoch_query_error`) was untouched.
 
-`VerticaParser._parse_statement`'s own custom dispatch (the `elif` chain
-handling `PROFILE`, `SAVE QUERY`, `AT epoch`, and siblings) is reentered by
-every call sqlglot makes through `self._parse_statement()`, not only the true
-per-script top-level entry: base `Parser._parse_select_query`, for instance,
-calls `self._parse_statement()` immediately after parsing a leading `WITH`
-clause's CTE list to parse each CTE body, and `self` is always the concrete
-`VerticaParser` instance regardless of which class's method body is
-executing. A CTE body can therefore independently carry any of these
-custom top-level prefixes (`WITH cte AS (AT EPOCH LATEST SELECT 1) SELECT *
-FROM cte` parses) even though no 26.2 source documents that position for any
-of them; this predates Q06 (`WITH cte AS (PROFILE SELECT 1) SELECT * FROM
-cte` already parsed identically before it) and is a property of the shared
-dispatch mechanism rather than any one family's grammar, so no single family
-should try to close it alone; Q14 owns the CTE-body contract. A CTE list
-arriving *before* the historical prefix (`WITH cte AS (...) AT EPOCH ...`)
-must still fail even though Q13's analyzer-safe query subclasses now have a
-canonical `with_` field. Parser provenance records whether WITH was parsed
-inside the prefixed query and rejects an outer list explicitly, preserving
-the documented `AT epoch`-before-WITH order. Other custom roots such as
-`PROFILE` retain the generic "does not support CTE" failure until Q14
-centralizes the full placement contract.
+WITH and CTE parsing has its own fail-closed query-expression boundary. While
+SQLGlot parses a CTE body, `VerticaParser._parse_statement` switches to a
+restricted path that admits only a nonempty SELECT, a supported
+UNION/INTERSECT/EXCEPT tree whose branches satisfy the same rule, and a
+subordinate WITH attached to one of those queries. This prevents the ordinary
+top-level dispatcher from admitting PROFILE, EXPLAIN, directed-query, DML,
+DDL, or administrative roots. It also deliberately rejects inherited VALUES
+and bare-FROM query shorthands, SELECT INTO side effects, and an `AT epoch`
+prefix: the 26.2 WITH production places `[ subordinate-WITH-clause ]
+query-expression` inside each CTE, whereas `AT epoch` is a statement-level
+prefix in the separate SELECT production. The WITH page's statement-level
+restriction says WITH supports SELECT and INSERT, and its official INSERT
+example uses the target-following form `INSERT INTO target WITH ... SELECT`;
+that form remains valid while a leading WITH before INSERT or any other
+nonquery statement fails through the CTE family's guaranteed-raise wrapper.
+
+The same parser boundary rejects PostgreSQL per-CTE `AS [NOT] MATERIALIZED`,
+USING KEY, and recursive SEARCH/CYCLE extensions; Vertica's one clause-level
+`ENABLE_WITH_CLAUSE_MATERIALIZATION` hint, ordinary/multiple/subordinate CTEs,
+and documented UNION/UNION ALL recursion remain supported. Strict generation
+validates With/CTE root placement, nonempty typed CTE lists, aliases and column
+lists, recursive state, body roots, modifiers, and unknown fields before
+rendering. A CTE list arriving before the historical prefix (`WITH cte AS
+(...) AT EPOCH ...`) still fails, while the documented `AT epoch WITH ...
+SELECT` order remains analyzer-safe through Q13's query subclasses.
 
 The same distinction applies to external loading. Executable `COPY` remains an
 `exp.Copy` subclass, while the reusable body inside `CREATE EXTERNAL TABLE` is

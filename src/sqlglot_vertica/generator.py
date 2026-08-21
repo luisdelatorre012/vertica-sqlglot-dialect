@@ -840,6 +840,7 @@ class VerticaGenerator(PostgresGenerator):
         return super().set_operation(canonical_type(**canonical_args))
 
     def _vertica_with_sql(self, expression: exp.With, hint: str) -> str:
+        self._validate_with(expression)
         sql = self.expressions(expression, flat=True)
         recursive = (
             "RECURSIVE "
@@ -851,10 +852,25 @@ class VerticaGenerator(PostgresGenerator):
         return f"WITH{hint} {recursive}{sql}{search}"
 
     def withhint_sql(self, expression: vexp.WithHint) -> str:
+        hint = expression.args.get("hint")
+        if (
+            not isinstance(hint, exp.Hint)
+            or not hint.expressions
+            or any(
+                directive.name.upper() != "ENABLE_WITH_CLAUSE_MATERIALIZATION"
+                for directive in hint.expressions
+            )
+        ):
+            self.unsupported(
+                "Vertica WITH materialization hints require ENABLE_WITH_CLAUSE_MATERIALIZATION"
+            )
+            return ""
         return self._vertica_with_sql(expression, self.sql(expression, "hint"))
 
     def with_sql(self, expression: exp.With) -> str:
         """Recover a materialization hint after SQLGlot rebuilds exp.With."""
+
+        self._validate_with(expression)
 
         for cte in expression.expressions:
             if not isinstance(cte, exp.CTE):
@@ -864,6 +880,90 @@ class VerticaGenerator(PostgresGenerator):
                     return self._vertica_with_sql(expression, self.sql(marker, "this"))
 
         return super().with_sql(expression)
+
+    @classmethod
+    def _valid_cte_query(cls, expression: exp.Expr | None) -> bool:
+        if isinstance(expression, exp.Subquery) and expression.is_wrapper:
+            return cls._valid_cte_query(expression.this)
+        if isinstance(
+            expression,
+            (
+                vexp.AtEpochSelect,
+                vexp.AtEpochUnion,
+                vexp.AtEpochIntersect,
+                vexp.AtEpochExcept,
+                vexp.SelectInto,
+            ),
+        ):
+            return False
+        if isinstance(expression, exp.Select):
+            return bool(expression.expressions) and expression.args.get("into") is None
+        if type(expression) in {exp.Union, exp.Intersect, exp.Except}:
+            assert isinstance(expression, exp.SetOperation)
+            return cls._valid_cte_query(expression.this) and cls._valid_cte_query(
+                expression.expression
+            )
+        return False
+
+    def _validate_with(self, expression: exp.With) -> None:
+        allowed = {"expressions", "recursive", "search"}
+        if isinstance(expression, vexp.WithHint):
+            allowed.add("hint")
+        if self._has_user_extras(expression, allowed):
+            self.unsupported("Vertica WITH contains unsupported fields")
+
+        if (
+            expression.parent is None
+            or expression.arg_key != "with_"
+            or not isinstance(expression.parent, exp.Query)
+        ):
+            self.unsupported("Vertica WITH must be attached to a SELECT query root")
+        if (
+            not isinstance(expression.expressions, list)
+            or not expression.expressions
+            or any(not isinstance(cte, exp.CTE) for cte in expression.expressions)
+        ):
+            self.unsupported("Vertica WITH requires a nonempty CTE list")
+        recursive = expression.args.get("recursive")
+        if recursive not in {None, True}:
+            self.unsupported("Vertica WITH RECURSIVE must be either present or absent")
+        if expression.args.get("search") is not None:
+            self.unsupported("Vertica WITH does not support SEARCH or CYCLE clauses")
+
+    def cte_sql(self, expression: exp.CTE) -> str:
+        if self._has_user_extras(
+            expression, {"this", "alias", "scalar", "materialized", "key_expressions"}
+        ):
+            self.unsupported("Vertica CTE contains unsupported fields")
+
+        alias = expression.args.get("alias")
+        columns = alias.args.get("columns") if isinstance(alias, exp.TableAlias) else None
+        if (
+            not isinstance(expression.parent, exp.With)
+            or expression.arg_key != "expressions"
+            or not isinstance(alias, exp.TableAlias)
+            or self._has_user_extras(alias, {"this", "columns"})
+            or not isinstance(alias.this, exp.Identifier)
+            or (
+                columns is not None
+                and (
+                    not columns or any(not isinstance(column, exp.Identifier) for column in columns)
+                )
+            )
+        ):
+            self.unsupported("Vertica CTE requires an identifier alias and optional column names")
+        if any(
+            expression.args.get(key) is not None
+            for key in ("scalar", "materialized", "key_expressions")
+        ):
+            self.unsupported(
+                "Vertica CTE does not support scalar, MATERIALIZED, or USING KEY modifiers"
+            )
+        if not self._valid_cte_query(expression.args.get("this")):
+            self.unsupported(
+                "Vertica CTE bodies require a side-effect-free SELECT query expression"
+            )
+        return super().cte_sql(expression)
 
     def _valid_directed_query(self, query: object, *, allow_subquery: bool = False) -> bool:
         if isinstance(query, exp.Select):

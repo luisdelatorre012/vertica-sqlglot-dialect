@@ -107,6 +107,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   remaining task.
 - Completed **Q13 — analyzer-safe historical query roots**. Q14 is the
   lowest-numbered remaining task.
+- Completed **Q14 — WITH/CTE query-expression and placement conformance**.
+  Q15 is the lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -247,7 +249,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q11 | DONE   | SELECT modifier, row-limit, and lock-tail conformance | Q10           | `fix: enforce Vertica select modifiers`                  |
 | Q12 | DONE   | Joined-table formal grammar                   | Q11                 | `fix: enforce Vertica joined table grammar`              |
 | Q13 | DONE   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
-| Q14 | TODO   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
+| Q14 | DONE   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
 | Q15 | TODO   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
 | Q16 | TODO   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
 | Q17 | TODO   | Analysis table-target identifier conformance  | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
@@ -2054,7 +2056,7 @@ clean force-install, `pip check`, and installed-wheel `python -I` smoke
 (`AT EPOCH LATEST SELECT a FROM t UNION SELECT a FROM u`, returning
 `AtEpochUnion`) passed.
 
-### Q14 — WITH/CTE query-expression and placement conformance — `TODO`
+### Q14 — WITH/CTE query-expression and placement conformance — `DONE`
 
 **Outcome.** Restrict WITH and every CTE body to the documented query surface,
 with guaranteed failure instead of top-level dispatcher re-entry, truncation,
@@ -2103,6 +2105,60 @@ materialization choices.
 [Materialization of WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/materialization-of-with-clause/),
 [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/),
 and [INSERT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/insert/).
+
+**Completion record.** Re-opened all five 26.2 primary sources and audited
+installed SQLGlot 30.13's `_parse_select_query`, `_parse_with`, `_parse_cte`,
+statement dispatch, canonical `With`/`CTE` fields, generator, scope traversal,
+qualification, optimization, and lineage. The WITH formal production places
+`[ subordinate-WITH-clause ] query-expression` inside each CTE and documents
+plain/multiple/subordinate CTEs, clause-level
+`ENABLE_WITH_CLAUSE_MATERIALIZATION`, and UNION/UNION ALL recursion. Its broad
+restriction says WITH supports SELECT and INSERT statements, while its sole
+INSERT example is specifically `INSERT INTO target WITH ... SELECT`; the
+separate INSERT formal syntax likewise owns the target before its SELECT
+query-expression. This was treated as the source-backed distinction between a
+side-effect-free SELECT query-expression in each CTE body and the documented
+target-following outer INSERT form, not permission for INSERT to become a CTE
+body or for leading-WITH INSERT. SELECT's separate `[ AT epoch ] [ WITH-clause
+] SELECT ...` statement production confirms `AT epoch` is a prefix outside the
+CTE `query-expression`, so AT-prefixed CTE bodies are now rejected. No source
+documents inherited bare `VALUES`, bare `FROM`, per-CTE `AS [NOT]
+MATERIALIZED`, `USING KEY`, or recursive SEARCH/CYCLE forms; all fail closed.
+
+Added a CTE parsing-depth boundary to `VerticaParser._parse_statement` and a
+Vertica-owned `_parse_cte`. While a CTE body is active, only a nonempty SELECT
+(including supported Vertica query extensions), a supported canonical
+UNION/INTERSECT/EXCEPT tree whose branches satisfy the same rule, and a
+subordinate WITH may parse. PROFILE, EXPLAIN, directed-query, AT-prefix,
+SELECT-INTO, DML, DDL, COPY, administrative, VALUES, and bare-FROM roots now
+raise through `_raise_cte_error` at IMMEDIATE, RAISE, WARN, and IGNORE instead
+of re-entering the full top-level dispatcher, returning a With sentinel,
+truncating, or producing empty SQL. The same wrapper owns invalid outer-WITH
+placement; ordinary SELECT and the official target-following INSERT form remain
+valid, while leading-WITH INSERT/UPDATE/DELETE/MERGE/CREATE/DROP/TRUNCATE/COPY/
+PROFILE/EXPLAIN/historical-prefix forms fail atomically. Parenthesis-boundary
+comments are retained explicitly. Clause-level materialization hints and
+plain/multiple/subordinate/recursive workload cases remain byte-stable.
+
+Strict generation now validates direct and nested `With`/`WithHint`/`CTE`
+trees before returning SQL: root placement, a nonempty typed CTE list,
+recursive/search state, exact alias and optional column-list shapes, body-root
+allowlists, materialized/scalar/key modifiers, hint identity, and unknown
+fields. Valid plain canonical CTEs remain portable to foreign dialects; the
+existing custom `WithHint` continues to fail atomically in PostgreSQL,
+DuckDB, MySQL, and SQLite. Added `tests/test_cte.py` with 163 tests covering
+the positive forms, exhaustive all-level source negatives, malformed
+multi-statement boundaries, comments, strict AST mutations, parent metadata,
+dump/load and compact/pretty round trips, scope traversal, qualification,
+optimization, lineage, and foreign contracts; updated Q13's former
+AT-prefixed-CTE observation into the new four-level rejection contract. The
+combined focused query/DML/analysis neighbors passed 1,738 tests. The default
+CPython 3.12.6 gate passed 6,539 tests at 93.02% branch coverage with Ruff
+lint/formatting, strict mypy, and diff checks clean. Isolated CPython 3.9.25,
+3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed 6,539
+tests, with 3.15 treating deprecations as errors. The sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel `python -I` smoke (subordinate
+WITH query returning `Select`) passed.
 
 ### Q15 — CREATE TABLE guaranteed-raise completion — `TODO`
 

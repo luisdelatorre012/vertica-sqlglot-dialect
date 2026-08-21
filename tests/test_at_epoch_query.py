@@ -139,20 +139,16 @@ def test_dispatch_neighbors_unchanged() -> None:
     assert not any(isinstance(prop, HISTORICAL_QUERY_TYPES) for prop in properties)
 
 
-def test_cte_body_may_carry_its_own_prefix() -> None:
-    """Documented, not endorsed: the CTE-body parenthesized query re-enters the
-    same top-level statement dispatch as PROFILE/SAVE QUERY/etc. already do, so
-    it independently accepts this prefix too. No 26.2 source documents (or
-    forbids) an AT-epoch-prefixed CTE body; this pins the observed, pre-existing
-    architectural behavior shared with those sibling families rather than a
-    new Q06-specific design choice.
-    """
-
-    sql = "WITH cte AS (AT EPOCH LATEST SELECT 1) SELECT * FROM cte"
-    expression = assert_roundtrip(sql, sql)
-    assert type(expression) is exp.Select
-    cte_query = expression.args["with_"].expressions[0].this
-    assert isinstance(cte_query, HISTORICAL_QUERY_TYPES)
+@pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
+def test_cte_body_rejects_a_statement_level_historical_prefix(
+    error_level: ErrorLevel,
+) -> None:
+    with pytest.raises(ParseError, match="CTE bodies require a SELECT query expression"):
+        parse_one(
+            "WITH cte AS (AT EPOCH LATEST SELECT 1) SELECT * FROM cte",
+            read="vertica",
+            error_level=error_level,
+        )
 
 
 @pytest.mark.parametrize(
@@ -282,18 +278,6 @@ def test_direct_foreign_generation_fails_atomically(
     sql: str, dialect: str, unsupported_level: ErrorLevel
 ) -> None:
     expression = parse_one(sql, read="vertica")
-    with pytest.raises(ValueError, match="AtEpoch"):
-        expression.sql(dialect=dialect, unsupported_level=unsupported_level)
-
-
-@pytest.mark.parametrize("dialect", FOREIGN_DIALECTS)
-@pytest.mark.parametrize("unsupported_level", ALL_UNSUPPORTED_LEVELS)
-def test_cte_body_foreign_generation_fails_atomically(
-    dialect: str, unsupported_level: ErrorLevel
-) -> None:
-    expression = parse_one(
-        "WITH cte AS (AT EPOCH LATEST SELECT 1) SELECT * FROM cte", read="vertica"
-    )
     with pytest.raises(ValueError, match="AtEpoch"):
         expression.sql(dialect=dialect, unsupported_level=unsupported_level)
 

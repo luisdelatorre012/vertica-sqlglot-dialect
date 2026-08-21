@@ -135,6 +135,7 @@ called out in code review.
 - [Defining column values](https://docs.vertica.com/26.2.x/en/admin/working-with-native-tables/managing-table-columns/defining-column-values/)
 - [WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/)
 - [WITH clause recursion](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/with-clause-recursion/)
+- [Materialization of WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/materialization-of-with-clause/)
 - [Subqueries](https://docs.vertica.com/26.2.x/en/data-analysis/queries/subqueries/)
 - [Subquery examples](https://docs.vertica.com/26.2.x/en/data-analysis/queries/subqueries/subquery-examples/)
 - [UPDATE and DELETE subqueries](https://docs.vertica.com/26.2.x/en/data-analysis/queries/subqueries/subqueries-update-and-delete-statements/)

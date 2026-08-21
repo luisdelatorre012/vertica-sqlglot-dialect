@@ -137,7 +137,14 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   unprefixed query. Prefix/value, placement, serialization, and foreign-
   atomicity contracts remain strict; the old Q06 `AtEpochQuery` wrapper stays
   loadable and renderable only as a serialized-AST compatibility path. Q14 is
-  the next eligible task.
+  complete: CTE bodies now use a SELECT/query-expression-only parser boundary
+  instead of re-entering the top-level statement dispatcher; side-effecting,
+  DML/DDL/admin, VALUES/bare-FROM, and AT-prefixed bodies fail at every error
+  level, as do invalid outer-WITH placements and inherited per-CTE
+  MATERIALIZED/USING KEY/SEARCH/CYCLE modifiers. Plain, multiple, subordinate,
+  recursive, clause-materialization-hinted, set-operation, and documented
+  target-following INSERT forms remain analyzable, and strict generation owns
+  the complete With/CTE shape. Q15 is the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

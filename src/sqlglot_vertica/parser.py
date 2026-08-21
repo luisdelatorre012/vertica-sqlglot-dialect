@@ -105,6 +105,8 @@ def _build_to_char(args: list[exp.Expr], dialect: Dialect) -> exp.Expr:
 class VerticaParser(PostgresParser):
     """Parse Vertica SQL into canonical and Vertica-specific AST nodes."""
 
+    _parsing_cte_query_expression = 0
+
     # These Vertica clause words are tokenized specially so they can terminate
     # implicit aliases in their grammatical positions. They remain legal as
     # identifiers (and explicit aliases) everywhere an identifier is expected.
@@ -724,6 +726,15 @@ class VerticaParser(PostgresParser):
     def _parse_statement(self) -> exp.Expr | None:
         if not self._curr:
             return None
+        if self._parsing_cte_query_expression:
+            if self._curr.token_type not in {TokenType.L_PAREN, TokenType.SELECT, TokenType.WITH}:
+                self._raise_cte_error("Vertica CTE bodies require a SELECT query expression")
+            cte_expression = super()._parse_statement()
+            if not self._is_valid_cte_query(cte_expression):
+                self._raise_cte_error(
+                    "Vertica CTE bodies require a side-effect-free SELECT query expression"
+                )
+            return cte_expression
         if any(
             isinstance(comment, MisplacedDirectedComment)
             for token in self._tokens
@@ -1219,6 +1230,12 @@ class VerticaParser(PostgresParser):
             self.check_errors()
         raise ParseError(message)
 
+    def _raise_cte_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
     def parse_set_operation(
         self, this: exp.Expr | None, consume_pipe: bool = False
     ) -> exp.Expr | None:
@@ -1505,6 +1522,15 @@ class VerticaParser(PostgresParser):
         if not with_expression:
             return None
 
+        if not with_expression.expressions:
+            self._raise_cte_error("Vertica WITH requires at least one CTE")
+        if with_expression.args.get("search") is not None or (
+            self._curr is not None
+            and self._curr.text.isascii()
+            and self._curr.text.upper() in {"CYCLE", "SEARCH"}
+        ):
+            self._raise_cte_error("Vertica WITH does not support SEARCH or CYCLE clauses")
+
         hints, ordinary_comments = self._extract_optimizer_hints(
             with_expression.comments, self.WITH_HINT_NAMES
         )
@@ -1538,6 +1564,73 @@ class VerticaParser(PostgresParser):
         result.meta.update(with_expression.meta)
         return result
 
+    def _parse_cte(self) -> exp.CTE | None:
+        index = self._index
+        alias = self._parse_table_alias(self.ID_VAR_TOKENS)
+        if not alias or not alias.this:
+            self._raise_cte_error("Expected CTE to have an alias")
+
+        if self._match_text_seq("USING", "KEY"):
+            self._raise_cte_error("Vertica CTEs do not support USING KEY")
+        if not self._match(TokenType.ALIAS) and not self.OPTIONAL_ALIAS_TOKEN_CTE:
+            self._retreat(index)
+            return None
+
+        comments = self._prev_comments
+        if self._match_text_seq("NOT", "MATERIALIZED") or self._match_text_seq("MATERIALIZED"):
+            self._raise_cte_error("Vertica CTEs do not support per-CTE AS MATERIALIZED modifiers")
+
+        body_comments = list(self._curr.comments) if self._curr else []
+        self._parsing_cte_query_expression += 1
+        try:
+            query = self._parse_wrapped(self._parse_statement)
+        finally:
+            self._parsing_cte_query_expression -= 1
+
+        if not self._is_valid_cte_query(query):
+            self._raise_cte_error(
+                "Vertica CTE bodies require a side-effect-free SELECT query expression"
+            )
+        assert query is not None
+        if body_comments:
+            query.add_comments(body_comments, prepend=True)
+        return self.expression(exp.CTE(this=query, alias=alias), comments=comments)
+
+    @classmethod
+    def _is_valid_cte_query(cls, expression: exp.Expr | None) -> bool:
+        if isinstance(expression, exp.Subquery) and expression.is_wrapper:
+            return cls._is_valid_cte_query(expression.this)
+        if isinstance(
+            expression,
+            (
+                vexp.AtEpochSelect,
+                vexp.AtEpochUnion,
+                vexp.AtEpochIntersect,
+                vexp.AtEpochExcept,
+                vexp.SelectInto,
+            ),
+        ):
+            return False
+        if isinstance(expression, exp.Select):
+            return bool(expression.expressions) and expression.args.get("into") is None
+        if type(expression) in {exp.Union, exp.Intersect, exp.Except}:
+            assert isinstance(expression, exp.SetOperation)
+            return cls._is_valid_cte_query(expression.this) and cls._is_valid_cte_query(
+                expression.expression
+            )
+        return False
+
+    @classmethod
+    def _is_valid_with_root(cls, expression: exp.Expr | None) -> bool:
+        if isinstance(expression, exp.Select):
+            return bool(expression.expressions)
+        if type(expression) in {exp.Union, exp.Intersect, exp.Except}:
+            assert isinstance(expression, exp.SetOperation)
+            return cls._is_valid_with_root(expression.this) and cls._is_valid_with_root(
+                expression.expression
+            )
+        return False
+
     def _parse_select_query(
         self,
         nested: bool = False,
@@ -1545,6 +1638,7 @@ class VerticaParser(PostgresParser):
         parse_subquery_alias: bool = True,
         parse_set_operation: bool = True,
     ) -> exp.Expr | None:
+        had_leading_with = self._match(TokenType.WITH, advance=False)
         self._validate_select_qualifier_prefix()
         expression = super()._parse_select_query(
             nested=nested,
@@ -1579,9 +1673,11 @@ class VerticaParser(PostgresParser):
         if isinstance(
             expression, (exp.Delete, exp.Insert, exp.Merge, exp.Update)
         ) and expression.args.get("with_"):
-            self.raise_error(
+            self._raise_cte_error(
                 f"Vertica {expression.key.upper()} does not support a leading WITH clause"
             )
+        if had_leading_with and not self._is_valid_with_root(expression):
+            self._raise_cte_error("Vertica WITH must precede a SELECT query")
         return expression
 
     def _validate_select_qualifier_prefix(self) -> None:
