@@ -285,6 +285,7 @@ class VerticaGenerator(PostgresGenerator):
         exp.Hex: lambda self, expression: self.func("TO_HEX", expression.this),
         exp.IntDiv: lambda self, expression: self.binary(expression, "//"),
         exp.LowerHex: lambda self, expression: self.func("TO_HEX", expression.this),
+        exp.Select: lambda self, expression: self._select_transform_sql(expression),
         exp.Merge: lambda self, expression: self.merge_sql(expression),
         exp.SHA: rename_func("SHA1"),
         exp.Struct: lambda self, expression: self.vertica_struct_sql(expression),
@@ -569,7 +570,124 @@ class VerticaGenerator(PostgresGenerator):
         vexp.WithHint: lambda self, expression: self.withhint_sql(expression),
     }
 
+    def _validate_join(self, expression: exp.Join, *, allow_semi_anti: bool) -> None:
+        allowed_args = {
+            "this",
+            "on",
+            "side",
+            "kind",
+            "using",
+            "method",
+            "global_",
+            "hint",
+            "match_condition",
+            "directed",
+            "expressions",
+            "pivots",
+        }
+        if set(expression.args) - allowed_args:
+            self.unsupported("Vertica JOIN contains unknown fields")
+
+        this = expression.args.get("this")
+        if not isinstance(this, exp.Expr):
+            self.unsupported("Vertica JOIN requires a relation child")
+            return
+
+        if any(key in expression.args for key in ("global_", "match_condition", "directed")):
+            self.unsupported("Vertica JOIN does not support global, match, or directed fields")
+        if "expressions" in expression.args:
+            self.unsupported("Vertica JOIN does not support secondary relation fields")
+        if expression.args.get("pivots") is not None:
+            self.unsupported("Vertica JOIN does not support pivot fields")
+
+        hint = expression.args.get("hint")
+        if hint is not None and (
+            not isinstance(hint, exp.Hint)
+            or not hint.expressions
+            or set(hint.args) != {"expressions"}
+            or any(
+                not isinstance(directive, (exp.Var, exp.Anonymous))
+                or directive.name.upper() not in {"DISTRIB", "JTYPE"}
+                for directive in hint.expressions
+            )
+        ):
+            self.unsupported("Vertica JOIN hints require structured JTYPE or DISTRIB directives")
+
+        method = expression.method
+        side = expression.side
+        kind = expression.kind
+        on = expression.args.get("on")
+        using = expression.args.get("using")
+        if on is not None and not isinstance(on, exp.Expr):
+            self.unsupported("Vertica JOIN ON requires an expression")
+        if using is not None and (
+            not isinstance(using, list)
+            or not using
+            or any(not isinstance(column, exp.Identifier) for column in using)
+        ):
+            self.unsupported("Vertica JOIN USING requires a nonempty identifier list")
+        if on is not None and using is not None:
+            self.unsupported("Vertica JOIN accepts either ON or USING, not both")
+
+        if isinstance(this, exp.Lateral) and this.args.get("cross_apply") is not None:
+            if any((method, side, kind, on is not None, using is not None, hint is not None)):
+                self.unsupported("Vertica APPLY lowering does not accept JOIN modifiers")
+            return
+
+        if method and method != "NATURAL":
+            self.unsupported(f"Vertica does not support {method} JOIN")
+            return
+        if kind == "STRAIGHT_JOIN":
+            self.unsupported("Vertica does not support STRAIGHT_JOIN")
+            return
+
+        if kind in {"SEMI", "ANTI"}:
+            if (
+                not allow_semi_anti
+                or method
+                or side not in {"", "LEFT"}
+                or not isinstance(on, exp.Expr)
+                or using is not None
+                or hint is not None
+            ):
+                self.unsupported(
+                    f"Vertica {kind} JOIN lowering requires a SELECT-owned left-side ON predicate"
+                )
+            return
+
+        if method == "NATURAL":
+            if not (
+                (not side and kind in {"", "INNER"})
+                or (side in {"LEFT", "RIGHT", "FULL"} and kind == "OUTER")
+            ):
+                self.unsupported("Invalid Vertica NATURAL JOIN kind")
+            if on is not None or using is not None:
+                self.unsupported("Vertica NATURAL JOIN does not accept ON or USING")
+            return
+
+        if kind == "CROSS":
+            if side or on is not None or using is not None:
+                self.unsupported("Vertica CROSS JOIN does not accept a side, ON, or USING")
+            return
+
+        if not (
+            (not side and kind in {"", "INNER"})
+            or (side in {"LEFT", "RIGHT", "FULL"} and kind in {"", "OUTER"})
+        ):
+            self.unsupported("Invalid Vertica JOIN side or kind")
+        if (on is None) == (using is None) and any((side, kind, hint is not None)):
+            self.unsupported("Vertica explicit JOIN requires exactly one ON or USING predicate")
+
+    def _select_transform_sql(self, expression: exp.Select) -> str:
+        for join in expression.args.get("joins") or []:
+            if isinstance(join, exp.Join):
+                self._validate_join(join, allow_semi_anti=True)
+            else:
+                self.unsupported("Vertica SELECT requires canonical Join children")
+        return PostgresGenerator.TRANSFORMS[exp.Select](self, expression)
+
     def join_sql(self, expression: exp.Join) -> str:
+        self._validate_join(expression, allow_semi_anti=False)
         sql = super().join_sql(expression)
         hint = expression.args.get("hint")
         if not isinstance(hint, exp.Hint):
@@ -5664,6 +5782,11 @@ class VerticaGenerator(PostgresGenerator):
 
     def select_sql(self, expression: exp.Select) -> str:
         self._validate_select_qualifier(expression)
+        for join in expression.args.get("joins") or []:
+            if isinstance(join, exp.Join):
+                self._validate_join(join, allow_semi_anti=True)
+            else:
+                self.unsupported("Vertica SELECT requires canonical Join children")
         return super().select_sql(expression)
 
     def fetch_sql(self, expression: exp.Fetch) -> str:

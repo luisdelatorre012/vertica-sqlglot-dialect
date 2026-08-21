@@ -191,6 +191,30 @@ OFFSET. Both relative LIMIT/OFFSET source orders are therefore accepted and
 canonicalized to stable `LIMIT ... OFFSET ...`; ORDER must precede either and
 FOR UPDATE must follow both.
 
+Joined tables likewise retain canonical `exp.Join` nodes, but parsing and
+generation enforce the 26.2 operator/predicate matrix. Default/explicit INNER
+and LEFT/RIGHT/FULL `[OUTER]` joins require exactly one `ON` or `USING`
+predicate; CROSS and NATURAL joins reject both. NATURAL outer joins retain the
+formal `NATURAL {LEFT|RIGHT|FULL} OUTER JOIN` spelling, including the required
+`OUTER` keyword, while comma joins remain canonical predicate-free `Join`
+nodes. The canonical AST cannot distinguish a comma join from a programmatic
+predicate-free default join once source tokens are gone, so the parser rejects
+the latter at every error level and strict generation treats the identical
+fieldless node as the documented comma form. ASOF, STRAIGHT_JOIN, positional,
+global, match-condition, directed, pivot, and secondary-relation fields are
+rejected rather than emitted or dropped. Structured JTYPE/DISTRIB hints remain
+attached to an explicit documented join and render immediately after JOIN.
+
+Two inherited input lowerings remain deliberate and are validated before the
+PostgreSQL generator preprocessing that implements them. A SELECT-owned LEFT
+SEMI/ANTI join with one ON predicate becomes an equivalent correlated
+`[NOT] EXISTS` predicate; right/full variants, USING, detached join fragments,
+and hinted forms fail instead of emitting foreign syntax or losing metadata.
+CROSS/OUTER APPLY retains SQLGlot's canonical `Lateral` representation and
+generates respectively as `INNER JOIN LATERAL ... ON TRUE` or
+`LEFT JOIN LATERAL ... ON TRUE`. Q20 owns the later full audit of these
+architecture-approved equivalence classes; Q12 does not broaden them.
+
 A clause that scopes an entire top-level query rather than one `exp.Select`
 needs a different shape than the "promote by becoming" pattern `SelectInto`/
 `TimeseriesSelect` use (re-instantiating the same concrete class with the

@@ -103,6 +103,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   lowest-numbered remaining task.
 - Completed **Q11 — SELECT modifier, row-limit, and lock-tail conformance**.
   Q12 is the lowest-numbered remaining task.
+- Completed **Q12 — joined-table formal grammar**. Q13 is the lowest-numbered
+  remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -241,7 +243,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q09 | DONE   | Ordered multilevel GROUP BY losslessness      | Q08                 | `feat: preserve ordered multilevel group by`             |
 | Q10 | DONE   | Set-operation modifier conformance            | Q09                 | `fix: enforce Vertica set operation modifiers`           |
 | Q11 | DONE   | SELECT modifier, row-limit, and lock-tail conformance | Q10           | `fix: enforce Vertica select modifiers`                  |
-| Q12 | TODO   | Joined-table formal grammar                   | Q11                 | `fix: enforce Vertica joined table grammar`              |
+| Q12 | DONE   | Joined-table formal grammar                   | Q11                 | `fix: enforce Vertica joined table grammar`              |
 | Q13 | TODO   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
 | Q14 | TODO   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
 | Q15 | TODO   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
@@ -1871,7 +1873,7 @@ clean force-install, `pip check`, and installed-wheel `python -I` smoke
 (`SELECT DISTINCT a FROM t ORDER BY a LIMIT 2 OFFSET 1 FOR UPDATE`, returning
 `Select`) passed.
 
-### Q12 — joined-table formal grammar — `TODO`
+### Q12 — joined-table formal grammar — `DONE`
 
 **Outcome.** Enforce Vertica's documented joined-table kinds and predicate
 rules at both parse and generation boundaries.
@@ -1912,6 +1914,69 @@ and SELECT tails (Q11).
 [Natural joins](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/inner-joins/natural-joins/),
 [Inner joins](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/inner-joins/),
 and [Outer joins](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/outer-joins/).
+
+**Completion record.** Re-opened all five exact 26.2 primary sources and
+audited installed SQLGlot 30.13's join token sets, `_parse_join`/
+`_parse_joins`, canonical `exp.Join.arg_types`, generic/PostgreSQL join and
+lateral generation, PostgreSQL's SELECT preprocessing, scope traversal,
+qualification, optimization, and lineage. The sources confirm default/
+explicit INNER, LEFT/RIGHT/FULL `[OUTER]`, NATURAL, CROSS, comma joins,
+TABLESAMPLE, ON, and the older USING alternative. One editorial tension is
+now recorded explicitly: the joined-table and join-syntax display blocks put
+`ON join-predicate` in optional brackets, while both pages' accompanying
+restriction says ON is invalid for NATURAL/CROSS and required for every other
+join type; the alternative-syntax section separately documents USING. The
+task's required predicate matrix and those restriction paragraphs were
+followed, so every ordinary explicit join requires exactly one ON or USING.
+The natural-join page's more specific formal syntax requires OUTER in
+`NATURAL {LEFT|RIGHT|FULL} OUTER JOIN`; that requirement is enforced even
+though ordinary LEFT/RIGHT/FULL joins may omit OUTER.
+
+Kept canonical `exp.Join` nodes and added a dedicated guaranteed-raise
+`_raise_join_error` path. The parser captures whether the source token was a
+comma before delegating to SQLGlot, because canonical SQLGlot deliberately
+stores both a comma join and a predicate-free default JOIN as the same
+fieldless node; comma joins remain valid, while source `JOIN b` now raises
+`ParseError` at IMMEDIATE, RAISE, WARN, and IGNORE. Default/INNER and ordinary
+outer forms require ON or a nonempty identifier-only USING list; CROSS and
+NATURAL reject both; invalid method/side/kind combinations, ASOF, and
+STRAIGHT_JOIN fail closed at all four levels. NATURAL inner and all three
+formal NATURAL outer forms, multi-join chains, nested relations/subqueries/
+CTEs, comments, TABLESAMPLE on both inputs, and existing structured
+JTYPE/DISTRIB join hints retain canonical shape and round-trip behavior.
+
+Strict generation validates every installed Join field, including falsey
+foreign/programmatic `global_`, `match_condition`, `directed`, `expressions`,
+and pivot extras, child/predicate/USING types, hint structure, and all
+operator/predicate combinations. Canonical SELECT joins are validated through
+a Vertica transform before inherited PostgreSQL preprocessing can remove or
+rewrite them; direct/non-SELECT Join roots are validated again at `join_sql`.
+This ordering closes the otherwise-silent hazard where an invalid SEMI/ANTI
+tree could be eliminated before per-Join dispatch. Two pre-existing
+equivalence lowerings were retained only after direct output probes and are
+now classified in `ARCHITECTURE.md`: a SELECT-owned left SEMI/ANTI join with
+one ON predicate becomes correlated `[NOT] EXISTS`, while CROSS/OUTER APPLY
+becomes INNER/LEFT `JOIN LATERAL ... ON TRUE`. Right/full, USING, hinted, or
+detached SEMI/ANTI variants and modifier-bearing APPLY forms fail rather than
+emitting foreign syntax or dropping metadata. The canonical fieldless-node
+ambiguity remains an intentional boundary: strict generation treats it as the
+documented comma form because no AST provenance can distinguish a
+programmatic missing-predicate JOIN; source text is unambiguous and rejected.
+
+Added `tests/test_joins.py` with 111 focused tests covering documented kinds,
+predicate rules, natural-outer spelling, samples/hints, chains/nesting/CTEs,
+comments, all four parser error levels, the bounded lowerings, strict direct
+and nested AST mutations, dump/load, copy/transform parent metadata,
+qualification, optimization, scope traversal, lineage, and foreign-parsed
+canonical interoperability. The focused module passed 111 tests; the combined
+join/query/hint/DML/analysis neighbors passed 940. Updated architecture,
+coverage, roadmap, source inventory, and changelog documentation. The default
+CPython 3.12.6 release gate passed 6,370 tests at 93.13% branch coverage with
+Ruff lint/formatting, strict mypy, and diff checks clean. Isolated CPython
+3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed
+6,370 tests, with 3.15 treating deprecations as errors. The sdist/wheel build,
+clean force-install, `pip check`, and installed-wheel `python -I` smoke
+(`SELECT * FROM a NATURAL LEFT OUTER JOIN b`, returning `Select`) passed.
 
 ### Q13 — analyzer-safe historical query roots — `TODO`
 

@@ -31,6 +31,11 @@ plugin interface.
   canonicalization, and `FOR UPDATE [OF ...]` survive; TOP, FETCH, foreign row
   options, lock strengths/waits, invalid ordering, and malformed AST fields
   fail atomically.
+- Enforced joined-table grammar and strict canonical Join validation:
+  documented INNER/outer/NATURAL/CROSS/comma forms preserve ON/USING,
+  TABLESAMPLE, and structured hints, while missing/forbidden predicates,
+  ASOF/STRAIGHT joins, and foreign programmatic fields fail atomically;
+  validated SEMI/ANTI/APPLY inputs retain explicit equivalence lowerings.
 - Added exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE TABLE
   semantics, including both MERGE filter spellings, strict foreign-clause
   rejection, and a lineage-safe UPDATE `FROM DEFAULT` relation.

@@ -1187,6 +1187,12 @@ class VerticaParser(PostgresParser):
             self.check_errors()
         raise ParseError(message)
 
+    def _raise_join_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
     def parse_set_operation(
         self, this: exp.Expr | None, consume_pipe: bool = False
     ) -> exp.Expr | None:
@@ -1600,6 +1606,7 @@ class VerticaParser(PostgresParser):
         parse_bracket: bool = False,
         alias_tokens: t.Collection[TokenType] | None = None,
     ) -> exp.Join | None:
+        comma = self._curr.token_type == TokenType.COMMA
         join = super()._parse_join(
             skip_join_token=skip_join_token,
             parse_bracket=parse_bracket,
@@ -1625,6 +1632,80 @@ class VerticaParser(PostgresParser):
                     )
                 ),
             )
+
+        method = join.method
+        side = join.side
+        kind = join.kind
+        on = join.args.get("on")
+        using = join.args.get("using")
+        lateral = join.args.get("this")
+
+        if on is not None and not isinstance(on, exp.Expr):
+            self._raise_join_error("Vertica JOIN ON requires an expression")
+        if using is not None and (
+            not isinstance(using, list)
+            or not using
+            or any(not isinstance(column, exp.Identifier) for column in using)
+        ):
+            self._raise_join_error("Vertica JOIN USING requires a nonempty identifier list")
+        if on is not None and using is not None:
+            self._raise_join_error("Vertica JOIN accepts either ON or USING, not both")
+
+        if isinstance(lateral, exp.Lateral) and lateral.args.get("cross_apply") is not None:
+            if any(
+                (
+                    method,
+                    side,
+                    kind,
+                    on is not None,
+                    using is not None,
+                    join.args.get("hint") is not None,
+                )
+            ):
+                self._raise_join_error("Vertica APPLY lowering does not accept JOIN modifiers")
+            return join
+
+        if method and method != "NATURAL":
+            self._raise_join_error(f"Vertica does not support {method} JOIN")
+
+        if kind == "STRAIGHT_JOIN":
+            self._raise_join_error("Vertica does not support STRAIGHT_JOIN")
+
+        if kind in {"SEMI", "ANTI"}:
+            if (
+                method
+                or side not in {"", "LEFT"}
+                or on is None
+                or using is not None
+                or join.args.get("hint") is not None
+            ):
+                self._raise_join_error(
+                    f"Vertica {kind} JOIN lowering requires a left-side ON predicate"
+                )
+            return join
+
+        if method == "NATURAL":
+            valid_natural = (not side and kind in {"", "INNER"}) or (
+                side in {"LEFT", "RIGHT", "FULL"} and kind == "OUTER"
+            )
+            if not valid_natural:
+                self._raise_join_error("Invalid Vertica NATURAL JOIN kind")
+            if on is not None or using is not None:
+                self._raise_join_error("Vertica NATURAL JOIN does not accept ON or USING")
+            return join
+
+        if kind == "CROSS":
+            if side or on is not None or using is not None:
+                self._raise_join_error("Vertica CROSS JOIN does not accept a side, ON, or USING")
+            return join
+
+        valid_ordinary = (not side and kind in {"", "INNER"}) or (
+            side in {"LEFT", "RIGHT", "FULL"} and kind in {"", "OUTER"}
+        )
+        if not valid_ordinary:
+            self._raise_join_error("Invalid Vertica JOIN side or kind")
+        if not comma and on is None and using is None:
+            self._raise_join_error("Vertica JOIN requires ON or USING")
         return join
 
     def _parse_describe(self) -> exp.Describe:

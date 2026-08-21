@@ -123,7 +123,14 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   TOP, FETCH, foreign limit options/lock strengths/waits, duplicate or
   misordered tails, and malformed programmatic fields fail atomically, while
   compound-query locks own the set root rather than SQLGlot's right SELECT
-  branch. Q12 is the next eligible task.
+  branch. Q12 is complete: canonical joined-table nodes now enforce the
+  documented INNER/default, LEFT/RIGHT/FULL `[OUTER]`, NATURAL (including
+  formal NATURAL outer spelling), CROSS, comma, ON/USING, TABLESAMPLE, and
+  structured-hint contract. Missing or forbidden predicates and inherited
+  ASOF/STRAIGHT forms fail at every parser error level, strict generation
+  validates every canonical Join field before preprocessing, and the bounded
+  SEMI/ANTI/APPLY equivalence lowerings are explicitly classified. Q13 is the
+  next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
