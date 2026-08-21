@@ -105,6 +105,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   Q12 is the lowest-numbered remaining task.
 - Completed **Q12 — joined-table formal grammar**. Q13 is the lowest-numbered
   remaining task.
+- Completed **Q13 — analyzer-safe historical query roots**. Q14 is the
+  lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -244,7 +246,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q10 | DONE   | Set-operation modifier conformance            | Q09                 | `fix: enforce Vertica set operation modifiers`           |
 | Q11 | DONE   | SELECT modifier, row-limit, and lock-tail conformance | Q10           | `fix: enforce Vertica select modifiers`                  |
 | Q12 | DONE   | Joined-table formal grammar                   | Q11                 | `fix: enforce Vertica joined table grammar`              |
-| Q13 | TODO   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
+| Q13 | DONE   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
 | Q14 | TODO   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
 | Q15 | TODO   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
 | Q16 | TODO   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
@@ -1978,7 +1980,7 @@ Ruff lint/formatting, strict mypy, and diff checks clean. Isolated CPython
 clean force-install, `pip check`, and installed-wheel `python -I` smoke
 (`SELECT * FROM a NATURAL LEFT OUTER JOIN b`, returning `Select`) passed.
 
-### Q13 — analyzer-safe historical query roots — `TODO`
+### Q13 — analyzer-safe historical query roots — `DONE`
 
 **Outcome.** Make a parsed SELECT `[ AT epoch ]` root participate directly in
 ordinary SQLGlot query analysis with parity to the same unprefixed query,
@@ -2013,6 +2015,44 @@ availability or historical-data semantics are modeled.
 
 **Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
 and [Historical queries](https://docs.vertica.com/26.2.x/en/data-analysis/queries/historical-queries/).
+
+**Completion record.** Re-opened both exact 26.2 primary sources. SELECT still
+places `[ AT epoch ]` before the optional WITH clause and the complete
+SELECT/set-operation production; Historical queries describes the same
+`EPOCH LATEST`/integer and `TIME 'timestamp'` forms and only catalog/runtime
+restrictions (AHM range, snapshot retention, and temporary-table behavior).
+No material grammar contradiction was found.
+
+Replaced the parser-emitted Q06 wrapper with four analyzer-visible concrete
+roots: `AtEpochSelect(exp.Select)`, `AtEpochUnion(exp.Union)`,
+`AtEpochIntersect(exp.Intersect)`, and `AtEpochExcept(exp.Except)`. Each stores
+the prefix in typed `at_epoch_kind`/`at_epoch_value` children while retaining
+the complete canonical query fields, so `traverse_scope`, `qualify`,
+`optimize`, source expansion, and `lineage` now accept the public prefixed root
+directly for plain, joined/grouped, CTE, UNION, INTERSECT, and EXCEPT queries.
+The source/column/CTE/scope graphs match unprefixed controls; ambiguous-column
+failures match as well. Parser provenance preserves the documented
+prefix-before-WITH order now that these roots legitimately expose `with_`.
+
+Vertica generation validates prefix values and the existing strict SELECT or
+set-operation contract before rendering. SQLGlot's base set renderer indexes
+operator defaults by exact class, so validated historical set roots are copied
+to their canonical operator only inside generation; the public tree remains
+the custom analyzer-safe subclass. All four roots fail atomically in direct
+and CTE-nested PostgreSQL, DuckDB, MySQL, and SQLite generation. The public
+Q06 `AtEpochQuery` wrapper remains loadable and renderable, with a dump/load
+regression, as the compatibility path for previously serialized trees; new
+parsing never emits it. The independent CTAS `AtEpochProperty` is unchanged.
+
+The focused `test_at_epoch_query.py` module passed 187 tests; the affected
+Q04 corpus plus focused Q09–Q13 query/AST neighbors passed 806 tests. The
+default CPython 3.12.6 gate passed 6,385 tests at 93.08% branch coverage with
+Ruff lint/formatting, strict mypy, and diff checks clean. Isolated CPython
+3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed
+6,385 tests, with 3.15 treating deprecations as errors. The sdist/wheel build,
+clean force-install, `pip check`, and installed-wheel `python -I` smoke
+(`AT EPOCH LATEST SELECT a FROM t UNION SELECT a FROM u`, returning
+`AtEpochUnion`) passed.
 
 ### Q14 — WITH/CTE query-expression and placement conformance — `TODO`
 

@@ -216,39 +216,38 @@ generates respectively as `INNER JOIN LATERAL ... ON TRUE` or
 architecture-approved equivalence classes; Q12 does not broaden them.
 
 A clause that scopes an entire top-level query rather than one `exp.Select`
-needs a different shape than the "promote by becoming" pattern `SelectInto`/
-`TimeseriesSelect` use (re-instantiating the same concrete class with the
-clause added to its own `arg_types`): the SELECT statement's `[ AT epoch ]`
-prefix precedes an optional `WITH` clause and any following `UNION`/
-`INTERSECT`/`EXCEPT` chain, so its wrapped content can be an `exp.Select` or
-any `exp.SetOperation`, shapes with materially different `arg_types`. Task
-Q06's `AtEpochQuery` instead wraps the already-fully-parsed top-level query
-unmodified as a typed `this` child (`exp.Expression`, not a promoted
-`exp.Select`/`exp.Query` subclass), alongside the prefix's own `kind`/`value`
-fields. This sidesteps needing one parallel promoted class per concrete root
-shape, and it also keeps the node outside any foreign dialect's
-Select-specific structural pre-dispatch rewrites (the exact hazard
-`SelectInto` was introduced to avoid): since `AtEpochQuery` is never itself
-an `exp.Select`, no foreign generator's `isinstance`-based CREATE-rewrite or
-INTO-popping logic ever runs on it, and it fails atomically through the same
-unregistered-custom-root fallback as `DropViews`/`DropTables`. The trade-off
-is that optimizer entry points requiring their input to already be an
-`exp.Query` degrade or fail against the wrapper: `sqlglot.lineage.lineage`
-raises immediately and must instead be called against `expression.this`, and
-`qualify`/`optimize` run without error and preserve the root, but their
-scope-building does not treat the wrapped query as a normal top-level scope,
-so previously unqualified columns are identifier-quoted only, not resolved to
-their source table (already-qualified references are unaffected, and no
-column is ever resolved to the wrong table). Choose the promotion pattern
-instead of this wrapping pattern when full optimizer/lineage parity matters
-and the clause is genuinely `exp.Select`-only, as `SelectInto`'s own
-`test_optimizer_qualification_and_lineage` regression requires.
+must still expose the concrete query shape to SQLGlot analysis. The SELECT
+statement's `[ AT epoch ]` prefix precedes an optional `WITH` clause and any
+following `UNION`/`INTERSECT`/`EXCEPT` chain, so Q13 represents it with four
+parallel roots: `AtEpochSelect`, `AtEpochUnion`, `AtEpochIntersect`, and
+`AtEpochExcept`. Each subclasses its corresponding canonical query class and
+adds typed `at_epoch_kind`/`at_epoch_value` fields. This lets
+`traverse_scope`, `qualify`, `optimize`, source expansion, and `lineage`
+operate directly on the public parsed root with the same sources, columns,
+CTEs, and scopes as the unprefixed query; callers never unwrap `.this`.
+
+The four-class shape is deliberate. A single wrapper cannot be both a real
+`Select` and every set-operation kind, while putting untyped prefix fields on
+an exact canonical root would let foreign generators silently ignore them.
+Each custom subclass is registered only in the Vertica generator, so direct
+and nested PostgreSQL, DuckDB, MySQL, and SQLite generation still fails on the
+custom class before Select-specific rewrites can discard the prefix. Vertica
+generation validates the prefix and ordinary query fields, then delegates to
+the existing strict SELECT or set-operation contract. SQLGlot's base
+set-operation renderer uses exact root classes for its dialect lookup, so the
+generator copies an analyzer-safe set root to the corresponding canonical
+operator only after validation and only for rendering; the public AST remains
+the custom query subclass. The original Q06 `AtEpochQuery` wrapper remains a
+public legacy load/generation class so serialized dumps created before Q13
+continue to load and emit identical Vertica SQL, but new parsing never emits
+it.
 
 The pre-existing, structurally unrelated CTAS-only `AtEpochProperty` snapshot
 property (`_parse_at_epoch_property`, wired only into the CTAS
 `AS [hint] [AT EPOCH|AT TIME] query` position) shares the same `EPOCH
-LATEST`/`EPOCH <integer>`/`TIME '<timestamp>'` value grammar as `AtEpochQuery`
-but not its parsing method, node class, or guaranteed-raise wrapper. Task Q07
+LATEST`/`EPOCH <integer>`/`TIME '<timestamp>'` value grammar as the historical
+query roots but not their parsing method, node classes, or guaranteed-raise
+wrapper. Task Q07
 found and fixed a latent defect in that method's three malformed-value
 branches, the same shape P15 already fixed once for the CREATE TABLE
 definition/CTAS/LIKE dispatch (see the column-constraint discussion below):
@@ -267,8 +266,8 @@ returns to the fall-through code once a malformed value is recognized, so
 every branch fails with `ParseError` at every error level regardless of
 whether `value` would otherwise have been bound, `None`, or unbound.
 `AtEpochProperty`'s `arg_types`, valid-input parsing, and rendering are
-unchanged, and `AtEpochQuery`'s own, separate guaranteed-raise wrapper
-(`_raise_at_epoch_query_error`) was untouched.
+unchanged, and the historical query family's own, separate guaranteed-raise
+wrapper (`_raise_at_epoch_query_error`) was untouched.
 
 `VerticaParser._parse_statement`'s own custom dispatch (the `elif` chain
 handling `PROFILE`, `SAVE QUERY`, `AT epoch`, and siblings) is reentered by
@@ -283,12 +282,14 @@ FROM cte` parses) even though no 26.2 source documents that position for any
 of them; this predates Q06 (`WITH cte AS (PROFILE SELECT 1) SELECT * FROM
 cte` already parsed identically before it) and is a property of the shared
 dispatch mechanism rather than any one family's grammar, so no single family
-should try to close it alone. It fails safely rather than silently in the one
-case that would otherwise be ambiguous: a CTE list arriving *after* one of
-these custom roots (`WITH cte AS (...) AT EPOCH LATEST SELECT ...` or the
-`PROFILE` equivalent) raises a clean `ParseError` ("`<node>` does not support
-CTE") instead of silently dropping the list, because none of these roots
-declare a `with_` arg for the generic CTE-attaching code to find.
+should try to close it alone; Q14 owns the CTE-body contract. A CTE list
+arriving *before* the historical prefix (`WITH cte AS (...) AT EPOCH ...`)
+must still fail even though Q13's analyzer-safe query subclasses now have a
+canonical `with_` field. Parser provenance records whether WITH was parsed
+inside the prefixed query and rejects an outer list explicitly, preserving
+the documented `AT epoch`-before-WITH order. Other custom roots such as
+`PROFILE` retain the generic "does not support CTE" failure until Q14
+centralizes the full placement contract.
 
 The same distinction applies to external loading. Executable `COPY` remains an
 `exp.Copy` subclass, while the reusable body inside `CREATE EXTERNAL TABLE` is

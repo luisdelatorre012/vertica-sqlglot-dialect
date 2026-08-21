@@ -129,8 +129,15 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   structured-hint contract. Missing or forbidden predicates and inherited
   ASOF/STRAIGHT forms fail at every parser error level, strict generation
   validates every canonical Join field before preprocessing, and the bounded
-  SEMI/ANTI/APPLY equivalence lowerings are explicitly classified. Q13 is the
-  next eligible task.
+  SEMI/ANTI/APPLY equivalence lowerings are explicitly classified. Q13 is
+  complete: parser-emitted historical queries now use analyzer-visible
+  `AtEpochSelect`/`AtEpochUnion`/`AtEpochIntersect`/`AtEpochExcept` roots, so
+  ordinary scope traversal, qualification, optimization, source expansion,
+  and lineage work directly on the public prefixed root with parity to the
+  unprefixed query. Prefix/value, placement, serialization, and foreign-
+  atomicity contracts remain strict; the old Q06 `AtEpochQuery` wrapper stays
+  loadable and renderable only as a serialized-AST compatibility path. Q14 is
+  the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

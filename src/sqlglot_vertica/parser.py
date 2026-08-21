@@ -1114,7 +1114,9 @@ class VerticaParser(PostgresParser):
             )
         )
 
-    def _parse_at_epoch_query(self, comments: list[str]) -> vexp.AtEpochQuery:
+    def _parse_at_epoch_query(
+        self, comments: list[str]
+    ) -> vexp.AtEpochSelect | vexp.AtEpochUnion | vexp.AtEpochIntersect | vexp.AtEpochExcept:
         """Parse the SELECT statement's ``[ AT epoch ] [ WITH-clause ] SELECT ...`` prefix.
 
         The prefix scopes the entire top-level query production that follows
@@ -1158,9 +1160,33 @@ class VerticaParser(PostgresParser):
             )
         assert isinstance(query, exp.Query)
 
-        return self.expression(
-            vexp.AtEpochQuery(this=query, kind=kind, value=value), comments=comments
+        root_args = {
+            **query.args,
+            "at_epoch_kind": kind,
+            "at_epoch_value": value,
+        }
+        root: vexp.AtEpochSelect | vexp.AtEpochUnion | vexp.AtEpochIntersect | vexp.AtEpochExcept
+        if isinstance(query, exp.Select):
+            root = vexp.AtEpochSelect(**root_args)
+        elif type(query) is exp.Union:
+            root = vexp.AtEpochUnion(**root_args)
+        elif type(query) is exp.Intersect:
+            root = vexp.AtEpochIntersect(**root_args)
+        elif type(query) is exp.Except:
+            root = vexp.AtEpochExcept(**root_args)
+        else:
+            self._raise_at_epoch_query_error(
+                "AT epoch requires a SELECT or supported set-operation query"
+            )
+
+        had_with = query.args.get("with_") is not None
+        result = self.expression(
+            root,
+            comments=[*comments, *query.pop_comments()],
         )
+        result.meta.update(query.meta)
+        result.meta["vertica_at_epoch_had_with"] = had_with
+        return result
 
     def _raise_at_epoch_query_error(self, message: str) -> None:
         self.raise_error(message)
@@ -1526,6 +1552,20 @@ class VerticaParser(PostgresParser):
             parse_subquery_alias=parse_subquery_alias,
             parse_set_operation=parse_set_operation,
         )
+        if (
+            isinstance(
+                expression,
+                (
+                    vexp.AtEpochSelect,
+                    vexp.AtEpochUnion,
+                    vexp.AtEpochIntersect,
+                    vexp.AtEpochExcept,
+                ),
+            )
+            and expression.args.get("with_") is not None
+            and expression.meta.get("vertica_at_epoch_had_with") is not True
+        ):
+            self._raise_at_epoch_query_error("AT epoch must precede a WITH clause")
         if isinstance(expression, exp.Select):
             distinct = expression.args.get("distinct")
             if isinstance(distinct, exp.Distinct) and distinct.args.get("on") is not None:

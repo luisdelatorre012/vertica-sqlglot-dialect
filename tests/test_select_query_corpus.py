@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 from sqlglot import exp
 
+from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_roundtrip
 
 
@@ -481,4 +482,4 @@ def test_at_epoch_query_prefix_scopes_a_union_chain() -> None:
         "AT EPOCH LATEST SELECT 1 UNION SELECT 2",
         "AT EPOCH LATEST SELECT 1 UNION SELECT 2",
     )
-    assert isinstance(expression.this, exp.Union)
+    assert isinstance(expression, vexp.AtEpochUnion)

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import typing as t
+
 import pytest
 from sqlglot import ErrorLevel, exp, parse, parse_one
-from sqlglot.errors import ParseError, UnsupportedError
+from sqlglot.errors import OptimizeError, ParseError, UnsupportedError
 from sqlglot.lineage import lineage
 from sqlglot.optimizer import optimize
 from sqlglot.optimizer.qualify import qualify
+from sqlglot.optimizer.scope import traverse_scope
 
 from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_roundtrip
@@ -15,11 +18,23 @@ from tests.helpers import assert_roundtrip
 FOREIGN_DIALECTS = ["postgres", "duckdb", "mysql", "sqlite"]
 ALL_PARSE_LEVELS = [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE]
 ALL_UNSUPPORTED_LEVELS = [ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE]
+HISTORICAL_QUERY_TYPES = (
+    vexp.AtEpochSelect,
+    vexp.AtEpochUnion,
+    vexp.AtEpochIntersect,
+    vexp.AtEpochExcept,
+)
+HistoricalQuery: t.TypeAlias = t.Union[
+    vexp.AtEpochSelect,
+    vexp.AtEpochUnion,
+    vexp.AtEpochIntersect,
+    vexp.AtEpochExcept,
+]
 
 
-def parse_at_epoch_query(sql: str, expected: str | None = None) -> vexp.AtEpochQuery:
+def parse_at_epoch_query(sql: str, expected: str | None = None) -> HistoricalQuery:
     expression = assert_roundtrip(sql, expected)
-    assert isinstance(expression, vexp.AtEpochQuery)
+    assert isinstance(expression, HISTORICAL_QUERY_TYPES)
     return expression
 
 
@@ -27,14 +42,14 @@ def test_epoch_latest() -> None:
     expression = parse_at_epoch_query(
         "AT EPOCH LATEST SELECT * FROM t", "AT EPOCH LATEST SELECT * FROM t"
     )
-    assert expression.args["kind"] == exp.var("EPOCH")
-    assert expression.args["value"] == exp.var("LATEST")
-    assert type(expression.this) is exp.Select
+    assert expression.args["at_epoch_kind"] == exp.var("EPOCH")
+    assert expression.args["at_epoch_value"] == exp.var("LATEST")
+    assert type(expression) is vexp.AtEpochSelect
 
 
 def test_epoch_integer() -> None:
     expression = parse_at_epoch_query("AT EPOCH 5 SELECT * FROM t", "AT EPOCH 5 SELECT * FROM t")
-    value = expression.args["value"]
+    value = expression.args["at_epoch_value"]
     assert isinstance(value, exp.Literal) and value.is_int and value.name == "5"
 
 
@@ -43,7 +58,7 @@ def test_time_literal() -> None:
         "AT TIME '2024-01-01 00:00:00' SELECT * FROM t",
         "AT TIME '2024-01-01 00:00:00' SELECT * FROM t",
     )
-    value = expression.args["value"]
+    value = expression.args["at_epoch_value"]
     assert isinstance(value, exp.Literal) and value.is_string
     assert value.name == "2024-01-01 00:00:00"
 
@@ -57,8 +72,8 @@ def test_prefix_scopes_a_with_clause() -> None:
         "AT EPOCH LATEST WITH cte AS (SELECT 1) SELECT * FROM cte",
         "AT EPOCH LATEST WITH cte AS (SELECT 1) SELECT * FROM cte",
     )
-    assert type(expression.this) is exp.Select
-    assert expression.this.args.get("with_") is not None
+    assert type(expression) is vexp.AtEpochSelect
+    assert expression.args.get("with_") is not None
 
 
 @pytest.mark.parametrize(
@@ -75,25 +90,30 @@ def test_prefix_scopes_the_whole_set_operation_chain(sql: str, root_type: type[e
     """The prefix wraps the entire compound query, not only its first branch."""
 
     expression = parse_at_epoch_query(sql, sql)
-    assert type(expression.this) is root_type
+    expected_type = {
+        exp.Union: vexp.AtEpochUnion,
+        exp.Intersect: vexp.AtEpochIntersect,
+        exp.Except: vexp.AtEpochExcept,
+    }[root_type]
+    assert type(expression) is expected_type
 
 
 def test_prefix_scopes_a_with_clause_and_a_union_chain() -> None:
     sql = "AT EPOCH LATEST WITH cte AS (SELECT 1) SELECT * FROM cte UNION SELECT * FROM cte"
     expression = parse_at_epoch_query(sql, sql)
-    assert type(expression.this) is exp.Union
-    assert expression.this.args.get("with_") is not None
+    assert type(expression) is vexp.AtEpochUnion
+    assert expression.args.get("with_") is not None
 
 
 def test_multi_statement_boundaries() -> None:
     statements = parse("AT EPOCH LATEST SELECT 1; AT EPOCH 2 SELECT 2", read="vertica")
     assert len(statements) == 2
-    assert all(isinstance(statement, vexp.AtEpochQuery) for statement in statements)
+    assert all(isinstance(statement, HISTORICAL_QUERY_TYPES) for statement in statements)
 
 
 def test_leading_comment_is_retained() -> None:
     expression = parse_one("/* scratch */ AT EPOCH LATEST SELECT * FROM t", read="vertica")
-    assert isinstance(expression, vexp.AtEpochQuery)
+    assert isinstance(expression, HISTORICAL_QUERY_TYPES)
     assert "scratch" in expression.sql(dialect="vertica")
 
 
@@ -116,7 +136,7 @@ def test_dispatch_neighbors_unchanged() -> None:
     assert type(ctas) is exp.Create
     properties = ctas.args["properties"].expressions
     assert any(isinstance(prop, vexp.AtEpochProperty) for prop in properties)
-    assert not any(isinstance(prop, vexp.AtEpochQuery) for prop in properties)
+    assert not any(isinstance(prop, HISTORICAL_QUERY_TYPES) for prop in properties)
 
 
 def test_cte_body_may_carry_its_own_prefix() -> None:
@@ -132,7 +152,7 @@ def test_cte_body_may_carry_its_own_prefix() -> None:
     expression = assert_roundtrip(sql, sql)
     assert type(expression) is exp.Select
     cte_query = expression.args["with_"].expressions[0].this
-    assert isinstance(cte_query, vexp.AtEpochQuery)
+    assert isinstance(cte_query, HISTORICAL_QUERY_TYPES)
 
 
 @pytest.mark.parametrize(
@@ -142,13 +162,11 @@ def test_cte_body_may_carry_its_own_prefix() -> None:
     ],
 )
 def test_prefix_after_an_outer_with_clause_fails_closed(sql: str) -> None:
-    """The prefix must precede WITH, not follow it; AtEpochQuery also carries
-    no ``with_`` slot, so a CTE list arriving after this node parses fails the
-    same generic "does not support CTE" check ``ProfileStatement`` already
-    relies on rather than silently dropping the CTE list.
+    """The analyzer-safe root has a WITH slot, so parser provenance must still
+    enforce the documented prefix-before-WITH order explicitly.
     """
 
-    with pytest.raises(ParseError, match="does not support CTE"):
+    with pytest.raises(ParseError, match="must precede a WITH clause"):
         parse_one(sql, read="vertica")
 
 
@@ -229,15 +247,17 @@ def test_contextual_words_remain_valid_identifiers_when_not_leading(name: str) -
 )
 def test_quoted_keyword_payloads_are_ordinary_identifiers(sql: str) -> None:
     expression = parse_one(sql, read="vertica")
-    assert not isinstance(expression, vexp.AtEpochQuery)
+    assert not isinstance(expression, HISTORICAL_QUERY_TYPES)
 
 
 def test_parent_metadata_and_copy_stability() -> None:
     expression = parse_at_epoch_query("AT EPOCH 5 SELECT a FROM t")
-    assert expression.this.parent is expression
-    assert expression.this.arg_key == "this"
-    assert expression.args["kind"].parent is expression
-    assert expression.args["value"].parent is expression
+    assert isinstance(expression, vexp.AtEpochSelect)
+    projection = expression.expressions[0]
+    assert projection.parent is expression
+    assert projection.arg_key == "expressions"
+    assert expression.args["at_epoch_kind"].parent is expression
+    assert expression.args["at_epoch_value"].parent is expression
 
     duplicate = expression.copy()
     assert duplicate == expression
@@ -262,7 +282,7 @@ def test_direct_foreign_generation_fails_atomically(
     sql: str, dialect: str, unsupported_level: ErrorLevel
 ) -> None:
     expression = parse_one(sql, read="vertica")
-    with pytest.raises(ValueError, match="AtEpochQuery"):
+    with pytest.raises(ValueError, match="AtEpoch"):
         expression.sql(dialect=dialect, unsupported_level=unsupported_level)
 
 
@@ -274,7 +294,7 @@ def test_cte_body_foreign_generation_fails_atomically(
     expression = parse_one(
         "WITH cte AS (AT EPOCH LATEST SELECT 1) SELECT * FROM cte", read="vertica"
     )
-    with pytest.raises(ValueError, match="AtEpochQuery"):
+    with pytest.raises(ValueError, match="AtEpoch"):
         expression.sql(dialect=dialect, unsupported_level=unsupported_level)
 
 
@@ -296,6 +316,8 @@ def build_valid_at_epoch_query(**overrides: object) -> vexp.AtEpochQuery:
 
 
 def test_programmatic_valid_node_renders() -> None:
+    """The Q06 wrapper remains a supported serialized-AST compatibility path."""
+
     expression = build_valid_at_epoch_query()
     assert (
         expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
@@ -315,6 +337,35 @@ def test_programmatic_valid_node_renders() -> None:
         integer_form.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
         == "AT EPOCH 5 SELECT a FROM t"
     )
+
+    restored = exp.Expr.load(integer_form.dump())
+    assert type(restored) is vexp.AtEpochQuery
+    assert restored.sql(dialect="vertica") == "AT EPOCH 5 SELECT a FROM t"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("at_epoch_kind", None),
+        ("at_epoch_kind", exp.var("SNAPSHOT")),
+        ("at_epoch_value", None),
+        ("at_epoch_value", exp.Literal.string("LATEST")),
+    ],
+)
+def test_malformed_programmatic_analyzer_safe_roots_fail_atomically(
+    field: str, value: exp.Expr | None
+) -> None:
+    expression = parse_at_epoch_query("AT EPOCH LATEST SELECT a FROM t")
+    expression.set(field, value)
+    with pytest.raises(UnsupportedError):
+        expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+
+
+def test_malformed_programmatic_historical_set_root_fails_atomically() -> None:
+    expression = parse_at_epoch_query("AT EPOCH LATEST SELECT a FROM t UNION SELECT a FROM u")
+    expression.set("expression", exp.column("not_a_query"))
+    with pytest.raises(UnsupportedError):
+        expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
 
 
 @pytest.mark.parametrize(
@@ -366,71 +417,116 @@ def test_malformed_programmatic_at_epoch_query_asts_fail_atomically(
         expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
 
 
-def test_optimizer_qualify_and_optimize_are_stable_but_do_not_fully_qualify() -> None:
-    """``qualify()``/``optimize()`` do not crash and preserve the ``AtEpochQuery``
-    root, dump/load, and structural validity -- the common release gate's
-    "optimizer stability" requirement. This is a deliberately weaker claim
-    than full support: neither one requires the root itself to be an
-    ``exp.Query``, so both run, but their scope-building does not treat the
-    wrapped ``this`` as a normal top-level query scope, so previously
-    unqualified columns are identifier-quoted only, not resolved to their
-    source table, unlike the identical query without the prefix. This is a
-    documented residual, not a crash or a wrong answer: already-qualified
-    references (for example a JOIN condition written as ``t1.a = t2.b``)
-    stay correctly qualified, and no column is ever resolved to the wrong
-    table. Out of scope to close in Q06 -- neither qualify/lineage support
-    nor the AT-epoch prefix are in Q07's own multi-statement corpus.
-    """
-
+def test_optimizer_qualification_and_scope_match_the_unprefixed_select() -> None:
     schema = {"t": {"a": "INT", "b": "VARCHAR"}}
     expression = parse_at_epoch_query("AT EPOCH LATEST SELECT a, b FROM t")
-
-    unwrapped_qualified = qualify(expression.this.copy(), dialect="vertica", schema=schema)
-    unwrapped_columns = {
-        column.name: column.table
-        for column in unwrapped_qualified.find_all(exp.Column)
-        if column.name in {"a", "b"}
-    }
-    assert unwrapped_columns == {"a": "t", "b": "t"}
+    control = parse_one("SELECT a, b FROM t", read="vertica")
 
     qualified = qualify(expression.copy(), dialect="vertica", schema=schema)
-    assert isinstance(qualified, vexp.AtEpochQuery)
-    assert isinstance(qualified.this, exp.Select)
-    wrapped_columns = {
+    qualified_control = qualify(control, dialect="vertica", schema=schema)
+    assert isinstance(qualified, vexp.AtEpochSelect)
+    historical_columns = {
         column.name: column.table
         for column in qualified.find_all(exp.Column)
         if column.name in {"a", "b"}
     }
-    assert wrapped_columns == {"a": "", "b": ""}
-    assert qualified.sql(dialect="vertica") == 'AT EPOCH LATEST SELECT "a", "b" FROM "t"'
-
-    joined = parse_at_epoch_query("AT EPOCH LATEST SELECT a, b FROM t1 JOIN t2 ON t1.a = t2.b")
-    join_schema = {"t1": {"a": "INT"}, "t2": {"b": "VARCHAR"}}
-    qualified_join = qualify(joined.copy(), dialect="vertica", schema=join_schema)
-    already_qualified = {
-        column.sql(dialect="vertica")
-        for column in qualified_join.find_all(exp.Column)
-        if column.table
+    control_columns = {
+        column.name: column.table
+        for column in qualified_control.find_all(exp.Column)
+        if column.name in {"a", "b"}
     }
-    assert already_qualified == {'"t1"."a"', '"t2"."b"'}
+    assert historical_columns == control_columns == {"a": "t", "b": "t"}
+    assert [set(scope.sources) for scope in traverse_scope(qualified)] == [
+        set(scope.sources) for scope in traverse_scope(qualified_control)
+    ]
 
     optimized = optimize(expression.copy(), dialect="vertica", schema=schema)
-    assert isinstance(optimized, vexp.AtEpochQuery)
+    assert isinstance(optimized, vexp.AtEpochSelect)
     restored = exp.Expr.load(optimized.dump())
     assert restored == optimized
 
 
-def test_lineage_requires_unwrapping_the_prefix() -> None:
-    """Documented residual: ``lineage()``'s entry point requires a
-    ``Select``-rooted input, so it raises against the wrapper directly and
-    must instead be called against ``expression.this``.
-    """
-
+def test_lineage_accepts_the_historical_select_root_directly() -> None:
     schema = {"t": {"a": "INT", "b": "VARCHAR"}}
     expression = parse_at_epoch_query("AT EPOCH LATEST SELECT a, b FROM t")
-
-    with pytest.raises(Exception, match="must be SELECT"):
-        lineage("a", expression, schema=schema, dialect="vertica")
-
-    node = lineage("a", expression.this, schema=schema, dialect="vertica")
+    node = lineage("a", expression, schema=schema, dialect="vertica")
     assert {downstream.name for downstream in node.walk()} >= {"a", "t.a"}
+
+
+@pytest.mark.parametrize(
+    ("operator", "root_type"),
+    [
+        ("UNION", vexp.AtEpochUnion),
+        ("INTERSECT", vexp.AtEpochIntersect),
+        ("EXCEPT", vexp.AtEpochExcept),
+    ],
+)
+def test_set_operation_roots_have_direct_analysis_parity(
+    operator: str, root_type: type[exp.SetOperation]
+) -> None:
+    schema = {"t": {"a": "INT"}, "u": {"a": "INT"}}
+    body = f"SELECT a FROM t {operator} SELECT a FROM u"
+    historical = parse_at_epoch_query(f"AT EPOCH LATEST {body}")
+    control = parse_one(body, read="vertica")
+
+    assert type(historical) is root_type
+    assert [set(scope.sources) for scope in traverse_scope(historical)] == [
+        set(scope.sources) for scope in traverse_scope(control)
+    ]
+    qualified = qualify(historical.copy(), dialect="vertica", schema=schema)
+    optimized = optimize(historical.copy(), dialect="vertica", schema=schema)
+    assert type(qualified) is root_type
+    assert type(optimized) is root_type
+    lineage_names = {
+        node.name for node in lineage("a", historical, schema=schema, dialect="vertica").walk()
+    }
+    assert lineage_names >= {
+        "t.a",
+        "u.a",
+    }
+
+
+def test_joined_grouped_cte_analysis_uses_the_public_historical_root() -> None:
+    sql = (
+        "AT EPOCH LATEST WITH c AS (SELECT t.a, u.b FROM t "
+        "JOIN u ON t.id = u.id) SELECT a, COUNT(b) AS n FROM c GROUP BY a"
+    )
+    schema = {
+        "t": {"id": "INT", "a": "INT"},
+        "u": {"id": "INT", "b": "INT"},
+    }
+    expression = parse_at_epoch_query(sql)
+    qualified = qualify(expression.copy(), dialect="vertica", schema=schema)
+    assert isinstance(qualified, vexp.AtEpochSelect)
+    assert [set(scope.sources) for scope in traverse_scope(qualified)] == [{"t", "u"}, {"c"}]
+    lineage_names = {
+        node.name for node in lineage("a", expression, schema=schema, dialect="vertica").walk()
+    }
+    assert lineage_names >= {
+        "c.a",
+        "t.a",
+    }
+
+
+def test_lineage_source_expansion_accepts_the_public_historical_root() -> None:
+    expression = parse_at_epoch_query("AT EPOCH LATEST SELECT a FROM supplied")
+    node = lineage(
+        "a",
+        expression,
+        sources={"supplied": "SELECT a FROM raw_source"},
+        schema={"raw_source": {"a": "INT"}},
+        dialect="vertica",
+    )
+    assert {downstream.name for downstream in node.walk()} >= {
+        "supplied.a",
+        "raw_source.a",
+    }
+
+
+def test_ambiguous_column_failure_matches_the_unprefixed_query() -> None:
+    schema = {"t": {"id": "INT"}, "u": {"id": "INT"}}
+    historical = parse_at_epoch_query("AT EPOCH LATEST SELECT id FROM t JOIN u ON t.id = u.id")
+    control = parse_one("SELECT id FROM t JOIN u ON t.id = u.id", read="vertica")
+    for expression in (historical, control):
+        with pytest.raises(OptimizeError, match="could not be resolved"):
+            qualify(expression, dialect="vertica", schema=schema)

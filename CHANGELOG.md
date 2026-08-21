@@ -36,6 +36,10 @@ plugin interface.
   TABLESAMPLE, and structured hints, while missing/forbidden predicates,
   ASOF/STRAIGHT joins, and foreign programmatic fields fail atomically;
   validated SEMI/ANTI/APPLY inputs retain explicit equivalence lowerings.
+- Made SELECT `AT epoch` historical queries directly analyzer-safe with
+  concrete SELECT/UNION/INTERSECT/EXCEPT query subclasses, preserving scope,
+  qualification, optimization, source expansion, lineage, serialization, and
+  atomic foreign-generation contracts without caller-side unwrapping.
 - Added exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE TABLE
   semantics, including both MERGE filter spellings, strict foreign-clause
   rejection, and a lineage-safe UPDATE `FROM DEFAULT` relation.

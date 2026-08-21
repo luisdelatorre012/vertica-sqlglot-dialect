@@ -21,6 +21,7 @@ called out in code review.
 ## Query extensions and functions
 
 - [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
+- [Historical queries](https://docs.vertica.com/26.2.x/en/data-analysis/queries/historical-queries/)
 - [INTO TABLE clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/into-table-clause/)
 - [FROM clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/from-clause/)
 - [Joined-table](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/from-clause/joined-table/)

@@ -1377,24 +1377,55 @@ class SelectInto(exp.Select):
 
 
 class AtEpochQuery(exp.Expression):
-    """A top-level query preceded by Vertica's ``AT epoch`` historical-query prefix.
+    """Legacy serialized wrapper for Vertica's ``AT epoch`` query prefix.
 
-    The SELECT statement's own formal syntax is
-    ``[ AT epoch ] [ WITH-clause ] SELECT ... [ union-clause ] [ intersect-clause ]
-    [ except-clause ] ...``: the prefix precedes a possible ``WITH`` clause and
-    any trailing ``UNION``/``INTERSECT``/``EXCEPT`` chain, not one bare
-    ``exp.Select``. ``this`` therefore holds the complete top-level query
-    exactly as ordinary query parsing produced it (``exp.Select`` or
-    ``exp.SetOperation``), unmodified, rather than promoting via an args-spread
-    clone the way ``SelectInto``/``TimeseriesSelect`` do -- a single
-    query-typed ``this`` slot covers every concrete root shape without one
-    parallel class per shape, and it also keeps this node outside any foreign
-    dialect's Select-specific structural pre-dispatch rewrites (the exact
-    hazard ``SelectInto`` was introduced to avoid), since this node is never
-    itself an ``exp.Select``.
+    Q06 emitted this wrapper around a complete query. Q13 retains the public
+    class so previously dumped trees still load and generate, but new parsing
+    emits the analyzer-visible concrete query subclasses below.
     """
 
     arg_types: t.ClassVar = {"this": True, "kind": True, "value": True}
+
+
+class AtEpochSelect(exp.Select):
+    """Analyzer-visible historical SELECT root."""
+
+    arg_types: t.ClassVar = {
+        **exp.Select.arg_types,
+        "timeseries": False,
+        "at_epoch_kind": True,
+        "at_epoch_value": True,
+    }
+
+
+class AtEpochUnion(exp.Union):
+    """Analyzer-visible historical UNION root."""
+
+    arg_types: t.ClassVar = {
+        **exp.Union.arg_types,
+        "at_epoch_kind": True,
+        "at_epoch_value": True,
+    }
+
+
+class AtEpochIntersect(exp.Intersect):
+    """Analyzer-visible historical INTERSECT root."""
+
+    arg_types: t.ClassVar = {
+        **exp.Intersect.arg_types,
+        "at_epoch_kind": True,
+        "at_epoch_value": True,
+    }
+
+
+class AtEpochExcept(exp.Except):
+    """Analyzer-visible historical EXCEPT/MINUS root."""
+
+    arg_types: t.ClassVar = {
+        **exp.Except.arg_types,
+        "at_epoch_kind": True,
+        "at_epoch_value": True,
+    }
 
 
 class IntoTableClause(exp.Into):

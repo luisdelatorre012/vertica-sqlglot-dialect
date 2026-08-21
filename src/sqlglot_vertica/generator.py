@@ -323,6 +323,10 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AccessPolicyTarget: lambda self, expression: self.accesspolicytarget_sql(expression),
         vexp.AtEpochProperty: lambda self, expression: self.atepochproperty_sql(expression),
         vexp.AtEpochQuery: lambda self, expression: self.atepochquery_sql(expression),
+        vexp.AtEpochSelect: lambda self, expression: self.atepochquery_sql(expression),
+        vexp.AtEpochUnion: lambda self, expression: self.atepochquery_sql(expression),
+        vexp.AtEpochIntersect: lambda self, expression: self.atepochquery_sql(expression),
+        vexp.AtEpochExcept: lambda self, expression: self.atepochquery_sql(expression),
         vexp.AuthenticationGrant: lambda self, expression: self.authenticationgrant_sql(expression),
         vexp.AuthenticationRevoke: lambda self, expression: self.authenticationrevoke_sql(
             expression
@@ -793,33 +797,47 @@ class VerticaGenerator(PostgresGenerator):
 
     def set_operation(self, expression: exp.SetOperation) -> str:
         operation = type(expression)
-        if operation not in {exp.Union, exp.Intersect, exp.Except}:
+        operation_contracts = {
+            exp.Union: ("UNION", exp.Union),
+            exp.Intersect: ("INTERSECT", exp.Intersect),
+            exp.Except: ("EXCEPT", exp.Except),
+            vexp.AtEpochUnion: ("UNION", exp.Union),
+            vexp.AtEpochIntersect: ("INTERSECT", exp.Intersect),
+            vexp.AtEpochExcept: ("EXCEPT", exp.Except),
+        }
+        operation_contract = operation_contracts.get(operation)
+        if operation_contract is None:
             self.unsupported("Vertica requires a canonical UNION, INTERSECT, or EXCEPT node")
             return ""
+        operation_name, canonical_type = operation_contract
 
         left = expression.args.get("this")
         right = expression.args.get("expression")
         if not isinstance(left, exp.Query) or not isinstance(right, exp.Query):
-            self.unsupported(f"Vertica {operation.key.upper()} requires two query operands")
+            self.unsupported(f"Vertica {operation_name} requires two query operands")
             return ""
 
         distinct = expression.args.get("distinct")
         if type(distinct) is not bool:
             self.unsupported(
-                f"Vertica {operation.key.upper()} requires an explicit Boolean duplicate mode"
+                f"Vertica {operation_name} requires an explicit Boolean duplicate mode"
             )
             return ""
-        if operation in {exp.Intersect, exp.Except} and distinct is not True:
-            self.unsupported(f"Vertica {operation.key.upper()} supports DISTINCT results only")
+        if operation_name in {"INTERSECT", "EXCEPT"} and distinct is not True:
+            self.unsupported(f"Vertica {operation_name} supports DISTINCT results only")
             return ""
 
         if any(expression.args.get(key) is not None for key in ("by_name", "on", "side", "kind")):
-            self.unsupported(
-                f"Vertica {operation.key.upper()} does not support name-matching modifiers"
-            )
+            self.unsupported(f"Vertica {operation_name} does not support name-matching modifiers")
             return ""
 
-        return super().set_operation(expression)
+        if operation is canonical_type:
+            return super().set_operation(expression)
+
+        canonical_args = expression.copy().args
+        canonical_args.pop("at_epoch_kind", None)
+        canonical_args.pop("at_epoch_value", None)
+        return super().set_operation(canonical_type(**canonical_args))
 
     def _vertica_with_sql(self, expression: exp.With, hint: str) -> str:
         sql = self.expressions(expression, flat=True)
@@ -4589,10 +4607,20 @@ class VerticaGenerator(PostgresGenerator):
     def atepochproperty_sql(self, expression: vexp.AtEpochProperty) -> str:
         return f"AT {self.sql(expression, 'kind')} {self.sql(expression, 'this')}"
 
-    def atepochquery_sql(self, expression: vexp.AtEpochQuery) -> str:
-        kind = expression.args.get("kind")
+    def atepochquery_sql(
+        self,
+        expression: vexp.AtEpochQuery
+        | vexp.AtEpochSelect
+        | vexp.AtEpochUnion
+        | vexp.AtEpochIntersect
+        | vexp.AtEpochExcept,
+    ) -> str:
+        legacy = type(expression) is vexp.AtEpochQuery
+        kind_key = "kind" if legacy else "at_epoch_kind"
+        value_key = "value" if legacy else "at_epoch_value"
+        kind = expression.args.get(kind_key)
         kind_name = kind.name if isinstance(kind, exp.Var) else None
-        value = expression.args.get("value")
+        value = expression.args.get(value_key)
 
         if kind_name == "EPOCH":
             valid_value = (isinstance(value, exp.Var) and value.name == "LATEST") or (
@@ -4605,20 +4633,32 @@ class VerticaGenerator(PostgresGenerator):
 
         if not valid_value:
             self.unsupported(
-                "AtEpochQuery requires kind EPOCH with LATEST or an integer, "
+                "Historical query requires kind EPOCH with LATEST or an integer, "
                 "or kind TIME with a quoted timestamp"
             )
             return ""
 
-        query = expression.args.get("this")
-        if not isinstance(query, exp.Query):
-            self.unsupported("AtEpochQuery requires a SELECT or set-operation query")
+        if legacy:
+            query = expression.args.get("this")
+            if not isinstance(query, exp.Query):
+                self.unsupported("AtEpochQuery requires a SELECT or set-operation query")
+                return ""
+            query_sql = self.sql(expression, "this")
+        elif isinstance(expression, vexp.AtEpochSelect):
+            if self._has_user_extras(expression, set(expression.arg_types)):
+                self.unsupported("AtEpochSelect contains unsupported fields")
+                return ""
+            query_sql = self.select_sql(expression)
+        elif isinstance(expression, (vexp.AtEpochUnion, vexp.AtEpochIntersect, vexp.AtEpochExcept)):
+            if self._has_user_extras(expression, set(expression.arg_types)):
+                self.unsupported(f"{type(expression).__name__} contains unsupported fields")
+                return ""
+            query_sql = self.set_operations(expression)
+        else:
+            self.unsupported("Historical query requires a supported query root")
             return ""
 
-        return (
-            f"AT {self.sql(expression, 'kind')} {self.sql(expression, 'value')} "
-            f"{self.sql(expression, 'this')}"
-        )
+        return f"AT {self.sql(kind)} {self.sql(value)} {query_sql}"
 
     def tablepartitionproperty_sql(self, expression: vexp.TablePartitionProperty) -> str:
         sql = f"PARTITION BY {self.sql(expression, 'this')}"
