@@ -98,13 +98,25 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   re-reviewed and left unchanged because the corpus does not exercise
   `LIMIT`/`OFFSET`/`FETCH`, new identifiers, additional foreign-dialect
   surface, or the `AT epoch` query prefix (deliberately outside this task's
-  documented statement-family list).
+  documented statement-family list). A source-backed audit on 2026-08-21
+  superseded Q08's certification conclusion while preserving that positive
+  corpus as historical evidence. The audit found uncovered formal-negative,
+  losslessness, fail-closed, and direct-analysis blockers and scheduled
+  Q09–Q21 in `AGENT_TASK_PLAN.md`; Milestone 1 is reopened until its current
+  Q21 recertification gate and every preceding Q task are `DONE`. Q09 is
+  complete: parser-produced `GROUP BY` clauses now use a canonical-compatible
+  ordered Group subclass so ordinary expressions and repeated/interleaved
+  `ROLLUP`, `CUBE`, and `GROUPING SETS` constructs regenerate in source order;
+  material grouping parentheses and empty sets are retained, the documented
+  `GBYTYPE(HASH|PIPE)` hint is typed, inherited foreign modifiers fail closed,
+  and qualification, optimization, scope traversal, and lineage preserve the
+  ordered shape. Q10 is the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — was deferred until Milestone 1 was certified and is now
-  eligible.
+  (tasks P16–P35) — remains deferred until the reopened Milestone 1 is
+  recertified.
 
 ## Phase 1 — core analytical SQL and physical design
 
@@ -216,8 +228,8 @@ Implemented catalog P0:
   temporary-table/single-SELECT restrictions, with CHECK expression content
   left as a named server-side residual.
 
-Remaining (all Milestone 2; the Milestone 1 analysis-surface tasks Q01–Q08
-that previously deferred this work are complete):
+Remaining (all Milestone 2; deferred while the reopened Milestone 1 tasks
+Q09–Q21 remain incomplete):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);

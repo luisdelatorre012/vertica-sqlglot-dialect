@@ -556,6 +556,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.VerticaArrayLength: lambda self, expression: self.verticaarraylength_sql(expression),
         vexp.VerticaCopy: lambda self, expression: self.verticacopy_sql(expression),
         vexp.VerticaExplode: lambda self, expression: self.verticaexplode_sql(expression),
+        vexp.VerticaGroup: lambda self, expression: self.group_sql(expression),
         vexp.VerticaInstr: lambda self, expression: self.verticainstr_sql(expression),
         vexp.VerticaInterval: lambda self, expression: self.interval_sql(expression),
         vexp.VerticaMerge: lambda self, expression: self.verticamerge_sql(expression),
@@ -581,6 +582,96 @@ class VerticaGenerator(PostgresGenerator):
 
         hint_sql = self.sql(hint)
         return f"{sql[: join_index + 4]}{hint_sql}{sql[join_index + 4 :]}"
+
+    def _valid_grouping_construct(self, expression: exp.Expr) -> bool:
+        if isinstance(expression, (exp.Cube, exp.Rollup)):
+            if set(expression.args) != {"expressions"}:
+                self.unsupported(
+                    f"Vertica {expression.key.upper()} accepts only an expression list"
+                )
+                return False
+            children = expression.args.get("expressions")
+            if not isinstance(children, list) or not children:
+                self.unsupported(
+                    f"Vertica {expression.key.upper()} requires at least one expression"
+                )
+                return False
+            if not all(isinstance(child, exp.Expr) for child in children):
+                self.unsupported(f"Vertica {expression.key.upper()} requires expression children")
+                return False
+            if any(
+                isinstance(child, (exp.Cube, exp.Rollup, exp.GroupingSets)) for child in children
+            ):
+                self.unsupported(
+                    f"Vertica {expression.key.upper()} cannot contain a multilevel aggregate"
+                )
+                return False
+            return True
+
+        if isinstance(expression, exp.GroupingSets):
+            if set(expression.args) != {"expressions"}:
+                self.unsupported("Vertica GROUPING SETS accepts only a grouping list")
+                return False
+            children = expression.args.get("expressions")
+            if not isinstance(children, list) or not children:
+                self.unsupported("Vertica GROUPING SETS requires at least one grouping")
+                return False
+            for child in children:
+                if not isinstance(child, exp.Expr):
+                    self.unsupported("Vertica GROUPING SETS requires expression children")
+                    return False
+                if isinstance(child, exp.GroupingSets):
+                    self.unsupported("Vertica GROUPING SETS cannot contain GROUPING SETS")
+                    return False
+                if isinstance(child, (exp.Cube, exp.Rollup)) and not self._valid_grouping_construct(
+                    child
+                ):
+                    return False
+            return True
+
+        return True
+
+    def group_sql(self, expression: exp.Group) -> str:
+        ordered = isinstance(expression, vexp.VerticaGroup)
+        allowed_args = {"expressions", "algorithm"} if ordered else {"expressions"}
+        if set(expression.args) - allowed_args:
+            self.unsupported(
+                "Vertica GROUP BY does not support canonical bucket, ALL, DISTINCT, "
+                "or TOTALS fields"
+            )
+            return ""
+
+        expressions = expression.args.get("expressions")
+        if not isinstance(expressions, list) or not expressions:
+            self.unsupported("Vertica GROUP BY requires a nonempty ordered expression list")
+            return ""
+        if not all(isinstance(item, exp.Expr) for item in expressions):
+            self.unsupported("Vertica GROUP BY requires expression children")
+            return ""
+        if any(isinstance(item, exp.Group) for item in expressions):
+            self.unsupported("Vertica GROUP BY cannot contain another GROUP BY node")
+            return ""
+        if any(
+            isinstance(item, (exp.Cube, exp.Rollup, exp.GroupingSets))
+            and not self._valid_grouping_construct(item)
+            for item in expressions
+        ):
+            return ""
+        if any(isinstance(item, exp.Tuple) and not item.expressions for item in expressions):
+            self.unsupported("An empty grouping set is legal only inside GROUPING SETS")
+            return ""
+
+        if not ordered:
+            return super().group_sql(expression)
+
+        algorithm = expression.args.get("algorithm")
+        prefix = "GROUP BY"
+        if algorithm is not None:
+            if not isinstance(algorithm, exp.Var) or algorithm.name.upper() not in {"HASH", "PIPE"}:
+                self.unsupported("GBYTYPE requires the HASH or PIPE algorithm")
+                return ""
+            prefix += f" /*+GBYTYPE({algorithm.name.upper()})*/"
+        return self.op_expressions(prefix, expression)
 
     def _vertica_with_sql(self, expression: exp.With, hint: str) -> str:
         sql = self.expressions(expression, flat=True)

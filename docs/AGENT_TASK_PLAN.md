@@ -61,8 +61,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   lowest-numbered remaining task.
 - On 2026-08-17 the SELECT `[ AT epoch ]` historical-query-prefix gap
   recorded by Q04 was scheduled as new task Q06, and the acceptance gate was
-  renumbered Q06 → Q07 before any gate work began; no completion record
-  references the old gate number.
+  renumbered Q06 → Q07 before any gate work began. Q06's later completion
+  record preserves that intermediate gate number as historical context.
 - Completed **Q05 — foreign embedded-property atomicity**. Q06 is the
   lowest-numbered remaining task.
 - Completed **Q06 — SELECT `AT epoch` historical-query prefix**. Q07 is the
@@ -74,16 +74,33 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   at `WARN`/`IGNORE`, because it uses plain `self.raise_error(...)` rather
   than a guaranteed-raise wrapper. This gap was scheduled as new task Q07,
   and the acceptance gate was renumbered Q07 → Q08 before any gate work
-  began; no completion record references the old gate number.
+  began. Q06's completion record necessarily retains the earlier Q07 gate
+  reference because it records the discovery that caused this renumbering.
 - Completed **Q07 — CTAS historical-snapshot guaranteed-raise conformance**.
   Q08 is the lowest-numbered remaining task, and is the Milestone 1
   acceptance gate.
-- Completed **Q08 — Milestone 1 acceptance gate** on 2026-08-17. **Milestone 1
-  (the analysis parsing surface) is certified.** All Q01–Q08 tasks are `DONE`;
-  Milestone 2 (administration and remaining DDL, tasks P16–P35, specified in
-  [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md)) is now
-  eligible. P16 is the lowest-numbered remaining task overall.
-- There is intentionally no Git remote. Make local commits only; never push.
+- Completed **Q08 — Milestone 1 acceptance gate** on 2026-08-17. Its positive
+  workload corpus and release-gate result remain valid historical evidence,
+  but the certification conclusion is superseded by the audit below.
+- On 2026-08-21, a fresh source-backed audit reran the default coverage gate
+  (5,816 tests passed at 93.38% branch coverage) and then exercised formal
+  negative boundaries that Q08 did not cover. It found milestone blockers in
+  ordered multilevel `GROUP BY`, set-operation modifiers, inherited SELECT
+  modifiers and joined-table grammar, direct analysis of `AT epoch` query
+  roots, WITH/CTE root placement, guaranteed-raise handling for temporary
+  `CREATE TABLE` and `INSERT`, cross-family table-target identifiers,
+  `SELECT INTO` tail atomicity, and programmatic `CREATE TABLE` generation.
+  Q08 therefore remains `DONE` as a historical positive gate, while
+  **Milestone 1 is reopened and is not certified**.
+- Tasks Q09–Q21 below are the bounded remediation, formal-negative audit, and
+  recertification queue. Milestone 2
+  (P16–P35) is ineligible until every Q task is `DONE`; Q21 is the current
+  recertification gate and must remain the highest-numbered Q task if Q20
+  schedules another bounded fix.
+- Completed **Q09 — ordered multilevel GROUP BY losslessness**. Q10 is the
+  lowest-numbered remaining task.
+- A Git remote is configured. Repository agents make local commits only and
+  never push.
 
 ## Installed local Python runtimes
 
@@ -217,11 +234,25 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q06 | DONE   | SELECT `AT epoch` historical-query prefix     | —                   | `feat: model select at epoch historical query prefix`   |
 | Q07 | DONE   | CTAS historical-snapshot guaranteed-raise conformance | —            | `fix: harden ctas at epoch guaranteed raise`            |
 | Q08 | DONE   | Milestone 1 acceptance gate                   | Q01–Q07             | `test: certify milestone one analysis surface`          |
+| Q09 | DONE   | Ordered multilevel GROUP BY losslessness      | Q08                 | `feat: preserve ordered multilevel group by`             |
+| Q10 | TODO   | Set-operation modifier conformance            | Q09                 | `fix: enforce Vertica set operation modifiers`           |
+| Q11 | TODO   | SELECT modifier, row-limit, and lock-tail conformance | Q10           | `fix: enforce Vertica select modifiers`                  |
+| Q12 | TODO   | Joined-table formal grammar                   | Q11                 | `fix: enforce Vertica joined table grammar`              |
+| Q13 | TODO   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
+| Q14 | TODO   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
+| Q15 | TODO   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
+| Q16 | TODO   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
+| Q17 | TODO   | Analysis table-target identifier conformance  | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
+| Q18 | TODO   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
+| Q19 | TODO   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
+| Q20 | TODO   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
+| Q21 | TODO   | Milestone 1 recertification gate              | Q20                 | `test: recertify milestone one analysis surface`         |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred until Q08 is `DONE`. Task numbering, dependencies, and
-specifications are intentionally unchanged from the prior plan revision.
+Deferred until every Milestone 1 Q task is `DONE`; Q21 is the current final
+gate. Milestone 2 task numbering, dependencies, and specifications are
+intentionally unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -256,10 +287,10 @@ specifications are intentionally unchanged from the prior plan revision.
 2. If a task is `IN_PROGRESS`, resume it. Otherwise select the next eligible
    task with milestone precedence: while any Milestone 1 (`Q`-series) task is
    not `DONE`, only `Q` tasks are eligible; Milestone 2 (`P`-series) tasks
-   become eligible only after Q08 is `DONE`. Within the active milestone,
-   select the lowest-numbered `TODO` task whose dependencies are all `DONE`,
-   change it to `IN_PROGRESS` in both the dashboard and its detail heading,
-   and do no other task.
+   become eligible only after every Q task is `DONE`. Within the active
+   milestone, select the lowest-numbered `TODO` task whose dependencies are
+   all `DONE`, change it to `IN_PROGRESS` in both the dashboard and its detail
+   heading, and do no other task.
 3. Inspect `git status` and `git diff` before editing. Never discard or overwrite
    unrelated changes. If unexpected changes overlap the selected task, mark it
    `BLOCKED` with an exact explanation and stop.
@@ -487,10 +518,12 @@ active backlog starts at the Milestone 1 section that follows.
 
 ## Detailed tasks — Milestone 1: analysis parsing surface
 
-These six bounded tasks close the verified gaps between the completed
-foundation and the milestone goal — parsing, analyzing, and regenerating
-`SELECT`/CTE/temporary-table workloads — and retire the one recorded
-cross-cutting policy violation inside that surface (Q05). No
+The bounded tasks below close verified gaps between the completed foundation
+and the milestone goal — parsing, analyzing, and regenerating
+`SELECT`/CTE/temporary-table workloads. Q01–Q08 preserve their historical
+completion records. The 2026-08-21 audit reopened the milestone with Q09–Q21
+because several named residuals were milestone blockers and the positive Q08
+corpus did not exercise the required formal-negative boundaries. No
 database-management capability is in scope in this milestone.
 
 ### Q01 — scoped temporary CTAS acceptance — `DONE`
@@ -1258,8 +1291,9 @@ Testing surfaced four points worth recording precisely rather than assuming:
    confirmed directly against the installed package rather than inferred.
    Out of scope here (this task's own exclusions bar changing
    `AtEpochProperty`), so scheduled as new task Q07 per protocol step 6, and
-   the acceptance gate renumbered Q07 → Q08 before any gate work began; no
-   completion record references the old gate number.
+   the acceptance gate renumbered Q07 → Q08 before any gate work began.
+   Earlier references to Q07 in this same record describe the then-current
+   gate and are retained as historical sequencing.
 
 The focused `test_at_epoch_query.py` module passed 176 tests and the edited
 `test_select_query_corpus.py` (one pinned `ParseError` residual replaced by
@@ -1540,9 +1574,587 @@ partial `qualify`/`lineage` support, and the CTE-body dispatch-reentry
 observation) remains named and unchanged. **Milestone 1 — the analysis
 parsing surface — is certified.**
 
+**2026-08-21 audit supersession.** The preceding paragraph is retained as
+Q08's historical completion record, not as the current milestone verdict.
+The fresh audit recorded in Current state proved that several of those named
+residuals violate the milestone's own parsing/analyzing/regenerating outcome
+and found additional uncovered formal-negative paths. Q08 remains `DONE`, but
+Milestone 1 is reopened. Only the current highest-numbered recertification
+gate may certify it again.
+
+### Q09 — ordered multilevel `GROUP BY` losslessness — `DONE`
+
+**Outcome.** Preserve the source order and meaning of every documented
+ordinary and multilevel grouping item instead of storing each construct in a
+fixed bucket that regenerates in a different order.
+
+**Required work.** Re-open the 26.2 `GROUP BY`, `ROLLUP`, `CUBE`, `GROUPING
+SETS`, and `GROUPING_ID` pages and inspect the installed SQLGlot parser,
+canonical `exp.Group` contract, generator, scope builder, and optimizer
+rewrites before choosing a representation. Give Vertica one typed,
+source-ordered sequence capable of interleaving ordinary expressions,
+`ROLLUP`, `CUBE`, and `GROUPING SETS`, including repeated constructs of the
+same kind. `GROUP BY ROLLUP(a), CUBE(b), GROUPING SETS(c)` and `GROUP BY
+CUBE(a), c, ROLLUP(b)` must regenerate in that exact order in compact and
+pretty modes. Preserve parentheses and empty grouping sets exactly where they
+are semantically material. Audit inherited `Group` fields and source forms
+such as `GROUP BY ALL`, `DISTINCT`, and `TOTALS`; any form outside the pinned
+Vertica grammar must fail through a dedicated guaranteed-raise path at all
+four parser error levels, and malformed/programmatic group trees must be
+rejected by strict Vertica generation rather than reordered, dropped, or
+rendered as foreign SQL.
+
+Add positive and negative matrices covering ordinary-only, one and multiple
+instances of each multilevel construct, every interleaving direction,
+no-argument and explicit-argument `GROUPING_ID`, aliases/ordinals where the
+source permits them, nested queries, CTEs, set-operation branches, comments,
+compact/pretty regeneration, parse-after-generate equality, `dump()`/load,
+copy/transform parent metadata, and optimizer/qualification/lineage
+stability. If a Vertica-specific node is required, include the customary
+four-dialect direct/nested foreign-generation matrix and verify installed
+SQLGlot transforms do not silently replace it with the old bucketed shape.
+
+**Explicit exclusions.** Server-side grouping cardinality, aggregate-value
+evaluation, optimizer cost choices, and unrelated window-function ordering.
+Do not redesign set-operation nodes (Q10) or historical query roots (Q13).
+
+**Primary sources.** [GROUP BY clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/group-by-clause/),
+[ROLLUP aggregate](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/group-by-clause/rollup-aggregate/),
+[CUBE aggregate](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/group-by-clause/cube-aggregate/),
+[GROUPING SETS aggregate](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/group-by-clause/grouping-sets-aggregate/),
+and [GROUPING_ID](https://docs.vertica.com/26.2.x/en/sql-reference/functions/aggregate-functions/grouping-id/).
+
+**Completion record.** Re-opened all five 26.2 primary sources and found no
+material grammar contradiction. The GROUP BY page explicitly describes an
+ordered aggregate-expression list, permits multiple `GROUPING SETS`, `CUBE`,
+and `ROLLUP` aggregates in one query, and includes the exact formerly-lossy
+`GROUP BY ROLLUP(a), CUBE(b), GROUPING SETS(c)` example; the subordinate pages
+confirm parentheses as semantically material (`ROLLUP((a,b),c)`), `()` as the
+grand-total grouping set, `CUBE`/`ROLLUP` nesting inside `GROUPING SETS`, and
+both zero-argument and explicit-argument `GROUPING_ID`. The GROUP BY formal
+syntax also documents one `/*+GBYTYPE(HASH|PIPE)*/` hint. Two editorial slips
+were treated as non-normative because the surrounding syntax, restrictions,
+and examples are unambiguous: the CUBE page says “use the ROLLUP clause” in
+one introductory sentence, and its displayed syntax is the generic
+`GROUP BY group-expression[, ...]` rather than a CUBE-specific production.
+
+Added `vexp.VerticaGroup(exp.Group)`, retaining canonical Group identity for
+scope/optimizer code while replacing SQLGlot 30.13's four fixed buckets
+(`expressions`, `grouping_sets`, `cube`, `rollup`) with one source-ordered
+typed `expressions` list. Ordinary expressions and repeated/interleaved
+canonical `exp.Rollup`, `exp.Cube`, and `exp.GroupingSets` children now render
+in exact source order in compact and pretty modes; parentheses, tuple groups,
+and empty grouping sets remain canonical children. An optional typed
+`algorithm` child preserves `GBYTYPE(HASH|PIPE)` in its documented position.
+The dedicated `_raise_group_by_error` path guarantees `ParseError` at
+`IMMEDIATE`, `RAISE`, `WARN`, and `IGNORE` for inherited `GROUP BY ALL`,
+`DISTINCT`, `TOTALS`, `WITH ROLLUP`/`WITH CUBE`, malformed construct lists,
+and malformed/duplicate GBYTYPE hints. `VerticaGenerator.group_sql` accepts
+ordinary-only canonical `exp.Group` trees for foreign/programmatic
+interoperability, but rejects canonical bucket fields, all/totals modifiers,
+falsey extras, empty/wrong children, nested invalid constructs, and invalid
+algorithms with `UnsupportedError` rather than reordering, dropping, or
+emitting foreign SQL. `VerticaGroup` fails atomically, direct or SELECT-nested,
+against PostgreSQL, DuckDB, MySQL, and SQLite at `RAISE`, `WARN`, and `IGNORE`.
+Qualification, optimization, scope traversal, lineage, copy, transform,
+parent/index metadata, dump/load, CTE/subquery/set-branch placement, aliases,
+ordinals, comments, and both `GROUPING_ID` forms are pinned; installed
+SQLGlot transforms preserve the custom Group subclass and never reconstruct
+the old bucketed shape. Updated the Q04 corpus regression from its former
+named-loss assertion to the ordered contract, plus architecture, coverage,
+roadmap, source inventory, and changelog documentation.
+
+The focused `test_group_by.py` module passed 134 tests; the affected Q04
+corpus plus neighboring workload, keyword, query-extension, and AST-safety
+suites passed 278 tests. The default CPython 3.12.6 gate passed 5,951 tests at
+93.25% branch coverage with Ruff lint/formatting, strict mypy, and diff checks
+clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1 each passed 5,951 tests, with 3.15 treating deprecations as
+errors. The sdist/wheel build, clean force-install, `pip check`, and installed-
+wheel `python -I` smoke (`SELECT a, b FROM t GROUP BY CUBE(a), b, ROLLUP(a)`,
+returning `Select` with a `VerticaGroup` child) passed.
+
+### Q10 — set-operation modifier conformance — `TODO`
+
+**Outcome.** Make the canonical set-operation tree express exactly Vertica's
+operator-specific duplicate and branch contract, with no inherited modifier
+that generates unsupported SQL.
+
+**Required work.** Re-open all four 26.2 set-operation pages and audit the
+installed SQLGlot set parser, precedence/associativity logic, canonical
+`SetOperation` fields, generator, scope traversal, and optimizer rewrites.
+Support `UNION` with its default/DISTINCT and `ALL` modes. Treat `INTERSECT`,
+`EXCEPT`, and its `MINUS` synonym as DISTINCT-only, rejecting `ALL` at all
+four parser error levels. Reject inherited name-matching or correspondence
+forms (`BY NAME`, `CORRESPONDING`, and their canonical `by_name`/`on`/`side`/
+`kind` states) for every operator unless a re-opened 26.2 primary source
+explicitly admits one. Strict Vertica generation must validate direct,
+nested, and programmatically mutated set trees before emitting any text; it
+must not emit `INTERSECT ALL`, `EXCEPT ALL`, or foreign UNION syntax and must
+not silently discard a modifier.
+
+Preserve Vertica's precedence and left-to-right behavior, parentheses,
+`MINUS` parsing/canonicalization, CTE and subquery placement, branch-local
+`ORDER BY`/`LIMIT`/`OFFSET`, whole-compound tails, comments, compact/pretty
+round trips, serialization, transform/parent metadata, scope traversal,
+qualification, optimization, and lineage. Test operator chains whose
+individual branches carry different legal modifiers so validation is applied
+to the owning branch rather than only the compound root. Include strict AST
+mutation cases for every relevant installed-SQLGlot field and all-level
+source-negative matrices.
+
+**Explicit exclusions.** Ordered grouping (Q09), the exact SELECT tail value
+grammar (Q11), historical prefix wrapping (Q13), and server-side type/
+cardinality compatibility between branches.
+
+**Primary sources.** [UNION clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/union-clause/),
+[INTERSECT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/intersect-clause/),
+[EXCEPT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/except-clause/),
+and [MINUS clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/minus-clause/).
+
+### Q11 — SELECT modifier, row-limit, and lock-tail conformance — `TODO`
+
+**Outcome.** Own the ordinary SELECT-level qualifier and tail grammar so
+foreign SQLGlot modifiers cannot parse, partially survive, or regenerate as
+if they were Vertica syntax.
+
+**Required work.** Re-open the formal SELECT, LIMIT, and OFFSET pages and the
+relevant 26.2 syntax-error entries, then audit installed SQLGlot's SELECT
+qualifier, TOP/FETCH/LIMIT/OFFSET, lock, parser-finalization, generator, and
+optimizer code. Preserve only the documented SELECT qualifier forms `ALL`
+and `DISTINCT`; reject PostgreSQL-style `DISTINCT ON` in source and
+programmatic trees. Pin the exact primary-source value grammar and clause
+order for ordinary `LIMIT` and `OFFSET`, while retaining Vertica's separate
+partitioned `LIMIT ... OVER` extension. Explicitly decide and test whether
+`LIMIT ALL` is stored or deliberately canonicalized to clause absence; either
+choice must be documented as semantic no-op canonicalization rather than an
+accidental loss.
+
+Reject `FETCH`, comma-form `LIMIT`, `PERCENT`, `WITH TIES`, and recognized
+`TOP` forms at every parser error level; permissive levels must not return a
+partial `SELECT TOP` or normalize an unsupported form into different SQL.
+Support only `FOR UPDATE [OF table-name[, ...]]` and reject foreign lock
+strengths (`SHARE`, `KEY SHARE`, `NO KEY UPDATE`) and wait options (`NOWAIT`,
+`SKIP LOCKED`). Audit and validate every installed canonical limit/fetch/lock
+field during Vertica generation so a programmatic or foreign AST either
+renders valid Vertica SQL or raises the documented unsupported exception
+atomically. Do not silently discard any recognized tail.
+
+Cover direct queries, subqueries, CTE bodies, every set-operation ownership
+position stabilized by Q10, comments, parameters and boundary values allowed
+by the primary sources, clause permutations, all four parser error levels,
+strict AST mutation, compact/pretty round trips, serialization, and
+qualification/optimization/lineage stability. Correct the
+LIMIT/OFFSET/FETCH coverage row to distinguish supported grammar from
+intentional canonicalization and explicit rejection.
+
+**Explicit exclusions.** Join conditions (Q12), set-operation modifier
+ownership (Q10), `TIMESERIES`, and catalog/transaction lock effects. Valid
+semantic lowerings for unrelated non-Vertica input, such as the existing
+`QUALIFY` lowering, are not broadened or prohibited here.
+
+**Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/),
+[LIMIT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/limit-clause/),
+[OFFSET clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/offset-clause/),
+and [SQLSTATE 42601 messages](https://docs.vertica.com/26.2.x/en/error-messages/sql-state-list/messages-associated-with-sqlstate-42601/).
+
+### Q12 — joined-table formal grammar — `TODO`
+
+**Outcome.** Enforce Vertica's documented joined-table kinds and predicate
+rules at both parse and generation boundaries.
+
+**Required work.** Re-open the 26.2 joined-table, join-syntax, natural-join,
+inner-join, and outer-join pages and audit installed SQLGlot's join parser,
+canonical `exp.Join` fields, dialect rewrites, generator, scope traversal, and
+the existing Vertica hint override. Preserve documented INNER/default,
+LEFT/RIGHT/FULL `[OUTER]`, NATURAL, CROSS, comma, and NATURAL outer variants,
+plus `ON`, the documented alternative `USING`, `TABLESAMPLE`, and structured
+Vertica join hints in their legal positions. Require `ON` or `USING` for
+ordinary INNER/LEFT/RIGHT/FULL joined-table forms and reject either predicate
+form on CROSS or NATURAL joins, as the primary sources require.
+
+Reject join kinds that the Vertica grammar does not name and that the current
+generator emits verbatim, including `ASOF` and `STRAIGHT_JOIN`, at all four
+parser error levels. Validate programmatic/foreign `Join` trees before
+generation, including every installed method/kind/side/on/using field and
+invalid combinations; no unsupported kind or predicate may be silently
+lowered, dropped, or rendered as Vertica. Keep existing intentional
+equivalence lowerings such as SEMI/ANTI/APPLY only if the installed generator
+produces valid canonical Vertica and the architecture contract explicitly
+classifies that behavior; Q20 will audit those classifications rather than
+this task guessing a new strict-input policy.
+
+Test each legal kind, NATURAL outer combinations, predicate requirements,
+multi-join chains, nested joins/subqueries/CTEs, join hints, samples on both
+sides, comments, all error levels, strict AST mutations, compact/pretty
+round trips, serialization, transform/parent metadata, qualification,
+optimization, and lineage.
+
+**Explicit exclusions.** Event-series `INTERPOLATE` semantic restrictions,
+server-side join predicate type checks, optimizer join reordering/costing,
+and SELECT tails (Q11).
+
+**Primary sources.** [Joined-table](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/from-clause/joined-table/),
+[Join syntax](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/join-syntax/),
+[Natural joins](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/inner-joins/natural-joins/),
+[Inner joins](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/inner-joins/),
+and [Outer joins](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/outer-joins/).
+
+### Q13 — analyzer-safe historical query roots — `TODO`
+
+**Outcome.** Make a parsed SELECT `[ AT epoch ]` root participate directly in
+ordinary SQLGlot query analysis with parity to the same unprefixed query,
+without requiring callers to unwrap `.this`.
+
+**Required work.** Re-open the formal SELECT and historical-query pages and
+inspect installed SQLGlot query expression classes, `traverse_scope`, scope
+building, qualification, optimization, lineage, expansion, transforms, and
+generator dispatch before choosing the representation. Redesign the
+parser-emitted historical-query root so direct calls to `traverse_scope`,
+`qualify`, `optimize`, and `lineage` recognize it as a real query for plain
+SELECT and UNION/INTERSECT/EXCEPT roots, including queries with a leading WITH
+clause. The prefixed and unprefixed forms must expose equivalent source,
+column, CTE, and scope graphs while the prefix continues to apply to the
+entire compound query rather than one branch.
+
+Preserve the Q06 epoch/time value contract, comments, compact/pretty output,
+parentheses, whole-query tail ownership, `dump()`/load, copy/transform parent
+links, multi-statement boundaries, and atomic foreign-generation behavior.
+Audit compatibility with already serialized `AtEpochQuery` trees and provide
+a safe load/generation path or an explicit documented migration if the node
+shape must change. Strict Vertica generation must reject malformed
+programmatic prefix/query combinations atomically. Add direct analysis tests
+for SELECT and each set-operation root, joined/grouped queries, CTE and source
+expansion, ambiguous and qualified columns, and column lineage; calling
+`.this` in those tests is not acceptable evidence.
+
+**Explicit exclusions.** The CTAS-only `AtEpochProperty` remains Q07's
+independent property. Whether an AT-prefixed query is legal as a CTE body is
+decided in Q14 after this analyzer-safe shape exists. No catalog snapshot
+availability or historical-data semantics are modeled.
+
+**Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
+and [Historical queries](https://docs.vertica.com/26.2.x/en/data-analysis/queries/historical-queries/).
+
+### Q14 — WITH/CTE query-expression and placement conformance — `TODO`
+
+**Outcome.** Restrict WITH and every CTE body to the documented query surface,
+with guaranteed failure instead of top-level dispatcher re-entry, truncation,
+empty SQL, or raw Python exceptions.
+
+**Required work.** Re-open the 26.2 WITH syntax, recursion, materialization,
+SELECT, and INSERT pages and inspect installed SQLGlot's `_parse_cte`, outer
+WITH attachment, statement dispatcher, canonical `With`/`CTE` fields,
+generator, optimizer, and scope code. Source-pin an explicit allowed-root
+contract rather than testing only `isinstance(exp.Query)`: ordinary SELECT
+and Vertica query extensions, supported set operations, subordinate WITH,
+and documented recursive query forms must work; side-effecting `SELECT INTO`
+and all DML, PROFILE, EXPLAIN, directed-query, DDL, and administrative roots
+must not be CTE bodies. Decide AT-prefixed CTE legality from the formal
+`query-expression` contract only after Q13's analyzer-safe representation is
+stable. Pin inherited `VALUES` and bare-`FROM` behavior explicitly instead of
+accepting it by accident.
+
+Enforce the corresponding outer-WITH placement contract. Preserve leading
+WITH on SELECT and the documented target-following `INSERT INTO target WITH
+... SELECT` form; reject leading-WITH UPDATE/DELETE/INSERT/MERGE, CREATE, DROP,
+TRUNCATE, COPY, PROFILE/EXPLAIN, directed-query, historical-prefix, and other
+non-query forms without returning a DML AST, a bare `With` sentinel, or a
+truncated prefix at permissive error levels. Route every recognized violation
+through a dedicated guaranteed-raise wrapper at IMMEDIATE, RAISE, WARN, and
+IGNORE. Reject inherited per-CTE `AS [NOT] MATERIALIZED` and recursive
+`SEARCH`/`CYCLE` fields unless a re-opened 26.2 source expressly supports
+them; preserve Vertica's clause-level materialization hint and documented
+plain/multiple/subordinate/recursive CTEs.
+
+Strict Vertica generation must validate direct and nested programmatic
+`With`/`CTE` children, root placement, aliases/column lists, recursion fields,
+and modifiers before rendering any text. Add source and AST matrices for
+direct/nested invalid bodies, comments around the body boundary, malformed
+multi-statement input, all four parser error levels, compact/pretty valid
+round trips, serialization, parent metadata, qualification/optimization/
+lineage, and foreign generation. Retain valid hinted and recursive workload
+cases from Q08.
+
+**Explicit exclusions.** General INSERT validation outside WITH placement
+(Q16), historical-root analysis internals (Q13), and server recursion depth or
+materialization choices.
+
+**Primary sources.** [WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/),
+[WITH clause recursion](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/with-clause-recursion/),
+[Materialization of WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/materialization-of-with-clause/),
+[SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/),
+and [INSERT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/insert/).
+
+### Q15 — CREATE TABLE guaranteed-raise completion — `TODO`
+
+**Outcome.** Make every recognized malformed CREATE TABLE form in the
+Milestone 1 lifecycle fail with `ParseError` at every parser error level,
+without silent normalization, generic `Command` fallback, truncated ASTs, or
+raw Python exceptions.
+
+**Required work.** Re-open the 26.2 CREATE TABLE and CREATE TEMPORARY TABLE
+pages and audit every CREATE TABLE front-door, lookahead, and shared
+definition/CTAS/LIKE helper that can call plain `raise_error`, assert, or
+continue after an error. Route table-family validation through the existing
+dedicated guaranteed-raise contract (or a narrowly factored equivalent),
+including CTAS column-name lists and encodings, `ON COMMIT`, `DISK_QUOTA`,
+segmentation, ordering, partitioning, inherited privileges, projection
+segmentation, scope/temporary prefixes, and table-only CREATE modifiers.
+Recognized malformed TABLE syntax must never degrade to `exp.Command` at any
+error level.
+
+Cover the audit's concrete failures: invalid or incomplete `ON COMMIT`, empty
+CTAS column lists, invalid `ACCESSRANK`/`ENCODED BY`/segmentation clauses,
+scope without TEMPORARY, LOCAL/GLOBAL misuse, `OR REPLACE`, duplicate or
+contradictory scope/temporary prefixes, misplaced clauses, unexpected end of
+input, and malformed multi-statement boundaries. Run every negative at
+IMMEDIATE, RAISE, WARN, and IGNORE and assert `ParseError` rather than merely
+asserting that parsing fails somehow. Preserve all currently valid permanent
+control forms and unscoped/GLOBAL/LOCAL temporary definition, LIKE, and CTAS
+forms, including Q01/Q07 behavior, comments, compact/pretty output,
+serialization, multi-statement parsing, and query analysis.
+
+**Explicit exclusions.** New CREATE grammar, flex/external tables, identifier
+byte/qualification rules (Q17), and programmatic CREATE generation validation
+(Q19). Shared helper edits may protect permanent TABLE forms, but acceptance
+scope is the already-semantic TABLE family, not other CREATE statement kinds.
+
+**Primary sources.** [CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/)
+and [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/).
+
+### Q16 — INSERT fail-closed parser conformance — `TODO`
+
+**Outcome.** Make malformed INSERT syntax fail at the parser boundary at every
+error level instead of returning a normalized, unusable, or blank-rendering
+`exp.Insert`.
+
+**Required work.** Re-open the 26.2 INSERT and WITH pages and audit
+`_parse_insert`, the DML validation helpers, all raw `raise_error` sites, and
+parser finalization. Add a dedicated guaranteed-raise INSERT path and route
+missing `INTO`, invalid target shapes/aliases, missing or conflicting query/
+VALUES/default sources, empty column or VALUES lists, unsupported RETURNING
+and foreign tail clauses, and any other recognized `insert_errors` result
+through it. WARN and IGNORE must raise the same family `ParseError` as RAISE
+and IMMEDIATE; they must not invent `INTO`, return a partial Insert, silently
+drop a tail, or rely on later generator validation to produce empty SQL.
+
+Preserve supported VALUES/default and INSERT-SELECT forms, explicit column
+lists, hints/labels, the Q14 target-following WITH form, comments,
+multi-statement boundaries, compact/pretty round trips, serialization,
+qualification, optimization, and lineage. Add an exhaustive all-level source
+matrix and direct AST/parser-shape tests for every error emitted by the shared
+DML helper. Re-audit the existing strict INSERT generator only for regression
+parity; any newly discovered independent generation gap must be scheduled as
+a separate bounded Q task under protocol rule 6.
+
+**Explicit exclusions.** UPDATE/DELETE/MERGE behavior, WITH root-placement
+ownership (Q14, retained here only as regression coverage), cross-family target
+identifier rules (Q17), and server constraint/default evaluation.
+
+**Primary sources.** [INSERT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/insert/)
+and [WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/).
+
+### Q17 — analysis table-target identifier conformance — `TODO`
+
+**Outcome.** Give every Milestone 1 table-target family one consistent,
+source-backed identifier and qualification contract in both parsing and
+generation.
+
+**Required work.** Re-open the 26.2 identifier, CREATE TEMPORARY TABLE, INSERT,
+INTO TABLE, and DROP TABLE pages. Extract the already strict Q03 DROP target
+component validation into a shared contract where appropriate, then apply it
+to CREATE TABLE definition/LIKE/CTAS targets, INSERT targets,
+`IntoTableClause` targets, and DROP TABLE controls. Pin the formal one-, two-,
+and three-part qualification shapes, require schema when catalog is present,
+reject a fourth part, and enforce valid UTF-8 plus the 128-byte limit per
+component. Apply the established quoted-payload, empty-name, unquoted-start/
+continuation, reserved/contextual-keyword, and case-folding rules consistently
+rather than allowing each front door to inherit a different SQLGlot default.
+
+Validate both source text at all four parser error levels and programmatic/
+foreign `exp.Table`/`Identifier` trees during strict Vertica generation. The
+boundary matrix must include 127-, 128-, and 129-byte ASCII and multibyte
+identifiers, valid quoted Unicode, invalid unpaired surrogates, empty quoted
+and unquoted components, catalog-without-schema AST shapes, each legal
+qualification depth, four-part names, comments/aliases in adjacent legal
+positions, and parse/generate/reparse shape equality. Demonstrate that all
+four target families accept and reject the same names unless a primary source
+documents a family-specific exception.
+
+**Explicit exclusions.** Column/expression aliases, identifiers throughout the
+rest of the repository, server catalog existence/cross-database access, and
+statement-specific tail placement (Q18). Do not turn this into a general
+tokenizer rewrite.
+
+**Primary sources.** [Identifiers](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/identifiers/),
+[CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/),
+[INSERT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/insert/),
+[INTO TABLE clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/into-table-clause/),
+and [DROP TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-table/).
+
+### Q18 — SELECT INTO placement and tail atomicity — `TODO`
+
+**Outcome.** Reject recognized but misplaced or duplicated INTO/ON COMMIT
+syntax atomically at every parser error level, instead of returning a
+truncated SELECT or silently dropping the malformed tail.
+
+**Required work.** Re-open the formal SELECT and INTO TABLE pages, audit the
+legal-slot `_parse_into` override and inherited SELECT final-token behavior,
+and add a dedicated guaranteed-raise path that can distinguish ordinary
+trailing junk from recognized misplaced INTO-family clauses. Reject INTO
+after FROM/WHERE/other later clauses, duplicate INTO, aliases or column lists
+attached to the target, duplicate/misplaced `ON COMMIT`, permanent-target
+temporary clauses, and any recognized incomplete variant at IMMEDIATE, RAISE,
+WARN, and IGNORE. No permissive level may return a plain `Select`, a partial
+`SelectInto`, or a canonical query with the offending tail removed.
+
+Preserve the legal Q02 contract and verify composition with leading WITH,
+subqueries, TIMESERIES and other Vertica query extensions, parenthesized
+queries, and every set-operation position the re-opened primary syntax
+permits. Test comments at clause boundaries, multi-statement atomicity,
+compact/pretty round trips, `dump()`/load, transform/parent metadata,
+qualification/optimization/lineage, Q17 target validation, and strict
+programmatic generation of the existing `SelectInto`/`IntoTableClause` shape.
+
+**Explicit exclusions.** New target forms, table-target lexical rules (Q17),
+temporary-table storage effects, and unrelated generic SELECT trailing-token
+policy.
+
+**Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
+and [INTO TABLE clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/into-table-clause/).
+
+### Q19 — CREATE TABLE strict AST generation contract — `TODO`
+
+**Outcome.** Validate a canonical CREATE TABLE tree completely before
+rendering so programmatic or foreign ASTs cannot produce invalid Vertica SQL
+or lose a recognized property silently.
+
+**Required work.** Re-open the 26.2 CREATE TABLE and CREATE TEMPORARY TABLE
+pages and audit `VerticaGenerator.create_sql`, installed SQLGlot's canonical
+`exp.Create` fields/property sorting, every table property renderer, and any
+preprocessing that can mutate the tree before dispatch. Add a table-specific
+structural validator that runs before property ordering or text emission. It
+must validate root/kind, definition versus LIKE versus CTAS shape, expression
+and property node types, duplicates/mutual exclusions, scope/temporary
+combinations, `ON COMMIT`, `DISK_QUOTA`, `NO PROJECTION`, segmentation/order/
+partition clauses, CTAS-only `AtEpochProperty` and encoded-by fields, and all
+other installed canonical CREATE extras against the parser-supported contract.
+
+At `unsupported_level=RAISE`, direct and nested programmatic mutations must
+raise `UnsupportedError` atomically for concrete audit cases including LOCAL
+without TEMPORARY, contradictory GLOBAL/LOCAL/TEMPORARY states, permanent
+`ON COMMIT`, LOCAL temporary plus `DISK_QUOTA`, temporary CTAS plus illegal
+segmentation, CTAS plus definition-only `NO PROJECTION`, definition-form
+`AtEpochProperty`, wrong node types, duplicate properties, and foreign-only
+Create fields. No property may be silently discarded even when the base
+generator lacks a renderer. Preserve valid parser-produced property ordering,
+compact/pretty output, Q01/Q07 behavior, Q17 target validation, serialization,
+query analysis, and Q05's direct/nested four-dialect embedded-property
+atomicity. Add a strict mutation matrix across definition, LIKE, and CTAS
+roots rather than testing only one reversed valid property list.
+
+**Explicit exclusions.** New CREATE syntax, parser guaranteed-raise work
+(Q15), flex/external tables, physical-design validity that the existing parser
+delegates to the server, and foreign-dialect support for Vertica properties.
+
+**Primary sources.** [CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/)
+and [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/).
+
+### Q20 — Milestone 1 formal-syntax negative audit — `TODO`
+
+**Outcome.** Prove that the remediated Milestone 1 surface owns every inherited
+SQLGlot parse/generate field it exposes, and schedule any remaining concrete
+gap before recertification.
+
+**Required work.** This is a test-and-documentation audit, not an
+implementation task. Re-open the complete 26.2 formal syntax for SELECT core,
+FROM/joined tables, subqueries, GROUP BY/HAVING/ORDER BY, query extensions,
+set operations, LIMIT/OFFSET/locks, WITH/recursion, SELECT INTO, temporary
+CREATE definition/LIKE/CTAS, INSERT, and DROP TABLE. Inventory the installed
+SQLGlot parser and canonical expression fields for each family, then classify
+every exposed source/programmatic form as documented Vertica syntax, an
+architecture-approved semantic lowering/canonicalization, an explicit
+fail-closed boundary, or an uncovered product gap. Include direct roots,
+nested/CTE/set-operation positions, comments, multi-statement boundaries, all
+four parser error levels, and strict generator mutations.
+
+Add durable negative matrices for the fixed boundaries from Q09–Q19 and
+positive pins for deliberate canonicalizations such as the final Q11 decision
+on `LIMIT ALL`. Re-evaluate existing equivalence lowerings (`QUALIFY`,
+SEMI/ANTI joins, APPLY, and any other inherited rewrite found by the inventory)
+against `ARCHITECTURE.md`; preserve them only when they generate valid,
+semantically equivalent Vertica and are documented as such. Correct stale or
+overbroad `docs/COVERAGE.md` rows, including ordered grouping, supported
+LIMIT/OFFSET versus rejected FETCH, CTE root constraints, direct historical
+analysis, and lifecycle identifier/fail-closed boundaries.
+
+If the audit finds a new product gap, do not implement it here and do not mark
+the milestone certified. Add one narrowly scoped Q task with its own source,
+tests, exclusions, dependency, and commit title; place it after Q20, renumber
+the recertification gate so it remains the highest Q number, and update every
+gate cross-reference in this file, `AGENTS.md`, and `docs/ROADMAP.md`. Q20 may
+be marked `DONE` only after its audit inventory and passing contract tests are
+committed and every discovered implementation gap is represented by such a
+task.
+
+**Explicit exclusions.** Opportunistic grammar or production-code fixes,
+Milestone 2 families, catalog-aware/server-only semantics, and milestone
+certification itself (the final gate owns that decision).
+
+**Primary sources.** The Q09–Q19 pages plus the linked 26.2 SELECT and
+temporary-table statement subtrees. Record the exact pages re-opened in the
+completion note.
+
+### Q21 — Milestone 1 recertification gate — `TODO`
+
+**Outcome.** Re-prove the complete analysis surface end to end and certify
+Milestone 1 only if every remediation and formal-negative boundary holds.
+
+**Required work.** Introduce no new grammar. Re-read the Q09–Q20 completion
+records and extend the realistic workload corpus so it exercises ordered
+multilevel grouping, legal set-operation modifiers and branch tails,
+documented joins and SELECT tails, direct analyzer-safe AT-prefixed SELECT and
+set-operation roots, legal plain/subordinate/recursive/hinted CTEs, and the
+full temporary-table lifecycle. Add negative multi-statement scripts proving
+unsupported query/CTE/CREATE/INSERT/INTO forms raise atomically at all four
+parser error levels without swallowing the following statement or returning
+empty SQL.
+
+Strengthen the data-flow proof beyond Q08's supplied-schema boundary: trace a
+column through SELECT INTO -> CTAS/CTE -> a definition-form temporary table
+populated by INSERT -> the raw source query, with qualification, optimization,
+scope traversal, and lineage all invoked on their ordinary public roots.
+Assert statement boundaries, root classes, compact/pretty regeneration,
+parse-after-generate equality, `dump()`/load, copy/transform parents, comments,
+strict programmatic AST validation, and the applicable direct/nested foreign
+generation contracts.
+
+Re-audit every Milestone 1 coverage row and deliberate residual against the
+committed tests. Update `docs/COVERAGE.md`, `docs/ROADMAP.md`,
+`docs/ARCHITECTURE.md` where contracts changed, `CHANGELOG.md`, this Current
+state section, dashboard/gate references, and installation-facing milestone
+claims. Then run the complete common release gate: default tests with branch
+coverage, every supported CPython minor including 3.15 warnings-as-errors,
+lint/format/strict typing, sdist/wheel build, clean-wheel install and smoke,
+repository-wide hooks, and diff hygiene. Record exact counts and versions.
+
+If any product gap is found, do not fix it in this gate and do not certify the
+milestone. Schedule a bounded Q task, renumber this gate to remain the highest
+Q number, and stop after committing only the gate's in-scope test/docs work.
+Milestone 2 becomes eligible only after the final recertification task is
+`DONE` and its completion record expressly certifies Milestone 1.
+
+**Explicit exclusions.** New grammar, Milestone 2 implementation, live-server
+catalog semantics, and silent waiver of any failing or untested boundary.
+
+**Primary sources.** Re-open every page named by Q09–Q20 as needed to verify
+the final documented contract.
+
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 
-Every Milestone 2 task is deferred until Q08 is `DONE`. The detailed P16–P35
+Every Milestone 2 task is deferred until every Milestone 1 Q task is `DONE`;
+Q21 is the current final gate. The detailed P16–P35
 specifications — outcome, required work, exclusions, primary sources, and
 completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

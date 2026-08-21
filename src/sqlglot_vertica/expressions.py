@@ -1333,6 +1333,24 @@ class CreateProjection(exp.Create):
     }
 
 
+class VerticaGroup(exp.Group):
+    """A source-ordered Vertica ``GROUP BY`` clause.
+
+    SQLGlot's canonical :class:`exp.Group` stores ordinary expressions,
+    ``GROUPING SETS``, ``CUBE``, and ``ROLLUP`` in separate buckets.  Its
+    generator consequently emits those buckets in a fixed order that can
+    differ from the source.  Vertica permits the four item kinds to be
+    interleaved and repeated, so this node keeps every item in one ordered
+    ``expressions`` list.  ``algorithm`` retains the optional documented
+    ``GBYTYPE(HASH|PIPE)`` optimizer hint.
+    """
+
+    arg_types: t.ClassVar = {
+        "expressions": True,
+        "algorithm": False,
+    }
+
+
 class TimeseriesSelect(exp.Select):
     """A SELECT whose Vertica ``TIMESERIES`` clause must never be dropped."""
 

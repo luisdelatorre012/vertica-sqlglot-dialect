@@ -166,17 +166,16 @@ def test_group_by_mixed_expressions_and_rollup_preserves_order() -> None:
 
 
 def test_group_by_rollup_cube_grouping_sets_ast_shape() -> None:
-    # exp.Group keeps ROLLUP/CUBE/GROUPING SETS in separate typed lists, so a
-    # GROUP BY built only from these three regenerates in fixed list order
-    # rather than source order; reproduced identically under plain postgres,
-    # so this is a generic base-SQLGlot limit, not a Vertica-specific defect.
     expression = assert_roundtrip(
-        "SELECT a, b, c, SUM(e) FROM t GROUP BY ROLLUP(a), CUBE(b), GROUPING SETS(c)"
+        "SELECT a, b, c, SUM(e) FROM t GROUP BY ROLLUP(a), CUBE(b), GROUPING SETS(c)",
+        "SELECT a, b, c, SUM(e) FROM t GROUP BY ROLLUP (a), CUBE (b), GROUPING SETS (c)",
     )
     group = expression.args["group"]
-    assert isinstance(group.args["rollup"][0], exp.Rollup)
-    assert isinstance(group.args["cube"][0], exp.Cube)
-    assert isinstance(group.args["grouping_sets"][0], exp.GroupingSets)
+    assert [type(item) for item in group.expressions] == [
+        exp.Rollup,
+        exp.Cube,
+        exp.GroupingSets,
+    ]
 
 
 def test_having_filters_aggregate() -> None:

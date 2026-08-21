@@ -128,6 +128,23 @@ The following invariants apply to every custom node:
    tested.
 5. Public class names are treated as serialized-AST compatibility surface.
 
+Ordered multilevel grouping is one case where a close canonical subclass is
+necessary. SQLGlot 30.13's canonical `exp.Group` stores ordinary expressions,
+`GROUPING SETS`, `CUBE`, and `ROLLUP` in four separate fields, and its generic
+generator emits those buckets in the fixed order ordinary expressions,
+grouping sets, cubes, then rollups. Vertica permits all four item kinds to be
+interleaved and repeated, so parser-produced clauses use
+`VerticaGroup(exp.Group)` with one source-ordered `expressions` list. The
+subclass keeps scope traversal, qualification, optimization, lineage, ordinal
+expansion, and `isinstance(exp.Group)` checks working while its explicit
+Vertica transform renders that list without rebucketing it. The same node has
+an optional typed `algorithm` child for the documented
+`/*+GBYTYPE(HASH|PIPE)*/` clause hint. Canonical `exp.Group` trees remain
+accepted for ordinary-only foreign/programmatic interoperability, but their
+bucket, `all`, and `totals` fields are rejected rather than rendered in a
+potentially reordered or foreign form. The custom root fails atomically in
+foreign dialects, directly or nested in a SELECT.
+
 A clause that scopes an entire top-level query rather than one `exp.Select`
 needs a different shape than the "promote by becoming" pattern `SelectInto`/
 `TimeseriesSelect` use (re-instantiating the same concrete class with the

@@ -18,6 +18,10 @@ plugin interface.
   source-exact collection/regex/conversion functions, in-call analytic NULL
   treatment, and special window partition modes.
 - Added TIMESERIES, INTERPOLATE, MATCH, and partitioned LIMIT query clauses.
+- Added source-ordered multilevel `GROUP BY` ASTs that preserve arbitrary
+  interleaving and repetition of ordinary expressions, `ROLLUP`, `CUBE`, and
+  `GROUPING SETS`, plus typed `GBYTYPE(HASH|PIPE)` hints and strict rejection
+  of inherited foreign grouping modifiers.
 - Added exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE TABLE
   semantics, including both MERGE filter spellings, strict foreign-clause
   rejection, and a lineage-safe UPDATE `FROM DEFAULT` relation.

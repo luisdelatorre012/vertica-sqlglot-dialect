@@ -23,8 +23,8 @@ archive only when the selected task explicitly requires that history.
 - Resume the single `IN_PROGRESS` task. If none exists, select with milestone
   precedence: while any Milestone 1 (`Q`-series) task is not `DONE`, only `Q`
   tasks are eligible, and Milestone 2 (`P`-series) tasks become eligible only
-  after Q08 is `DONE`. Within the active milestone, take the lowest-numbered
-  `TODO` task whose dependencies are `DONE`.
+  after every Q task is `DONE`. Within the active milestone, take the
+  lowest-numbered `TODO` task whose dependencies are `DONE`.
 - Complete exactly one task per invocation. Do not begin, research, or partially
   implement the following task.
 - Follow the plan's scope, exclusions, acceptance tests, release gate, status
@@ -65,7 +65,8 @@ archive only when the selected task explicitly requires that history.
 - Update the selected task to `DONE` (or `BLOCKED`) and update the dashboard in
   the same commit as the implementation. After that local commit, run only
   `git status --short` and `git log -1 --oneline` to verify the handoff, then
-  stop. Never push; this repository intentionally has no remote.
+  stop. Never push; repository-agent work is intentionally local even when a
+  remote is configured.
 
 ## Local CPython release matrix
 

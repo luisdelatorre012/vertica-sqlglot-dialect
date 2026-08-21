@@ -118,6 +118,8 @@ class VerticaParser(PostgresParser):
     JOIN_HINT_NAMES: t.ClassVar = {"DISTRIB", "JTYPE"}
     WITH_HINT_NAMES: t.ClassVar = {"ENABLE_WITH_CLAUSE_MATERIALIZATION"}
     CTAS_HINT_NAMES: t.ClassVar = {"LABEL"}
+    GROUP_BY_HINT = re.compile(r"^\s*GBYTYPE\s*\(\s*(HASH|PIPE)\s*\)\s*$", re.I | re.ASCII)
+    GROUP_BY_HINT_PREFIX = re.compile(r"^\s*GBYTYPE\b", re.I | re.ASCII)
     DIRECTED_CONSTANT_HINT: t.ClassVar[re.Pattern[str]] = re.compile(
         r"^(?:(?P<conserve>:c)|(?P<pair>:v|IGNORECONST(?:ANT)?)\s*"
         r"\(\s*(?P<index>[0-9]+)\s*\))$",
@@ -1166,6 +1168,130 @@ class VerticaParser(PostgresParser):
             self.check_errors()
         if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
             raise ParseError(message)
+
+    def _raise_group_by_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
+    def _parse_vertica_grouping_construct(
+        self, kind: type[exp.Cube | exp.Rollup], *, nested: bool = False
+    ) -> exp.Cube | exp.Rollup:
+        self._advance()
+        name = "CUBE" if kind is exp.Cube else "ROLLUP"
+        if not self._match(TokenType.L_PAREN):
+            self._raise_group_by_error(f"GROUP BY {name} requires parentheses")
+        if self._match(TokenType.R_PAREN):
+            self._raise_group_by_error(f"GROUP BY {name} requires at least one expression")
+
+        expressions: list[exp.Expr] = []
+        while True:
+            if nested and self._curr.token_type == TokenType.GROUPING_SETS:
+                self._raise_group_by_error("GROUPING SETS cannot contain GROUPING SETS")
+
+            expression = self._parse_bitwise()
+            if not expression:
+                self._raise_group_by_error(f"GROUP BY {name} requires an expression")
+            expressions.append(expression)
+
+            if self._match(TokenType.COMMA):
+                if self._curr.token_type == TokenType.R_PAREN:
+                    self._raise_group_by_error(f"GROUP BY {name} cannot end with a comma")
+                continue
+            if not self._match(TokenType.R_PAREN):
+                self._raise_group_by_error(f"GROUP BY {name} requires a closing parenthesis")
+            break
+
+        return self.expression(kind(expressions=expressions))
+
+    def _parse_vertica_grouping_sets(self) -> exp.GroupingSets:
+        self._advance()
+        if not self._match(TokenType.L_PAREN):
+            self._raise_group_by_error("GROUPING SETS requires parentheses")
+        if self._match(TokenType.R_PAREN):
+            self._raise_group_by_error("GROUPING SETS requires at least one grouping")
+
+        expressions: list[exp.Expr] = []
+        while True:
+            expression: exp.Expr | None
+            if self._curr.token_type == TokenType.GROUPING_SETS:
+                self._raise_group_by_error("GROUPING SETS cannot contain GROUPING SETS")
+            if self._curr.token_type == TokenType.CUBE:
+                expression = self._parse_vertica_grouping_construct(exp.Cube, nested=True)
+            elif self._curr.token_type == TokenType.ROLLUP:
+                expression = self._parse_vertica_grouping_construct(exp.Rollup, nested=True)
+            else:
+                expression = self._parse_bitwise()
+                if not expression:
+                    self._raise_group_by_error("GROUPING SETS requires a grouping expression")
+            expressions.append(expression)
+
+            if self._match(TokenType.COMMA):
+                if self._curr.token_type == TokenType.R_PAREN:
+                    self._raise_group_by_error("GROUPING SETS cannot end with a comma")
+                continue
+            if not self._match(TokenType.R_PAREN):
+                self._raise_group_by_error("GROUPING SETS requires a closing parenthesis")
+            break
+
+        return self.expression(exp.GroupingSets(expressions=expressions))
+
+    def _parse_vertica_group_item(self) -> exp.Expr:
+        if self._curr.token_type in {TokenType.ALL, TokenType.DISTINCT}:
+            self._raise_group_by_error("Vertica GROUP BY does not support ALL or DISTINCT")
+
+        if self._curr.token_type == TokenType.GROUPING_SETS:
+            return self._parse_vertica_grouping_sets()
+        if self._curr.token_type == TokenType.CUBE and self._next.token_type == TokenType.L_PAREN:
+            return self._parse_vertica_grouping_construct(exp.Cube)
+        if self._curr.token_type == TokenType.ROLLUP and self._next.token_type == TokenType.L_PAREN:
+            return self._parse_vertica_grouping_construct(exp.Rollup)
+
+        expression = self._parse_disjunction()
+        if not expression:
+            self._raise_group_by_error("GROUP BY requires at least one expression")
+        return expression
+
+    def _parse_group(self, skip_group_by_token: bool = False) -> exp.Group | None:
+        if not skip_group_by_token and not self._match(TokenType.GROUP_BY):
+            return None
+
+        comments = self._prev_comments
+        algorithm: exp.Var | None = None
+        ordinary_comments: list[str] = []
+        for comment in comments or ():
+            match = self.GROUP_BY_HINT.fullmatch(comment)
+            if match:
+                if algorithm is not None:
+                    self._raise_group_by_error("GROUP BY accepts only one GBYTYPE hint")
+                algorithm = exp.var(match.group(1).upper())
+            elif self.GROUP_BY_HINT_PREFIX.match(comment):
+                self._raise_group_by_error("GBYTYPE requires HASH or PIPE")
+            else:
+                ordinary_comments.append(comment)
+
+        expressions: list[exp.Expr] = []
+        while True:
+            expressions.append(self._parse_vertica_group_item())
+            if not self._match(TokenType.COMMA):
+                break
+            if self._match_set(self.QUERY_MODIFIER_TOKENS, advance=False):
+                self._raise_group_by_error("GROUP BY cannot end with a comma")
+
+        if self._curr.token_type == TokenType.WITH and self._next.text.upper() in {
+            "CUBE",
+            "ROLLUP",
+            "TOTALS",
+        }:
+            self._raise_group_by_error("Vertica GROUP BY does not support WITH grouping modifiers")
+        if self._curr.text.isascii() and self._curr.text.upper() == "TOTALS":
+            self._raise_group_by_error("Vertica GROUP BY does not support TOTALS")
+
+        args: dict[str, t.Any] = {"expressions": expressions}
+        if algorithm is not None:
+            args["algorithm"] = algorithm
+        return self.expression(vexp.VerticaGroup(**args), comments=ordinary_comments)
 
     def _structure_directed_constant_hints(self, expression: exp.Expr | None) -> exp.Expr | None:
         if not expression:
