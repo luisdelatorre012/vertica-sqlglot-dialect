@@ -99,6 +99,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   schedules another bounded fix.
 - Completed **Q09 — ordered multilevel GROUP BY losslessness**. Q10 is the
   lowest-numbered remaining task.
+- Completed **Q10 — set-operation modifier conformance**. Q11 is the
+  lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -235,7 +237,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q07 | DONE   | CTAS historical-snapshot guaranteed-raise conformance | —            | `fix: harden ctas at epoch guaranteed raise`            |
 | Q08 | DONE   | Milestone 1 acceptance gate                   | Q01–Q07             | `test: certify milestone one analysis surface`          |
 | Q09 | DONE   | Ordered multilevel GROUP BY losslessness      | Q08                 | `feat: preserve ordered multilevel group by`             |
-| Q10 | TODO   | Set-operation modifier conformance            | Q09                 | `fix: enforce Vertica set operation modifiers`           |
+| Q10 | DONE   | Set-operation modifier conformance            | Q09                 | `fix: enforce Vertica set operation modifiers`           |
 | Q11 | TODO   | SELECT modifier, row-limit, and lock-tail conformance | Q10           | `fix: enforce Vertica select modifiers`                  |
 | Q12 | TODO   | Joined-table formal grammar                   | Q11                 | `fix: enforce Vertica joined table grammar`              |
 | Q13 | TODO   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
@@ -1674,7 +1676,7 @@ errors. The sdist/wheel build, clean force-install, `pip check`, and installed-
 wheel `python -I` smoke (`SELECT a, b FROM t GROUP BY CUBE(a), b, ROLLUP(a)`,
 returning `Select` with a `VerticaGroup` child) passed.
 
-### Q10 — set-operation modifier conformance — `TODO`
+### Q10 — set-operation modifier conformance — `DONE`
 
 **Outcome.** Make the canonical set-operation tree express exactly Vertica's
 operator-specific duplicate and branch contract, with no inherited modifier
@@ -1711,6 +1713,58 @@ cardinality compatibility between branches.
 [INTERSECT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/intersect-clause/),
 [EXCEPT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/except-clause/),
 and [MINUS clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/minus-clause/).
+
+**Completion record.** Re-opened all four 26.2 primary sources and found no
+material contradiction. UNION's formal grammar admits omitted/default
+DISTINCT, explicit DISTINCT, and ALL; INTERSECT and EXCEPT explicitly prohibit
+ALL and describe distinct results; EXCEPT explicitly requires left-to-right
+evaluation unless parentheses intervene; and the MINUS page defines MINUS
+only as an EXCEPT alias. None documents SQLGlot's BY NAME, CORRESPONDING,
+side, kind, or column-matching forms. Explicit DISTINCT on INTERSECT/EXCEPT/
+MINUS is accepted as a semantic-no-op spelling and canonicalized to the same
+DISTINCT-only tree/output as omission, matching UNION's existing explicit-
+DISTINCT canonicalization and the task's “DISTINCT-only” contract rather than
+inventing a second duplicate state.
+
+Audited installed SQLGlot 30.13's `Parser.parse_set_operation`, iterative
+left-associated `_parse_set_operations`, canonical `SetOperation.arg_types`,
+`Generator.set_operation`/`set_operations`, and scope/optimizer behavior.
+Kept the canonical `exp.Union`, `exp.Intersect`, and `exp.Except` nodes: the
+existing `distinct` Boolean is lossless, MINUS already tokenizes to EXCEPT,
+and the canonical nested tree already preserves parentheses, left
+association, CTE/subquery placement, branch-local ORDER BY/LIMIT/OFFSET, and
+whole-compound tails. Added `_raise_set_operation_error` and a narrow
+`parse_set_operation` override. It rejects INTERSECT/EXCEPT/MINUS ALL and
+every non-`None` `by_name`/`on`/`side`/`kind` state at IMMEDIATE, RAISE, WARN,
+and IGNORE, so permissive levels cannot return or normalize an unsupported
+tree. UNION retains default/explicit DISTINCT and ALL exactly.
+
+Added strict `VerticaGenerator.set_operation` validation before rendering
+each direct or nested operator: only exact canonical operator classes, two
+query operands, a real Boolean duplicate mode, the operator-specific
+DISTINCT/ALL domain, and absent name-matching fields are accepted. This also
+rejects falsey programmatic extras (`by_name=False`, empty `on`, empty
+`side`/`kind`) rather than treating them as absent, and invalid inner nodes
+raise before the generator returns any compound SQL. Valid foreign-parsed
+canonical set trees still generate Vertica. Added
+`tests/test_set_operations.py` with 86 tests covering every documented mode,
+MINUS canonicalization, mixed chains and per-node modifier ownership,
+parentheses, CTE/subquery and branch/compound-tail placement, comments,
+compact/pretty round trips, dump/load, copy/transform parent metadata,
+all-level source negatives, strict direct/nested AST mutations, scope
+traversal, qualification, optimization, lineage, and foreign-parsed valid
+trees. Updated architecture, coverage, roadmap, and changelog contracts; the
+four source links were already present in `docs/SOURCES.md` and needed no
+duplicate entries.
+
+The focused Q10 module passed 86 tests; the neighboring set/query/group/
+workload/hint/AST suites passed 858 tests. The default CPython 3.12.6 release
+gate passed 6,037 tests at 93.25% branch coverage with Ruff lint/formatting,
+strict mypy, and diff checks clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed 6,037 tests, with 3.15
+treating deprecations as errors. The sdist/wheel build, clean force-install,
+`pip check`, and installed-wheel `python -I` smoke (`SELECT 1 UNION ALL SELECT
+2 INTERSECT SELECT 3`, returning `Intersect`) passed.
 
 ### Q11 — SELECT modifier, row-limit, and lock-tail conformance — `TODO`
 

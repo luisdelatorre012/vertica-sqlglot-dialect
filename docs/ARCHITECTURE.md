@@ -145,6 +145,22 @@ bucket, `all`, and `totals` fields are rejected rather than rendered in a
 potentially reordered or foreign form. The custom root fails atomically in
 foreign dialects, directly or nested in a SELECT.
 
+Set operations stay fully canonical because SQLGlot's `Union`, `Intersect`,
+and `Except` nodes preserve Vertica's operator and duplicate semantics without
+an additional AST type. The parser records omitted and explicit `DISTINCT` as
+`distinct=True`, records `UNION ALL` as `distinct=False`, and canonicalizes
+the documented `MINUS` synonym to `Except`. Vertica's `INTERSECT`, `EXCEPT`,
+and `MINUS` are DISTINCT-only, so their inherited `ALL` form fails through a
+dedicated guaranteed-raise path at every parser error level. The same path
+rejects SQLGlot's name-matching/correspondence fields (`by_name`, `on`,
+`side`, and `kind`) for every operator. Generation validates those fields,
+the Boolean duplicate mode, both query operands, and every nested operation
+before returning SQL; invalid programmatic or foreign trees therefore cannot
+emit `INTERSECT ALL`, `EXCEPT ALL`, `BY NAME`, or `CORRESPONDING` syntax.
+Canonical nesting retains SQLGlot's left-associated tree, parentheses,
+branch-local modifiers, whole-compound tails, scope traversal, qualification,
+optimization, and lineage behavior.
+
 A clause that scopes an entire top-level query rather than one `exp.Select`
 needs a different shape than the "promote by becoming" pattern `SelectInto`/
 `TimeseriesSelect` use (re-instantiating the same concrete class with the

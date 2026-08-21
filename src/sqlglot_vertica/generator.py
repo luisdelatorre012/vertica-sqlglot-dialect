@@ -673,6 +673,36 @@ class VerticaGenerator(PostgresGenerator):
             prefix += f" /*+GBYTYPE({algorithm.name.upper()})*/"
         return self.op_expressions(prefix, expression)
 
+    def set_operation(self, expression: exp.SetOperation) -> str:
+        operation = type(expression)
+        if operation not in {exp.Union, exp.Intersect, exp.Except}:
+            self.unsupported("Vertica requires a canonical UNION, INTERSECT, or EXCEPT node")
+            return ""
+
+        left = expression.args.get("this")
+        right = expression.args.get("expression")
+        if not isinstance(left, exp.Query) or not isinstance(right, exp.Query):
+            self.unsupported(f"Vertica {operation.key.upper()} requires two query operands")
+            return ""
+
+        distinct = expression.args.get("distinct")
+        if type(distinct) is not bool:
+            self.unsupported(
+                f"Vertica {operation.key.upper()} requires an explicit Boolean duplicate mode"
+            )
+            return ""
+        if operation in {exp.Intersect, exp.Except} and distinct is not True:
+            self.unsupported(f"Vertica {operation.key.upper()} supports DISTINCT results only")
+            return ""
+
+        if any(expression.args.get(key) is not None for key in ("by_name", "on", "side", "kind")):
+            self.unsupported(
+                f"Vertica {operation.key.upper()} does not support name-matching modifiers"
+            )
+            return ""
+
+        return super().set_operation(expression)
+
     def _vertica_with_sql(self, expression: exp.With, hint: str) -> str:
         sql = self.expressions(expression, flat=True)
         recursive = (

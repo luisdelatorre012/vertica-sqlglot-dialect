@@ -110,7 +110,13 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   material grouping parentheses and empty sets are retained, the documented
   `GBYTYPE(HASH|PIPE)` hint is typed, inherited foreign modifiers fail closed,
   and qualification, optimization, scope traversal, and lineage preserve the
-  ordered shape. Q10 is the next eligible task.
+  ordered shape. Q10 is complete: canonical set-operation trees now enforce
+  Vertica's operator-specific duplicate contract (`UNION` default/DISTINCT or
+  `ALL`; `INTERSECT`, `EXCEPT`, and canonicalized `MINUS` DISTINCT-only),
+  reject inherited name-matching/correspondence modifiers at every parser
+  error level, and validate nested/programmatic trees before generation while
+  preserving left association, branch tails, analysis traversal, and lineage.
+  Q11 is the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

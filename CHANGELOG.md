@@ -22,6 +22,10 @@ plugin interface.
   interleaving and repetition of ordinary expressions, `ROLLUP`, `CUBE`, and
   `GROUPING SETS`, plus typed `GBYTYPE(HASH|PIPE)` hints and strict rejection
   of inherited foreign grouping modifiers.
+- Enforced Vertica's canonical set-operation contract: `UNION` supports
+  default/explicit DISTINCT and `ALL`, while `INTERSECT`, `EXCEPT`, and
+  canonicalized `MINUS` reject `ALL` and inherited name-matching modifiers in
+  source and programmatic trees.
 - Added exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE TABLE
   semantics, including both MERGE filter spellings, strict foreign-clause
   rejection, and a lineage-safe UPDATE `FROM DEFAULT` relation.

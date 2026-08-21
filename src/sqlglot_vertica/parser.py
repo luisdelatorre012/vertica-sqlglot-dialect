@@ -1175,6 +1175,32 @@ class VerticaParser(PostgresParser):
             self.check_errors()
         raise ParseError(message)
 
+    def _raise_set_operation_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
+    def parse_set_operation(
+        self, this: exp.Expr | None, consume_pipe: bool = False
+    ) -> exp.Expr | None:
+        expression = super().parse_set_operation(this, consume_pipe=consume_pipe)
+        if not isinstance(expression, exp.SetOperation):
+            return expression
+
+        operation = type(expression)
+        if operation in {exp.Except, exp.Intersect} and expression.args.get("distinct") is not True:
+            self._raise_set_operation_error(
+                f"Vertica {operation.key.upper()} supports DISTINCT results only"
+            )
+
+        if any(expression.args.get(key) is not None for key in ("by_name", "on", "side", "kind")):
+            self._raise_set_operation_error(
+                f"Vertica {operation.key.upper()} does not support name-matching modifiers"
+            )
+
+        return expression
+
     def _parse_vertica_grouping_construct(
         self, kind: type[exp.Cube | exp.Rollup], *, nested: bool = False
     ) -> exp.Cube | exp.Rollup:
