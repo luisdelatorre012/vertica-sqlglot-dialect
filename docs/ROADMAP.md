@@ -185,12 +185,17 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   consolidated the Q09–Q19
   all-level negative contract, and revalidated the deliberate `ALL`/`LIMIT
   ALL`/`MINUS`, QUALIFY, SEMI/ANTI, and APPLY canonicalizations or lowerings.
-  It found two distinct product gaps without changing production code: Q21
-  will close undocumented inherited SELECT/projection/order/table-reference
-  fields that currently emit foreign SQL or disappear, and Q22 will make
-  malformed TIMESERIES/MATCH/INTERPOLATE paths fail at `WARN`/`IGNORE` rather
-  than return partial ASTs. The former Q21 recertification gate is therefore
-  renumbered Q23 and remains ineligible until both fixes are complete.
+  It found two distinct product gaps without changing production code. Q21 is
+  complete: SELECT, set-operation, subquery, table-reference, TABLESAMPLE,
+  ordering, Lateral, Pivot, and Star fields now have a whole-tree parser and
+  pre-preprocessing generator closure. Undocumented WINDOW/CONNECT/LATERAL
+  VIEW/PIVOT, distribution/sort/cluster, star modifiers, ordering extensions,
+  table ONLY/historical-AT, and foreign sampling forms fail atomically, while
+  bare numeric TABLESAMPLE and the approved APPLY lowerings remain stable.
+  Q22 is now the lowest-numbered remaining task and will make malformed
+  TIMESERIES/MATCH/INTERPOLATE paths fail at `WARN`/`IGNORE` rather than return
+  partial ASTs. The recertification gate remains Q23 and is ineligible until
+  Q22 is complete.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

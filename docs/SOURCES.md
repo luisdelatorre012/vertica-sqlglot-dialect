@@ -24,6 +24,7 @@ called out in code review.
 - [Historical queries](https://docs.vertica.com/26.2.x/en/data-analysis/queries/historical-queries/)
 - [INTO TABLE clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/into-table-clause/)
 - [FROM clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/from-clause/)
+- [Table-reference](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/from-clause/table-reference/)
 - [Joined-table](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/from-clause/joined-table/)
 - [Join syntax](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/join-syntax/)
 - [Natural joins](https://docs.vertica.com/26.2.x/en/data-analysis/queries/joins/inner-joins/natural-joins/)

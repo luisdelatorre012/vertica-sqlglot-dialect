@@ -221,21 +221,31 @@ Q20 froze the installed SQLGlot 30.13 field inventory for `Select`,
 `SetOperation`, `Join`, `Table`, `TableSample`, `With`/`CTE`, row tails,
 ordering, `Into`, `Create`, `Insert`, and `Drop`. The audit classifies each
 field as documented Vertica syntax, one of the explicit canonicalizations or
-lowerings above, an existing Q09–Q19 fail-closed boundary, or a scheduled
-product gap. Two independent gaps remain before recertification. First,
-undocumented ordinary query/relation fields can still escape the contract:
-named WINDOW, CONNECT BY, LATERAL VIEW, table ONLY/historical `AT (...)`,
-ORDER BY WITH FILL, star EXCLUDE/EXCEPT, and foreign TABLESAMPLE variants
-currently emit foreign-looking SQL, while PIVOT and DISTRIBUTE/SORT/CLUSTER BY
-are parsed into typed fields and then silently disappear during Vertica
-generation. Q21 owns the complete SELECT/projection/relation field closure,
-including strict programmatic validation; until then these forms are pinned as
-residuals, not supported syntax. Second, several pre-existing custom query-
-extension parsers still call level-dependent error paths: malformed
-TIMESERIES, MATCH, and INTERPOLATE inputs raise at `IMMEDIATE`/`RAISE` but can
-return partial custom ASTs at `WARN`/`IGNORE`. Q22 owns their guaranteed-raise
-and strict-generation closure. Neither gap is an approved lowering or
-canonicalization, and neither is waived by the historical Q08 positive gate.
+lowerings above, or a fail-closed boundary. Q21 completed the ordinary query
+closure: parser-produced SELECT, set-operation, subquery, table-reference,
+TABLESAMPLE, ORDER/Ordered, Lateral, Pivot, and Star nodes are checked before
+they can escape the query parser, and the same whole-tree preflight runs before
+PostgreSQL's SELECT preprocessing can lower or discard a field. Named WINDOW,
+CONNECT BY, LATERAL VIEW, PIVOT/UNPIVOT, DISTRIBUTE/SORT/CLUSTER BY, star
+EXCLUDE/EXCEPT/REPLACE, ORDER SIBLINGS BY/WITH FILL and explicit NULLS
+ordering, table ONLY/historical `AT (...)`, and method/ROWS/PERCENT/REPEATABLE
+TABLESAMPLE variants now raise `ParseError` at every parser error level.
+Strict direct and nested generation rejects those fields, falsey mutations,
+unknown fields, and malformed child shapes with `UnsupportedError` before an
+inherited renderer can emit foreign SQL or silently drop them. The documented
+bare numeric `TABLESAMPLE(percent)` form remains canonical on tables and named
+subqueries; numeric range and sampling behavior remain server checks. LATERAL
+remains admitted only as the canonical output of the approved CROSS/OUTER
+APPLY lowerings (INNER/LEFT LATERAL JOIN with `ON TRUE`), so those outputs
+still reparse while free-standing LATERAL syntax fails closed.
+
+One independent gap remains before recertification: several pre-existing
+custom query-extension parsers still call level-dependent error paths.
+Malformed TIMESERIES, MATCH, and INTERPOLATE inputs raise at
+`IMMEDIATE`/`RAISE` but can return partial custom ASTs at `WARN`/`IGNORE`.
+Q22 owns their guaranteed-raise and strict-generation closure. This gap is not
+an approved lowering or canonicalization and is not waived by the historical
+Q08 positive gate.
 
 A clause that scopes an entire top-level query rather than one `exp.Select`
 must still expose the concrete query shape to SQLGlot analysis. The SELECT

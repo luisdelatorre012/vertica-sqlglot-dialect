@@ -1224,6 +1224,12 @@ class VerticaParser(PostgresParser):
             self.check_errors()
         raise ParseError(message)
 
+    def _raise_select_field_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
     def _raise_join_error(self, message: str) -> t.NoReturn:
         self.raise_error(message)
         if self.error_level == ErrorLevel.RAISE:
@@ -1648,6 +1654,16 @@ class VerticaParser(PostgresParser):
         )
         self._validate_select_into_remainder(expression)
         if (
+            self._curr is not None
+            and self._next is not None
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == "SIBLINGS"
+            and self._next.text.isascii()
+            and self._next.text.upper() == "BY"
+        ):
+            self._raise_select_field_error("Vertica ORDER BY does not support SIBLINGS")
+        self._validate_inherited_select_fields(expression)
+        if (
             isinstance(
                 expression,
                 (
@@ -1681,6 +1697,177 @@ class VerticaParser(PostgresParser):
             self._raise_cte_error("Vertica WITH must precede a SELECT query")
         return expression
 
+    @staticmethod
+    def _is_numeric_table_sample(expression: exp.Expr | None) -> bool:
+        if isinstance(expression, exp.Literal):
+            return not expression.is_string
+        return (
+            isinstance(expression, exp.Neg)
+            and isinstance(expression.this, exp.Literal)
+            and not (expression.this.is_string)
+        )
+
+    def _validate_parsed_table_sample(self, expression: exp.TableSample) -> None:
+        if any(
+            value is not None for key, value in expression.args.items() if key != "percent"
+        ) or not self._is_numeric_table_sample(expression.args.get("percent")):
+            self._raise_select_field_error(
+                "Vertica TABLESAMPLE requires one bare numeric percentage"
+            )
+
+    @staticmethod
+    def _is_approved_lateral(expression: exp.Lateral) -> bool:
+        if any(
+            key not in {"this", "alias", "cross_apply", "view", "outer", "ordinality"}
+            and value is not None
+            for key, value in expression.args.items()
+        ):
+            return False
+        if expression.args.get("view") not in {None, False} or expression.args.get("outer") not in {
+            None,
+            False,
+        }:
+            return False
+        if expression.args.get("ordinality") is not None:
+            return False
+        if type(expression.args.get("cross_apply")) is bool:
+            return True
+        if expression.args.get("cross_apply") is not None or not isinstance(
+            expression.parent, exp.Join
+        ):
+            return False
+
+        join = expression.parent
+        on = join.args.get("on")
+        return (
+            isinstance(on, exp.Boolean)
+            and on.this is True
+            and join.args.get("using") is None
+            and join.args.get("method") is None
+            and join.args.get("hint") is None
+            and (
+                (not join.side and join.kind == "INNER") or (join.side == "LEFT" and not join.kind)
+            )
+        )
+
+    def _validate_inherited_select_fields(self, expression: exp.Expr | None) -> None:
+        if expression is None:
+            return
+
+        select_fields = {
+            "exclude",
+            "laterals",
+            "connect",
+            "pivots",
+            "prewhere",
+            "windows",
+            "distribute",
+            "sort",
+            "cluster",
+            "sample",
+            "settings",
+            "format",
+            "for_",
+        }
+        relation_fields = {
+            "laterals",
+            "pivots",
+            "system_time",
+            "version",
+            "format",
+            "pattern",
+            "ordinality",
+            "when",
+            "only",
+            "partition",
+            "changes",
+            "rows_from",
+            "indexed",
+        }
+        subquery_fields = {
+            "with_",
+            "match",
+            "laterals",
+            "connect",
+            "pivots",
+            "prewhere",
+            "where",
+            "group",
+            "having",
+            "qualify",
+            "windows",
+            "distribute",
+            "sort",
+            "cluster",
+            "settings",
+            "format",
+            "for_",
+        }
+        set_fields = {
+            "match",
+            "laterals",
+            "joins",
+            "connect",
+            "pivots",
+            "prewhere",
+            "where",
+            "group",
+            "having",
+            "qualify",
+            "windows",
+            "distribute",
+            "sort",
+            "cluster",
+            "sample",
+            "settings",
+            "format",
+            "for_",
+        }
+
+        for node in expression.walk():
+            if isinstance(node, exp.Select) and any(
+                key in select_fields and value is not None for key, value in node.args.items()
+            ):
+                self._raise_select_field_error(
+                    "Vertica SELECT contains an undocumented inherited query field"
+                )
+            if isinstance(node, exp.SetOperation) and any(
+                key in set_fields and value is not None for key, value in node.args.items()
+            ):
+                self._raise_select_field_error(
+                    "Vertica set operations contain an undocumented inherited query field"
+                )
+            if isinstance(node, exp.Subquery) and any(
+                key in subquery_fields and value is not None for key, value in node.args.items()
+            ):
+                self._raise_select_field_error(
+                    "Vertica subqueries contain an undocumented inherited query field"
+                )
+            if isinstance(node, exp.Table) and any(
+                key in relation_fields and value is not None for key, value in node.args.items()
+            ):
+                self._raise_select_field_error(
+                    "Vertica table references contain an undocumented inherited field"
+                )
+            if isinstance(node, exp.TableSample):
+                self._validate_parsed_table_sample(node)
+            if isinstance(node, exp.Pivot):
+                self._raise_select_field_error("Vertica SELECT does not support PIVOT or UNPIVOT")
+            if isinstance(node, exp.Lateral) and not self._is_approved_lateral(node):
+                self._raise_select_field_error(
+                    "Vertica supports LATERAL only through CROSS or OUTER APPLY"
+                )
+            if isinstance(node, exp.Order) and node.args.get("siblings") is not None:
+                self._raise_select_field_error("Vertica ORDER BY does not support SIBLINGS")
+            if isinstance(node, exp.Ordered) and node.args.get("with_fill") is not None:
+                self._raise_select_field_error("Vertica ORDER BY does not support WITH FILL")
+            if isinstance(node, exp.Star) and any(
+                value is not None for value in node.args.values()
+            ):
+                self._raise_select_field_error(
+                    "Vertica star projections do not support inherited modifiers"
+                )
+
     def _validate_select_qualifier_prefix(self) -> None:
         if not self._match(TokenType.SELECT, advance=False):
             return
@@ -1692,6 +1879,43 @@ class VerticaParser(PostgresParser):
             self._raise_select_modifier_error(
                 "Vertica SELECT accepts at most one ALL or DISTINCT qualifier"
             )
+
+    def _parse_table_sample(self, as_modifier: bool = False) -> exp.TableSample | None:
+        start = self._index
+        expression = super()._parse_table_sample(as_modifier=as_modifier)
+        if expression is None:
+            return None
+
+        if any(
+            token.token_type in {TokenType.PERCENT, TokenType.MOD}
+            for token in self._tokens[start : self._index]
+        ):
+            self._raise_select_field_error(
+                "Vertica TABLESAMPLE uses a bare percentage without PERCENT"
+            )
+        self._validate_parsed_table_sample(expression)
+        return expression
+
+    def _parse_ordered(
+        self, parse_method: t.Callable[[], exp.Expr | None] | None = None
+    ) -> exp.Ordered | None:
+        start = self._index
+        expression = super()._parse_ordered(parse_method=parse_method)
+        consumed = self._tokens[start : self._index]
+        for token, next_token in zip(consumed, consumed[1:]):
+            if (
+                token.token_type == TokenType.VAR
+                and token.text.isascii()
+                and token.text.upper() == "NULLS"
+                and next_token.text.isascii()
+                and next_token.text.upper() in {"FIRST", "LAST"}
+            ):
+                self._raise_select_field_error(
+                    "Vertica ORDER BY does not support explicit NULLS FIRST or NULLS LAST"
+                )
+        if expression is not None and expression.args.get("with_fill") is not None:
+            self._raise_select_field_error("Vertica ORDER BY does not support WITH FILL")
+        return expression
 
     def _parse_table(
         self,

@@ -23,6 +23,11 @@ plugin interface.
   revalidates the approved query canonicalizations/lowerings, and pins two
   remaining remediation queues: inherited SELECT/relation-field closure and
   guaranteed-raise handling for malformed query extensions.
+- Closed inherited SELECT/relation fields in both parsing and strict
+  generation: undocumented WINDOW/CONNECT/LATERAL VIEW/PIVOT, distribution and
+  sort extensions, star modifiers, ordering extensions, table historical/ONLY
+  forms, and foreign TABLESAMPLE variants now fail atomically, while bare
+  numeric TABLESAMPLE and the approved APPLY lowerings remain supported.
 - Added source-ordered multilevel `GROUP BY` ASTs that preserve arbitrary
   interleaving and repetition of ordinary expressions, `ROLLUP`, `CUBE`, and
   `GROUPING SETS`, plus typed `GBYTYPE(HASH|PIPE)` hints and strict rejection

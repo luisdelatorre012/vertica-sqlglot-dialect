@@ -293,97 +293,30 @@ def test_architecture_approved_canonicalizations_and_lowerings(
 
 
 @pytest.mark.parametrize(
-    ("sql", "field", "expected"),
+    "sql",
     [
-        ("SELECT a FROM t DISTRIBUTE BY a", "distribute", "SELECT a FROM t"),
-        ("SELECT a FROM t SORT BY a", "sort", "SELECT a FROM t"),
-        ("SELECT a FROM t CLUSTER BY a", "cluster", "SELECT a FROM t"),
-        (
-            "SELECT a FROM t WINDOW w AS (PARTITION BY a)",
-            "windows",
-            "SELECT a FROM t WINDOW w AS (PARTITION BY a)",
-        ),
-        (
-            "SELECT a FROM t CONNECT BY a = PRIOR a",
-            "connect",
-            "SELECT a FROM t CONNECT BY a = PRIOR a",
-        ),
-        (
-            "SELECT * FROM t LATERAL VIEW EXPLODE(a) q AS x",
-            "laterals",
-            "SELECT * FROM t LATERAL VIEW EXPLODE(a) q AS x",
-        ),
+        "SELECT a FROM t DISTRIBUTE BY a",
+        "SELECT a FROM t SORT BY a",
+        "SELECT a FROM t CLUSTER BY a",
+        "SELECT a FROM t WINDOW w AS (PARTITION BY a)",
+        "SELECT a FROM t CONNECT BY a = PRIOR a",
+        "SELECT * FROM t LATERAL VIEW EXPLODE(a) q AS x",
+        "SELECT * FROM t PIVOT(SUM(x) FOR y IN (1))",
+        "SELECT * FROM ONLY t",
+        "SELECT * FROM t AT (TIMESTAMP => '2020-01-01')",
+        "SELECT * FROM t TABLESAMPLE SYSTEM (10)",
+        "SELECT * FROM t TABLESAMPLE BERNOULLI (10) REPEATABLE (1)",
+        "SELECT * FROM t TABLESAMPLE (10 ROWS)",
+        "SELECT a FROM t ORDER BY a WITH FILL",
+        "SELECT * EXCLUDE (a) FROM t",
+        "SELECT * EXCEPT (a) FROM t",
+        "SELECT * REPLACE (a AS b) FROM t",
     ],
 )
-def test_scheduled_select_field_closure_gaps_are_reproducible(
-    sql: str, field: str, expected: str
-) -> None:
-    """Q21 will replace these residual pins with strict negative contracts."""
-
-    expression = parse_one(sql, read="vertica")
-    assert expression.args.get(field) is not None
-    assert expression.sql(dialect="vertica") == expected
-
-
-def test_scheduled_table_pivot_closure_gap_is_reproducible() -> None:
-    expression = parse_one("SELECT * FROM t PIVOT(SUM(x) FOR y IN (1))", read="vertica")
-    table = expression.args["from_"].this
-    assert isinstance(table, exp.Table)
-    assert table.args.get("pivots")
-    assert expression.sql(dialect="vertica") == "SELECT * FROM t"
-
-
-@pytest.mark.parametrize(
-    ("sql", "table_field", "expected"),
-    [
-        ("SELECT * FROM ONLY t", "only", "SELECT * FROM ONLY t"),
-        (
-            "SELECT * FROM t AT (TIMESTAMP => '2020-01-01')",
-            "when",
-            "SELECT * FROM t AT (TIMESTAMP => '2020-01-01')",
-        ),
-        (
-            "SELECT * FROM t TABLESAMPLE SYSTEM (10)",
-            "sample",
-            "SELECT * FROM t TABLESAMPLE SYSTEM (10)",
-        ),
-        (
-            "SELECT * FROM t TABLESAMPLE BERNOULLI (10) REPEATABLE (1)",
-            "sample",
-            "SELECT * FROM t TABLESAMPLE BERNOULLI (10) REPEATABLE (1)",
-        ),
-        (
-            "SELECT * FROM t TABLESAMPLE (10 ROWS)",
-            "sample",
-            "SELECT * FROM t TABLESAMPLE (10)",
-        ),
-    ],
-)
-def test_scheduled_table_reference_field_gaps_are_reproducible(
-    sql: str, table_field: str, expected: str
-) -> None:
-    expression = parse_one(sql, read="vertica")
-    table = expression.args["from_"].this
-    assert isinstance(table, exp.Table)
-    assert table.args.get(table_field) is not None
-    assert expression.sql(dialect="vertica") == expected
-
-
-def test_scheduled_order_with_fill_gap_is_reproducible() -> None:
-    expression = parse_one("SELECT a FROM t ORDER BY a WITH FILL", read="vertica")
-    ordered = expression.args["order"].expressions[0]
-    assert isinstance(ordered, exp.Ordered)
-    assert ordered.args.get("with_fill") is not None
-    assert expression.sql(dialect="vertica") == "SELECT a FROM t ORDER BY a WITH FILL"
-
-
-@pytest.mark.parametrize("keyword", ["EXCLUDE", "EXCEPT"])
-def test_scheduled_star_exclusion_gap_is_reproducible(keyword: str) -> None:
-    expression = parse_one(f"SELECT * {keyword} (a) FROM t", read="vertica")
-    star = expression.expressions[0]
-    assert isinstance(star, exp.Star)
-    assert star.args.get("except_")
-    assert expression.sql(dialect="vertica") == "SELECT * EXCEPT (a) FROM t"
+@pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
+def test_q21_inherited_select_fields_fail_closed(sql: str, error_level: ErrorLevel) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica", error_level=error_level)
 
 
 @pytest.mark.parametrize(

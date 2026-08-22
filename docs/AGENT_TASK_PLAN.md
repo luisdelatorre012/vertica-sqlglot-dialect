@@ -120,6 +120,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   lowest-numbered remaining task.
 - Completed **Q20 — Milestone 1 formal-syntax negative audit**. The audit
   scheduled Q21 and Q22; Q21 is the lowest-numbered remaining task.
+- Completed **Q21 — SELECT inherited-field closure**. Q22 is the
+  lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -267,7 +269,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q18 | DONE   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
 | Q19 | DONE   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
 | Q20 | DONE   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
-| Q21 | TODO   | SELECT inherited-field closure                | Q20                 | `fix: close inherited select fields`                     |
+| Q21 | DONE   | SELECT inherited-field closure                | Q20                 | `fix: close inherited select fields`                     |
 | Q22 | TODO   | Query-extension guaranteed-raise conformance  | Q20, Q21            | `fix: make query extensions fail closed`                 |
 | Q23 | TODO   | Milestone 1 recertification gate              | Q20–Q22             | `test: recertify milestone one analysis surface`         |
 
@@ -2652,7 +2654,7 @@ FROM t LIMIT ALL`, returning canonical `Select` and regenerating without the
 semantic-no-op clause) passed. Milestone 1 remains reopened; Q20 audits and
 schedules its residuals but does not certify the milestone.
 
-### Q21 — SELECT inherited-field closure — `TODO`
+### Q21 — SELECT inherited-field closure — `DONE`
 
 **Outcome.** Close the Q20 audit gap where undocumented inherited SELECT,
 projection, ordering, and table-reference fields can parse and either emit
@@ -2685,6 +2687,55 @@ lowerings.
 the FROM subtree's table-reference page,
 [ORDER BY clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/order-by-clause/),
 and the architecture classification recorded by Q20.
+
+**Completion record.** Re-opened the exact 26.2 SELECT, FROM, Table-reference,
+and ORDER BY pages and audited installed SQLGlot 30.13's parser, generator,
+PostgreSQL SELECT preprocessing, and `Select`, `SetOperation`, `Subquery`,
+`Table`, `TableSample`, `Order`, `Ordered`, `Lateral`, `Pivot`, and `Star`
+fields. No material source contradiction was found. SELECT's formal syntax
+contains none of the inherited fields Q20 identified; Table-reference admits
+only a one-/two-/three-part table plus optional alias; ORDER BY admits only an
+expression list with optional ASC/DESC; and FROM documents only bare
+`TABLESAMPLE(percent)`, including decimals. The documented 0–100 sampling
+range and runtime randomness remain server checks per this task's exclusion.
+
+Added `_raise_select_field_error` and a whole-query parser validation pass.
+Named WINDOW, CONNECT BY, LATERAL VIEW, PIVOT/UNPIVOT,
+DISTRIBUTE/SORT/CLUSTER BY, star EXCLUDE/EXCEPT/REPLACE, ORDER SIBLINGS BY,
+WITH FILL, explicit NULLS FIRST/LAST, table ONLY/historical `AT (...)`, and
+method/ROWS/PERCENT/REPEATABLE or malformed TABLESAMPLE forms now raise
+`ParseError` at IMMEDIATE, RAISE, WARN, and IGNORE, including nested and
+multi-statement positions. Token-provenance checks distinguish inherited
+explicit NULLS and PERCENT spellings from SQLGlot's canonical Boolean
+null-order state and Vertica's bare percentage field. Bare numeric sampling
+remains typed on tables and named subqueries, with compact/pretty round trips,
+serialization, copy/transform parents, scope traversal, qualification,
+optimization, and lineage preserved.
+
+Added the matching strict generator preflight before PostgreSQL's SELECT
+preprocessing, preventing QUALIFY/SEMI/ANTI rewrites or generic relation
+renderers from dropping an invalid field first. Direct and nested SELECT,
+set-operation, subquery, table, sample, ordering, lateral, pivot, and star
+trees reject meaningful, falsey, unknown, and malformed fields with
+`UnsupportedError`. The preflight deliberately delegates CREATE TABLE's
+physical-design `Order` property to Q19's existing strict validator. The only
+admitted Lateral shapes are the architecture-approved CROSS/OUTER APPLY trees
+and their generated INNER/LEFT LATERAL JOIN `ON TRUE` canonical output, which
+continues to reparse; free-standing LATERAL fails closed. Q20's residual pins
+were replaced by all-level negatives, and architecture, coverage, roadmap,
+source inventory, and changelog contracts were updated.
+
+The focused `test_select_field_closure.py` module passed 192 tests; the
+neighboring formal-negative, join, SELECT, set-operation, GROUP BY, CTE,
+historical-query, SELECT INTO, and workload suites passed 1,343 tests (1,535
+combined). The final default CPython 3.12.6 gate passed 7,771 tests at 92.45%
+branch coverage with Ruff lint/formatting, strict mypy, and diff checks clean.
+Isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
+3.15.0rc1 each passed 7,771 tests, with 3.15 treating deprecations as errors.
+The sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+`python -I` smoke (`SELECT a FROM t TABLESAMPLE(12.5) ORDER BY a DESC`,
+returning `Select`) passed. Milestone 1 remains reopened; Q22 and Q23 are not
+part of this task.
 
 ### Q22 — query-extension guaranteed-raise conformance — `TODO`
 

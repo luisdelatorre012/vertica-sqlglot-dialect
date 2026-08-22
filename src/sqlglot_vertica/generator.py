@@ -285,6 +285,7 @@ class VerticaGenerator(PostgresGenerator):
         exp.Hex: lambda self, expression: self.func("TO_HEX", expression.this),
         exp.IntDiv: lambda self, expression: self.binary(expression, "//"),
         exp.LowerHex: lambda self, expression: self.func("TO_HEX", expression.this),
+        exp.Pivot: lambda self, expression: self.pivot_sql(expression),
         exp.Select: lambda self, expression: self._select_transform_sql(expression),
         exp.Merge: lambda self, expression: self.merge_sql(expression),
         exp.SHA: rename_func("SHA1"),
@@ -682,7 +683,229 @@ class VerticaGenerator(PostgresGenerator):
         if (on is None) == (using is None) and any((side, kind, hint is not None)):
             self.unsupported("Vertica explicit JOIN requires exactly one ON or USING predicate")
 
+    @staticmethod
+    def _is_numeric_table_sample(expression: exp.Expr | None) -> bool:
+        if isinstance(expression, exp.Literal):
+            return not expression.is_string
+        return (
+            isinstance(expression, exp.Neg)
+            and isinstance(expression.this, exp.Literal)
+            and not (expression.this.is_string)
+        )
+
+    def _validate_table_sample(self, expression: exp.TableSample) -> bool:
+        if type(expression) is not exp.TableSample:
+            self.unsupported("Vertica TABLESAMPLE requires a canonical TableSample node")
+            return False
+        if self._has_user_extras(expression, set(exp.TableSample.arg_types)) or any(
+            value is not None and key != "percent" for key, value in expression.args.items()
+        ):
+            self.unsupported(
+                "Vertica TABLESAMPLE does not support methods, rows, buckets, or seeds"
+            )
+            return False
+        if not self._is_numeric_table_sample(expression.args.get("percent")):
+            self.unsupported("Vertica TABLESAMPLE requires one bare numeric percentage")
+            return False
+        return True
+
+    @staticmethod
+    def _is_approved_lateral(expression: exp.Lateral) -> bool:
+        if any(
+            key not in {"this", "alias", "cross_apply", "view", "outer", "ordinality"}
+            and value is not None
+            for key, value in expression.args.items()
+        ):
+            return False
+        view = expression.args.get("view")
+        outer = expression.args.get("outer")
+        if (view is not None and view is not False) or (outer is not None and outer is not False):
+            return False
+        if expression.args.get("ordinality") is not None:
+            return False
+        if type(expression.args.get("cross_apply")) is bool:
+            return True
+        if expression.args.get("cross_apply") is not None or not isinstance(
+            expression.parent, exp.Join
+        ):
+            return False
+
+        join = expression.parent
+        on = join.args.get("on")
+        return (
+            isinstance(on, exp.Boolean)
+            and on.this is True
+            and join.args.get("using") is None
+            and join.args.get("method") is None
+            and join.args.get("hint") is None
+            and (
+                (not join.side and join.kind == "INNER") or (join.side == "LEFT" and not join.kind)
+            )
+        )
+
+    def _validate_query_field_node(self, expression: exp.Expr) -> bool:
+        if isinstance(expression, exp.Select):
+            allowed = {
+                "with_",
+                "kind",
+                "expressions",
+                "hint",
+                "distinct",
+                "into",
+                "from_",
+                "operation_modifiers",
+                "match",
+                "joins",
+                "where",
+                "group",
+                "having",
+                "qualify",
+                "order",
+                "limit",
+                "offset",
+                "locks",
+                "options",
+                "timeseries",
+                "at_epoch_kind",
+                "at_epoch_value",
+            }
+            if any(
+                key not in allowed and value is not None for key, value in expression.args.items()
+            ) or self._has_user_extras(expression, allowed):
+                self.unsupported("Vertica SELECT contains an undocumented inherited query field")
+                return False
+
+        elif isinstance(expression, exp.SetOperation):
+            allowed = {
+                "with_",
+                "this",
+                "expression",
+                "distinct",
+                "by_name",
+                "side",
+                "kind",
+                "on",
+                "order",
+                "limit",
+                "offset",
+                "locks",
+                "options",
+                "at_epoch_kind",
+                "at_epoch_value",
+            }
+            if any(
+                key not in allowed and value is not None for key, value in expression.args.items()
+            ) or self._has_user_extras(expression, allowed):
+                self.unsupported(
+                    "Vertica set operations contain an undocumented inherited query field"
+                )
+                return False
+
+        elif isinstance(expression, exp.Subquery):
+            allowed = {
+                "this",
+                "alias",
+                "joins",
+                "order",
+                "limit",
+                "offset",
+                "locks",
+                "sample",
+                "options",
+            }
+            if any(
+                key not in allowed and value is not None for key, value in expression.args.items()
+            ) or self._has_user_extras(expression, allowed):
+                self.unsupported("Vertica subqueries contain an undocumented inherited query field")
+                return False
+
+        elif isinstance(expression, exp.Table):
+            allowed = {"this", "alias", "db", "catalog", "joins", "hints", "sample"}
+            if any(
+                key not in allowed and value is not None for key, value in expression.args.items()
+            ) or self._has_user_extras(expression, allowed):
+                self.unsupported("Vertica table references contain an undocumented inherited field")
+                return False
+            hints = expression.args.get("hints")
+            if hints is not None and (
+                not isinstance(hints, list)
+                or not hints
+                or any(not isinstance(hint, vexp.TableOptimizerHint) for hint in hints)
+            ):
+                self.unsupported("Vertica table hints require typed optimizer directives")
+                return False
+
+        elif isinstance(expression, exp.TableSample):
+            return self._validate_table_sample(expression)
+
+        elif isinstance(expression, exp.Pivot):
+            self.unsupported("Vertica SELECT does not support PIVOT or UNPIVOT")
+            return False
+
+        elif isinstance(expression, exp.Lateral):
+            if (
+                not self._is_approved_lateral(expression)
+                or self._has_user_extras(
+                    expression, {"this", "alias", "cross_apply", "view", "outer", "ordinality"}
+                )
+                or not isinstance(expression.args.get("this"), exp.Expr)
+                or (
+                    expression.args.get("alias") is not None
+                    and not isinstance(expression.args.get("alias"), exp.TableAlias)
+                )
+            ):
+                self.unsupported("Vertica supports LATERAL only through CROSS or OUTER APPLY")
+                return False
+
+        elif isinstance(expression, exp.Order):
+            if isinstance(expression.parent, exp.Properties):
+                return True
+            expressions = expression.args.get("expressions")
+            if (
+                self._has_user_extras(expression, set(exp.Order.arg_types))
+                or expression.args.get("siblings") is not None
+                or not isinstance(expressions, list)
+                or not expressions
+                or any(not isinstance(item, exp.Ordered) for item in expressions)
+            ):
+                self.unsupported("Vertica ORDER BY requires a nonempty canonical ordering list")
+                return False
+            parent = expression.parent
+            if (
+                expression.args.get("this") is not None
+                and parent is not None
+                and expression.arg_key == "order"
+            ):
+                self.unsupported("Vertica query ORDER BY does not accept an owning expression")
+                return False
+
+        elif isinstance(expression, exp.Ordered):
+            desc = expression.args.get("desc")
+            if (
+                self._has_user_extras(expression, set(exp.Ordered.arg_types))
+                or not isinstance(expression.args.get("this"), exp.Expr)
+                or (desc is not None and type(desc) is not bool)
+                or type(expression.args.get("nulls_first")) is not bool
+                or expression.args.get("with_fill") is not None
+            ):
+                self.unsupported("Vertica ORDER BY supports only expression and ASC or DESC")
+                return False
+
+        elif isinstance(expression, exp.Star):
+            if self._has_user_extras(expression, set(exp.Star.arg_types)) or any(
+                value is not None for value in expression.args.values()
+            ):
+                self.unsupported("Vertica star projections do not support inherited modifiers")
+                return False
+
+        return True
+
+    def _validate_query_field_closure(self, expression: exp.Expr) -> bool:
+        return all(self._validate_query_field_node(node) for node in expression.walk())
+
     def _select_transform_sql(self, expression: exp.Select) -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
         for join in expression.args.get("joins") or []:
             if isinstance(join, exp.Join):
                 self._validate_join(join, allow_semi_anti=True)
@@ -796,6 +1019,8 @@ class VerticaGenerator(PostgresGenerator):
         return self.op_expressions(prefix, expression)
 
     def set_operation(self, expression: exp.SetOperation) -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
         operation = type(expression)
         operation_contracts = {
             exp.Union: ("UNION", exp.Union),
@@ -6411,7 +6636,52 @@ class VerticaGenerator(PostgresGenerator):
                 "Partitioned LIMIT requires a positive integer, PARTITION BY, and ORDER BY"
             )
 
+    def table_sql(self, expression: exp.Table, sep: str = " AS ") -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
+        return super().table_sql(expression, sep=sep)
+
+    def tablesample_sql(
+        self,
+        expression: exp.TableSample,
+        tablesample_keyword: str | None = None,
+    ) -> str:
+        if not self._validate_table_sample(expression):
+            return ""
+        return super().tablesample_sql(expression, tablesample_keyword=tablesample_keyword)
+
+    def subquery_sql(self, expression: exp.Subquery, sep: str = " AS ") -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
+        return super().subquery_sql(expression, sep=sep)
+
+    def order_sql(self, expression: exp.Order, flat: bool = False) -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
+        return super().order_sql(expression, flat=flat)
+
+    def ordered_sql(self, expression: exp.Ordered) -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
+        return super().ordered_sql(expression)
+
+    def star_sql(self, expression: exp.Star) -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
+        return super().star_sql(expression)
+
+    def lateral_sql(self, expression: exp.Lateral) -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
+        return super().lateral_sql(expression)
+
+    def pivot_sql(self, expression: exp.Pivot) -> str:
+        self._validate_query_field_closure(expression)
+        return ""
+
     def select_sql(self, expression: exp.Select) -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
         self._validate_select_qualifier(expression)
         for join in expression.args.get("joins") or []:
             if isinstance(join, exp.Join):
