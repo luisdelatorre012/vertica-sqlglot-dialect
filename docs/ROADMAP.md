@@ -102,8 +102,8 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   superseded Q08's certification conclusion while preserving that positive
   corpus as historical evidence. The audit found uncovered formal-negative,
   losslessness, fail-closed, and direct-analysis blockers and scheduled
-  Q09–Q23 in `AGENT_TASK_PLAN.md`; Milestone 1 is reopened until its current
-  Q23 recertification gate and every preceding Q task are `DONE`. Q09 is
+  Q09–Q25 in `AGENT_TASK_PLAN.md`; Milestone 1 is reopened until its current
+  Q25 recertification gate and every preceding Q task are `DONE`. Q09 is
   complete: parser-produced `GROUP BY` clauses now use a canonical-compatible
   ordered Group subclass so ordinary expressions and repeated/interleaved
   `ROLLUP`, `CUBE`, and `GROUPING SETS` constructs regenerate in source order;
@@ -197,8 +197,14 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   and nested AST validation before generation. Required interval/order,
   DEFINE/pattern/row-mode, and operand failures no longer return partial ASTs
   at `WARN`/`IGNORE`; valid comments, serialization, optimizer/type behavior,
-  and foreign atomicity remain stable. Q23 is now the lowest-numbered remaining
-  task and remains the sole recertification gate.
+  and foreign atomicity remain stable. The first recertification attempt on
+  2026-08-22 expanded the end-to-end workload module from 8 to 68 tests and exposed
+  two documented-composition blockers without changing production code:
+  `FOR UPDATE OF` targets are misclassified as duplicate selected sources by
+  qualification/optimization (Q23), and AT-prefixed WITH queries fail when a
+  parenthesized set branch owns ORDER BY/LIMIT while leading-comment ownership
+  is not generation-stable (Q24). Q23 is now the lowest-numbered remaining
+  task; Q25 is the sole recertification gate. Milestone 1 remains reopened.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
@@ -317,7 +323,7 @@ Implemented catalog P0:
   left as a named server-side residual.
 
 Remaining (all Milestone 2; deferred while the reopened Milestone 1 tasks
-Q09–Q23 remain incomplete):
+Q09–Q25 remain incomplete):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);

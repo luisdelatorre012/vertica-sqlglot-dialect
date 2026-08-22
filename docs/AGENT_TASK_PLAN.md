@@ -92,11 +92,13 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   `SELECT INTO` tail atomicity, and programmatic `CREATE TABLE` generation.
   Q08 therefore remains `DONE` as a historical positive gate, while
   **Milestone 1 is reopened and is not certified**.
-- Tasks Q09–Q23 below are the bounded remediation, formal-negative audit, and
+- Tasks Q09–Q25 below are the bounded remediation, formal-negative audit, and
   recertification queue. Milestone 2
-  (P16–P35) is ineligible until every Q task is `DONE`; Q23 is the current
+  (P16–P35) is ineligible until every Q task is `DONE`; Q25 is the current
   recertification gate. Q20 scheduled Q21 and Q22 from two distinct audit
-  findings before renumbering the former Q21 gate to Q23.
+  findings before renumbering the former Q21 gate to Q23. The first Q23 gate
+  attempt on 2026-08-22 found two further analyzer/composition blockers and
+  scheduled them as Q23 and Q24 before renumbering the gate to Q25.
 - Completed **Q09 — ordered multilevel GROUP BY losslessness**. Q10 is the
   lowest-numbered remaining task.
 - Completed **Q10 — set-operation modifier conformance**. Q11 is the
@@ -122,9 +124,12 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   scheduled Q21 and Q22; Q21 is the lowest-numbered remaining task.
 - Completed **Q21 — SELECT inherited-field closure**. Q22 is the
   lowest-numbered remaining task.
-- Completed **Q22 — query-extension guaranteed-raise conformance**. Q23 is the
-  lowest-numbered remaining task and remains the Milestone 1 recertification
-  gate.
+- Completed **Q22 — query-extension guaranteed-raise conformance**. The first
+  recertification attempt found that `FOR UPDATE OF` targets collide with
+  ordinary query sources during qualification/optimization, and that an
+  AT-prefixed query combining WITH with a parenthesized set branch fails while
+  its leading-comment ownership is unstable. Q23 is the lowest-numbered
+  remaining task; Q25 is now the Milestone 1 recertification gate.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -274,11 +279,13 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q20 | DONE   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
 | Q21 | DONE   | SELECT inherited-field closure                | Q20                 | `fix: close inherited select fields`                     |
 | Q22 | DONE   | Query-extension guaranteed-raise conformance  | Q20, Q21            | `fix: make query extensions fail closed`                 |
-| Q23 | TODO   | Milestone 1 recertification gate              | Q20–Q22             | `test: recertify milestone one analysis surface`         |
+| Q23 | TODO   | FOR UPDATE target analysis safety             | Q20–Q22             | `fix: make for update targets analyzer safe`             |
+| Q24 | TODO   | AT epoch WITH compound-query composition      | Q23                 | `fix: compose historical ctes and set branches`          |
+| Q25 | TODO   | Milestone 1 recertification gate              | Q23–Q24             | `test: recertify milestone one analysis surface`         |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred until every Milestone 1 Q task is `DONE`; Q23 is the current final
+Deferred until every Milestone 1 Q task is `DONE`; Q25 is the current final
 gate. Milestone 2 task numbering, dependencies, and specifications are
 intentionally unchanged from the prior plan revision.
 
@@ -549,7 +556,7 @@ active backlog starts at the Milestone 1 section that follows.
 The bounded tasks below close verified gaps between the completed foundation
 and the milestone goal — parsing, analyzing, and regenerating
 `SELECT`/CTE/temporary-table workloads. Q01–Q08 preserve their historical
-completion records. The 2026-08-21 audit reopened the milestone with Q09–Q23
+completion records. The 2026-08-21 audit reopened the milestone with Q09–Q25
 because several named residuals were milestone blockers and the positive Q08
 corpus did not exercise the required formal-negative boundaries. No
 database-management capability is in scope in this milestone.
@@ -2809,12 +2816,105 @@ check`, and installed-wheel `python -I` smoke (a TIMESERIES query returning
 `TimeseriesSelect`) passed. Milestone 1 remains reopened; Q23 alone owns
 recertification.
 
-### Q23 — Milestone 1 recertification gate — `TODO`
+**2026-08-22 recertification attempt record.** Re-opened the 26.2 SELECT,
+GROUP BY, joined-table, UNION/INTERSECT/EXCEPT/MINUS, ORDER BY, WITH/recursion/
+materialization, INTO TABLE, INSERT, CREATE TABLE, CREATE TEMPORARY TABLE,
+DROP TABLE, TIMESERIES, MATCH, and INTERPOLATE primary pages needed to verify
+the combined Q09–Q22 contract. No new material source contradiction was found;
+the existing Q01 scoped-temporary-CTAS and Q11 LIMIT/order editorial choices
+remain unchanged. Extended `tests/test_workload_corpus.py` from 8 to 68 tests
+with a recertification pipeline covering ordered multilevel grouping, legal set
+branch and whole-query tails, joins, analyzer-visible AT-prefixed SELECT and
+set roots, plain/subordinate/recursive/hinted CTEs, the definition/INSERT/CTAS/
+SELECT-INTO/DROP temporary-table lifecycle, compact/pretty/dump-load/copy/
+transform stability, strict AST and foreign-generation contracts, and a
+lineage chain expanded through SELECT INTO -> CTAS/CTEs -> an INSERT-populated
+definition-form temporary table -> the aliased raw source query. Six
+query/CTE/CREATE/INSERT/INTO/query-extension negative scripts fail atomically
+at all four parser error levels without swallowing the following statement.
+
+The attempt found two distinct product blockers and, under this gate's stop
+rule, made no production-code change and did not certify the milestone.
+`SELECT a FROM t FOR UPDATE OF t` parses and regenerates, but both direct
+`qualify` and `optimize` raise `OptimizeError("Alias already used: t")`
+because SQLGlot scope collection treats the lock target as another selected
+source; Q23 owns that analysis fix. Separately,
+`AT EPOCH LATEST WITH c AS (SELECT a FROM t) SELECT a FROM c UNION ALL
+(SELECT a FROM u ORDER BY a LIMIT 1)` raises the false Q14 diagnostic
+`Vertica WITH must precede a SELECT query` at every parser error level, while
+the same AT+WITH set query without the parenthesized branch tail and the same
+AT-prefixed branch-tail query without WITH both work. A leading comment on an
+AT+WITH query also changes owner between the first and second generation even
+though the reparsed AST compares equal. The SELECT, WITH, and UNION formal
+productions admit the failed combination, so Q24 owns the tightly related
+historical-WITH composition and comment-ownership fixes. The recertification
+gate is renumbered Q25 and Milestone 2 remains ineligible.
+
+The focused workload module passed 68 tests. The default CPython 3.12.6 gate
+passed 7,941 tests at 92.27% branch coverage with Ruff lint/formatting, strict
+mypy, and diff checks clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed 7,941 tests, with 3.15
+treating deprecations as errors. The sdist/wheel build, clean force-install,
+`pip check`, and installed-wheel `python -I` smoke (an AT-prefixed UNION with
+a parenthesized branch-local ORDER BY/LIMIT, returning `AtEpochUnion`) passed.
+
+### Q23 — FOR UPDATE target analysis safety — `TODO`
+
+**Outcome.** Make the documented `FOR UPDATE OF table-name[, ...]` tail
+participate in ordinary query analysis without being mistaken for a second
+FROM/JOIN source or raising a duplicate-alias optimizer error.
+
+**Required work.** Re-open the 26.2 SELECT page and inspect installed
+SQLGlot's lock expression, scope reference collection, qualification,
+optimization, lineage, and set-tail ownership. Preserve the existing Q11
+parse/generate contract while ensuring `traverse_scope`, `qualify`,
+`optimize`, and `lineage` treat every OF target only as a lock target. Cover
+unaliased and aliased tables, multiple OF targets, joins, subqueries/CTEs,
+whole-compound locks, and Q13 AT-prefixed SELECT/set roots. Strict generation
+must continue to reject malformed lock fields, and compact/pretty output,
+serialization, copy/transform parents, comments, and foreign behavior must
+remain unchanged.
+
+**Explicit exclusions.** New lock syntax, transaction/catalog lock semantics,
+and unrelated scope/reference behavior.
+
+**Primary source.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
+(`FOR UPDATE [ OF table-name[,...] ]`).
+
+### Q24 — AT epoch WITH compound-query composition — `TODO`
+
+**Outcome.** Make the already-supported historical prefix, WITH clause, and
+set-operation branch-tail contracts compose without false CTE-placement
+failure or unstable comment relocation.
+
+**Required work.** Re-open SELECT, WITH, and the UNION/INTERSECT/EXCEPT pages
+and audit the Q13 historical-root promotion plus Q14 outer-WITH attachment.
+`AT EPOCH LATEST WITH c AS (...) SELECT ... UNION ALL (SELECT ... ORDER BY ...
+LIMIT ...)` and the corresponding INTERSECT/EXCEPT shapes must parse into the
+analyzer-safe historical set root instead of raising `Vertica WITH must precede
+a SELECT query`. Preserve the complete prefix/CTE/set tree, branch-local and
+whole-compound tails, and direct public-root analysis. A leading comment on an
+AT-prefixed WITH query must reach one stable typed owner so compact and pretty
+generate/reparse cycles are text-stable as well as AST-equal. Cover all epoch
+forms, plain/subordinate/hinted WITH, every supported set operator/modifier,
+parentheses, comments at each boundary, all parser error levels, serialization,
+parent metadata, strict generation, and direct/nested foreign atomicity.
+
+**Explicit exclusions.** New historical, CTE, or set-operation grammar; the
+CTAS-only `AtEpochProperty`; and Q23's independent lock-target analysis fix.
+
+**Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/),
+[WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/),
+[UNION clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/union-clause/),
+[INTERSECT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/intersect-clause/),
+and [EXCEPT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/except-clause/).
+
+### Q25 — Milestone 1 recertification gate — `TODO`
 
 **Outcome.** Re-prove the complete analysis surface end to end and certify
 Milestone 1 only if every remediation and formal-negative boundary holds.
 
-**Required work.** Introduce no new grammar. Re-read the Q09–Q22 completion
+**Required work.** Introduce no new grammar. Re-read the Q09–Q24 completion
 records and extend the realistic workload corpus so it exercises ordered
 multilevel grouping, legal set-operation modifiers and branch tails,
 documented joins and SELECT tails, direct analyzer-safe AT-prefixed SELECT and
@@ -2851,13 +2951,13 @@ Milestone 2 becomes eligible only after the final recertification task is
 **Explicit exclusions.** New grammar, Milestone 2 implementation, live-server
 catalog semantics, and silent waiver of any failing or untested boundary.
 
-**Primary sources.** Re-open every page named by Q09–Q22 as needed to verify
+**Primary sources.** Re-open every page named by Q09–Q24 as needed to verify
 the final documented contract.
 
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 
 Every Milestone 2 task is deferred until every Milestone 1 Q task is `DONE`;
-Q23 is the current final gate. The detailed P16–P35
+Q25 is the current final gate. The detailed P16–P35
 specifications — outcome, required work, exclusions, primary sources, and
 completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

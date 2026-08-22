@@ -191,6 +191,15 @@ OFFSET. Both relative LIMIT/OFFSET source orders are therefore accepted and
 canonicalized to stable `LIMIT ... OFFSET ...`; ORDER must precede either and
 FOR UPDATE must follow both.
 
+The 2026-08-22 recertification workload found one remaining analysis boundary
+inside that otherwise strict lock contract. SQLGlot scope collection currently
+treats the canonical table child of `FOR UPDATE OF table` as another selected
+query source; if the same table or alias is already in FROM, direct `qualify`
+and `optimize` raise `OptimizeError("Alias already used: ...")`. Plain
+`FOR UPDATE` remains analyzer-safe, and parse/generate validation of OF targets
+is unchanged. Task Q23 owns making lock targets visible to the lock without
+letting them enter the selected-source map.
+
 Joined tables likewise retain canonical `exp.Join` nodes, but parsing and
 generation enforce the 26.2 operator/predicate matrix. Default/explicit INNER
 and LEFT/RIGHT/FULL `[OUTER]` joins require exactly one `ON` or `USING`
@@ -281,6 +290,16 @@ the custom query subclass. The original Q06 `AtEpochQuery` wrapper remains a
 public legacy load/generation class so serialized dumps created before Q13
 continue to load and emit identical Vertica SQL, but new parsing never emits
 it.
+
+The same recertification workload found a separate composition gap at the
+historical-root/outer-WITH boundary. An AT-prefixed query with a WITH clause
+and a parenthesized set branch carrying branch-local ORDER BY/LIMIT raises the
+Q14 CTE-placement diagnostic even though the 26.2 SELECT and set-operation
+productions permit the combination. A leading comment on an AT-prefixed WITH
+query also moves from the historical SELECT boundary to the first CTE alias
+after one generate/reparse cycle: the AST compares equal, but a second
+generation is not text-stable. Task Q24 owns both tightly related AT+WITH
+attachment defects; the independent CTAS snapshot property is unaffected.
 
 The pre-existing, structurally unrelated CTAS-only `AtEpochProperty` snapshot
 property (`_parse_at_epoch_property`, wired only into the CTAS
