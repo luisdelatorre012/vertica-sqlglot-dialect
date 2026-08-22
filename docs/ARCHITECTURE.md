@@ -541,6 +541,23 @@ one shared generator validator rejects malformed canonical/programmatic
 before any SQL is returned. This boundary is intentionally target-specific;
 source-relation, column, and alias identifiers retain their own contracts.
 
+Canonical `CREATE TABLE` generation has a separate whole-tree preflight that
+runs before SQLGlot locates, sorts, or renders any property. It first
+classifies the root as definition, LIKE, or CTAS from the target and query
+shape, then validates the exact property domain for that form, every property
+container and typed child, scope/temporary/ON COMMIT combinations, duplicate
+and mutually exclusive properties, `NO PROJECTION` conflicts, LOCAL quota
+prohibition, CTAS column-list/`ENCODED BY` exclusivity, and every canonical
+`Create` field. Unknown fields are rejected even when falsey. The four false
+modifier fields and empty/`None` fields that PostgreSQL's parser always
+materializes on an otherwise portable plain CREATE TABLE are accepted only as
+their semantic-absence defaults; meaningful values still fail. Validation
+uses no recursive SQL generation, so malformed direct or nested trees report
+an atomic `UnsupportedError` at `RAISE` before property ordering or text
+emission. Valid parser-produced property lists are copied and sorted for
+canonical output without mutating the public tree, and Q05's embedded-property
+foreign-dialect boundary remains unchanged.
+
 Table drops complete the same lifecycle pattern with a split representation.
 Single-target `DROP TABLE` remains canonical `exp.Drop` because SQLGlot
 preserves `IF EXISTS`, up-to-three-part qualification, and `CASCADE` exactly,

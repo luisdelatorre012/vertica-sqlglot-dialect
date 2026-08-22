@@ -115,7 +115,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   lowest-numbered remaining task.
 - Completed **Q17 — analysis table-target identifier conformance**. Q18 is the
   lowest-numbered remaining task.
-- Completed **Q18 — SELECT INTO placement and tail atomicity**. Q19 is the
+- Completed **Q18 — SELECT INTO placement and tail atomicity**.
+- Completed **Q19 — CREATE TABLE strict AST generation contract**. Q20 is the
   lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
@@ -262,7 +263,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q16 | DONE   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
 | Q17 | DONE   | Analysis table-target identifier conformance     | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
 | Q18 | DONE   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
-| Q19 | TODO   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
+| Q19 | DONE   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
 | Q20 | TODO   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
 | Q21 | TODO   | Milestone 1 recertification gate              | Q20                 | `test: recertify milestone one analysis surface`         |
 
@@ -2470,7 +2471,7 @@ as errors. The sdist/wheel build, clean force-install, `pip check`, and
 installed-wheel `python -I` smoke (`SELECT a INTO LOCAL TEMP TABLE q18_target
 ON COMMIT PRESERVE ROWS FROM src`, returning `SelectInto`) passed.
 
-### Q19 — CREATE TABLE strict AST generation contract — `TODO`
+### Q19 — CREATE TABLE strict AST generation contract — `DONE`
 
 **Outcome.** Validate a canonical CREATE TABLE tree completely before
 rendering so programmatic or foreign ASTs cannot produce invalid Vertica SQL
@@ -2506,6 +2507,48 @@ delegates to the server, and foreign-dialect support for Vertica properties.
 
 **Primary sources.** [CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/)
 and [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/).
+
+**Completion record.** Re-opened both exact 26.2 primary sources and audited
+installed SQLGlot 30.13's canonical `Create.arg_types`, base `create_sql`,
+`locate_properties`, Vertica/PostgreSQL dispatch, property-location maps, and
+every table-property renderer. No new material source contradiction was found:
+the permanent page retains definition, LIKE, and CTAS productions; the
+temporary page retains definition and CTAS productions, the documented `NO
+PROJECTION` conflicts, CTAS column-list/`ENCODED BY` exclusivity, and LOCAL
+quota prohibition. Q01's previously recorded scoped-temporary-CTAS formal
+split remains the same deliberate operational-evidence exception.
+
+Added `_validate_create_table`, a no-render whole-tree preflight invoked before
+target rendering, property location, or sorting. It classifies definition,
+LIKE, and CTAS roots from the target/query shape; validates the exact property
+domain and typed children for each form; rejects malformed/empty containers,
+wrong nodes, duplicate properties, contradictory GLOBAL/LOCAL/TEMPORARY state,
+permanent ON COMMIT, LOCAL quota, temporary CTAS segmentation, CTAS `NO
+PROJECTION`, definition-form `AtEpochProperty`, `NO PROJECTION` physical-design
+conflicts, CTAS column-list/`ENCODED BY` overlap, invalid LIKE/encoding/snapshot
+children, and every meaningful or unknown canonical CREATE extra. PostgreSQL's
+parser-populated false/empty/`None` defaults are accepted only where they mean
+semantic absence, preserving Q17's valid foreign-parsed plain CREATE TABLE
+interoperability; meaningful values and unknown falsey fields fail. Valid
+property lists are still sorted on a copy, leaving the public AST unmodified.
+Because the preflight never calls `self.sql`, direct and nested malformed trees
+raise atomic `UnsupportedError` at `unsupported_level=RAISE` before generic
+property machinery can drop, reorder, partially render, or raise a raw Python
+exception. Q05's direct/nested four-dialect embedded-property behavior remains
+unchanged.
+
+Expanded `tests/test_create_table.py` from 314 to 337 tests with a 20-case
+definition/LIKE/CTAS mutation matrix plus three nested cases covering every
+concrete audit example and container/root/property boundaries. The focused
+module passed 337 tests; CREATE TABLE, ordinary constraints, foreign-property
+atomicity, target identifiers, workload, AST-safety, and projection neighbors
+passed 1,535. The default CPython 3.12.6 gate passed 7,441 tests at 92.48%
+branch coverage with Ruff lint/formatting, strict mypy, and diff checks clean.
+Isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
+3.15.0rc1 each passed 7,441 tests, with 3.15 treating deprecations as errors.
+The sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+`python -I` smoke (`CREATE GLOBAL TEMPORARY TABLE q19_guard (id BIGINT) ON
+COMMIT DELETE ROWS`, returning `Create`) passed.
 
 ### Q20 — Milestone 1 formal-syntax negative audit — `TODO`
 

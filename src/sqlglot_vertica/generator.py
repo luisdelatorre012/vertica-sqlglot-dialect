@@ -1437,10 +1437,16 @@ class VerticaGenerator(PostgresGenerator):
     def create_sql(self, expression: exp.Create) -> str:
         """Place Vertica DDL properties in their required order."""
 
-        if expression.kind == "ROLE":
+        raw_kind = expression.args.get("kind")
+        if raw_kind == "ROLE":
             return self._create_role_sql(expression)
 
-        if expression.kind == "TABLE":
+        table_kind = raw_kind == "TABLE" or (
+            isinstance(raw_kind, exp.Var) and raw_kind.name == "TABLE"
+        )
+        if table_kind:
+            if not self._validate_create_table(expression):
+                return ""
             target = expression.this
             if isinstance(target, exp.Schema):
                 target = target.this
@@ -1450,9 +1456,9 @@ class VerticaGenerator(PostgresGenerator):
         properties = expression.args.get("properties")
         property_order = (
             self.TABLE_PROPERTY_ORDER
-            if expression.kind == "TABLE"
+            if table_kind
             else self.SCHEMA_PROPERTY_ORDER
-            if expression.kind == "SCHEMA"
+            if raw_kind == "SCHEMA"
             else None
         )
         if (
@@ -1471,6 +1477,463 @@ class VerticaGenerator(PostgresGenerator):
             )
 
         return super().create_sql(expression)
+
+    def _validate_create_table(self, expression: exp.Create) -> bool:
+        """Validate the complete canonical CREATE TABLE shape before rendering.
+
+        SQLGlot's base generator locates and orders properties before it renders
+        them.  A malformed or unknown property can therefore be moved, dropped,
+        or fail in generic code before its own renderer is reached.  Keep this
+        validation free of ``self.sql`` calls so RAISE mode reports an atomic
+        ``UnsupportedError`` before any CREATE TABLE text is produced.
+        """
+
+        valid = True
+        allowed_root_args = {"this", "kind", "expression", "exists", "properties"}
+        foreign_false_defaults = {"replace", "refresh", "unique", "concurrently"}
+        foreign_none_defaults = {"no_schema_binding", "begin", "clone", "clustered"}
+        if type(expression) is not exp.Create:
+            self.unsupported("Vertica CREATE TABLE requires a canonical Create root")
+            valid = False
+        if any(
+            key not in allowed_root_args
+            and not (key in foreign_false_defaults and value is False)
+            and not (key in foreign_none_defaults and value is None)
+            and not (key == "indexes" and isinstance(value, list) and not value)
+            for key, value in expression.args.items()
+        ):
+            self.unsupported("Vertica CREATE TABLE contains unsupported CREATE fields")
+            valid = False
+        if expression.args.get("kind") != "TABLE":
+            self.unsupported("Vertica CREATE TABLE requires kind TABLE")
+            valid = False
+        exists = expression.args.get("exists")
+        if exists is not None and not isinstance(exists, bool):
+            self.unsupported("Vertica CREATE TABLE IF NOT EXISTS state must be boolean")
+            valid = False
+
+        properties = expression.args.get("properties")
+        if properties is None:
+            property_expressions: list[exp.Expr] = []
+        elif type(properties) is not exp.Properties:
+            self.unsupported("Vertica CREATE TABLE properties require a canonical Properties list")
+            property_expressions = []
+            valid = False
+        else:
+            if set(properties.args) != {"expressions"}:
+                self.unsupported("Vertica CREATE TABLE properties contain unsupported fields")
+                valid = False
+            raw_properties = properties.args.get("expressions")
+            if not isinstance(raw_properties, list):
+                self.unsupported("Vertica CREATE TABLE properties must be a list")
+                property_expressions = []
+                valid = False
+            else:
+                property_expressions = raw_properties
+                if not property_expressions:
+                    self.unsupported("Vertica CREATE TABLE properties cannot be empty")
+                    valid = False
+
+        property_types = [type(prop) for prop in property_expressions if isinstance(prop, exp.Expr)]
+        if len(property_types) != len(property_expressions):
+            self.unsupported("Vertica CREATE TABLE properties must be expression nodes")
+            valid = False
+        if len(property_types) != len(set(property_types)):
+            self.unsupported("Vertica CREATE TABLE properties cannot be repeated")
+            valid = False
+        for prop in property_expressions:
+            if isinstance(prop, exp.Expr):
+                valid = self._validate_create_table_property(prop) and valid
+
+        has_global = exp.GlobalProperty in property_types
+        has_local = vexp.LocalProperty in property_types
+        temporary = exp.TemporaryProperty in property_types
+        if has_global and has_local:
+            self.unsupported("Vertica CREATE TABLE cannot combine GLOBAL and LOCAL scope")
+            valid = False
+        if (has_global or has_local) and not temporary:
+            self.unsupported("GLOBAL or LOCAL scope requires TEMPORARY")
+            valid = False
+
+        target = expression.args.get("this")
+        query = expression.args.get("expression")
+        like = next((prop for prop in property_expressions if type(prop) is exp.LikeProperty), None)
+        schema_kind: str | None = None
+        if type(target) is exp.Schema:
+            if set(target.args) != {"this", "expressions"}:
+                self.unsupported("CREATE TABLE schema targets contain unsupported fields")
+                valid = False
+            raw_items = target.args.get("expressions")
+            items = raw_items if isinstance(raw_items, list) else []
+            if not isinstance(raw_items, list) or not items:
+                self.unsupported("CREATE TABLE parenthesized targets require a nonempty list")
+                valid = False
+            definition_types = (
+                exp.ColumnDef,
+                exp.Constraint,
+                exp.PrimaryKey,
+                exp.ForeignKey,
+                exp.UniqueColumnConstraint,
+                exp.CheckColumnConstraint,
+                vexp.VerticaPrimaryKey,
+                vexp.VerticaUniqueColumnConstraint,
+                vexp.VerticaCheckColumnConstraint,
+            )
+            definition = bool(items) and all(isinstance(item, definition_types) for item in items)
+            ctas_columns = bool(items) and all(
+                isinstance(
+                    item, (exp.Identifier, vexp.ProjectionColumn, vexp.GroupedProjectionColumns)
+                )
+                for item in items
+            )
+            if definition and any(isinstance(item, exp.ColumnDef) for item in items):
+                schema_kind = "definition"
+            elif ctas_columns:
+                schema_kind = "ctas"
+                for item in items:
+                    valid = self._validate_ctas_column_node(item, require_design=False) and valid
+            else:
+                self.unsupported(
+                    "CREATE TABLE parentheses must contain column definitions or CTAS column names"
+                )
+                valid = False
+        elif type(target) is not exp.Table:
+            self.unsupported("Vertica CREATE TABLE requires a table or table-schema target")
+            valid = False
+
+        if query is not None and not (
+            isinstance(query, exp.Query)
+            or (type(query) is exp.Subquery and isinstance(query.this, exp.Query))
+        ):
+            self.unsupported("CREATE TABLE AS requires a SELECT or set-operation query")
+            valid = False
+
+        if like is not None:
+            form = "like"
+            if query is not None or type(target) is not exp.Table:
+                self.unsupported("CREATE TABLE LIKE cannot carry a query or target column list")
+                valid = False
+        elif query is not None:
+            form = "ctas"
+            if schema_kind == "definition":
+                self.unsupported("CREATE TABLE AS column lists cannot contain definitions")
+                valid = False
+        elif schema_kind == "definition":
+            form = "definition"
+        else:
+            form = "invalid"
+            self.unsupported("CREATE TABLE requires a definition, LIKE clause, or AS query")
+            valid = False
+
+        definition_properties: set[type[exp.Expr]] = {
+            exp.GlobalProperty,
+            vexp.LocalProperty,
+            exp.TemporaryProperty,
+            exp.OnCommitProperty,
+            vexp.NoProjectionProperty,
+            exp.Order,
+            vexp.TableSegmentationProperty,
+            vexp.KsafeProperty,
+            vexp.TablePartitionProperty,
+            vexp.InheritedPrivilegesProperty,
+            vexp.DiskQuotaProperty,
+        }
+        like_properties: set[type[exp.Expr]] = {
+            exp.LikeProperty,
+            vexp.InheritedPrivilegesProperty,
+            vexp.DiskQuotaProperty,
+        }
+        ctas_properties: set[type[exp.Expr]] = {
+            exp.GlobalProperty,
+            vexp.LocalProperty,
+            exp.TemporaryProperty,
+            exp.OnCommitProperty,
+            vexp.InheritedPrivilegesProperty,
+            vexp.CtasHintProperty,
+            vexp.AtEpochProperty,
+            vexp.EncodedByProperty,
+            vexp.CtasSegmentationProperty,
+            vexp.CtasDiskQuotaProperty,
+        }
+        allowed_by_form: dict[str, set[type[exp.Expr]]] = {
+            "definition": definition_properties,
+            "like": like_properties,
+            "ctas": ctas_properties,
+            "invalid": set(),
+        }
+        unexpected = set(property_types).difference(allowed_by_form[form])
+        if unexpected:
+            self.unsupported(
+                f"Vertica CREATE TABLE {form} does not support properties: "
+                + ", ".join(sorted(property_type.__name__ for property_type in unexpected))
+            )
+            valid = False
+
+        if temporary and form == "like":
+            self.unsupported("CREATE TEMPORARY TABLE does not support LIKE")
+            valid = False
+        if temporary and form == "definition" and vexp.TablePartitionProperty in property_types:
+            self.unsupported("Temporary table definitions do not support PARTITION BY")
+            valid = False
+        if temporary and form == "ctas":
+            if vexp.InheritedPrivilegesProperty in property_types:
+                self.unsupported("Temporary CTAS does not support inherited privileges")
+                valid = False
+            if vexp.CtasSegmentationProperty in property_types:
+                self.unsupported("Temporary CTAS does not support a segmentation clause")
+                valid = False
+        if not temporary and (has_global or has_local or exp.OnCommitProperty in property_types):
+            self.unsupported("Permanent CREATE TABLE cannot carry temporary-table properties")
+            valid = False
+        if has_local and (
+            vexp.DiskQuotaProperty in property_types or vexp.CtasDiskQuotaProperty in property_types
+        ):
+            self.unsupported("LOCAL temporary tables cannot specify DISK_QUOTA")
+            valid = False
+        if vexp.NoProjectionProperty in property_types and any(
+            property_type in property_types
+            for property_type in (exp.Order, vexp.TableSegmentationProperty, vexp.KsafeProperty)
+        ):
+            self.unsupported(
+                "NO PROJECTION cannot be combined with ORDER BY, segmentation, or KSAFE"
+            )
+            valid = False
+        if schema_kind == "ctas" and vexp.EncodedByProperty in property_types:
+            self.unsupported("CTAS column-name lists and ENCODED BY are mutually exclusive")
+            valid = False
+        return valid
+
+    def _validate_create_table_property(self, prop: exp.Expr) -> bool:
+        """Validate one CREATE TABLE property without generating it."""
+
+        prop_type = type(prop)
+        no_arg_types = {
+            exp.GlobalProperty,
+            exp.TemporaryProperty,
+            vexp.LocalProperty,
+            vexp.NoProjectionProperty,
+        }
+        if prop_type in no_arg_types:
+            if prop.args:
+                self.unsupported(f"{prop_type.__name__} does not accept fields")
+                return False
+            return True
+
+        if prop_type is exp.OnCommitProperty:
+            if set(prop.args) != {"delete"} or not isinstance(prop.args.get("delete"), bool):
+                self.unsupported("ON COMMIT requires a Boolean DELETE/PRESERVE state")
+                return False
+            return True
+
+        if prop_type is exp.Order:
+            raw_columns = prop.args.get("expressions")
+            valid = (
+                set(prop.args) == {"expressions"}
+                and isinstance(raw_columns, list)
+                and bool(raw_columns)
+            )
+            if not valid or not all(
+                isinstance(column, exp.Identifier) for column in raw_columns or []
+            ):
+                self.unsupported("CREATE TABLE ORDER BY requires a nonempty identifier list")
+                return False
+            return True
+
+        if prop_type in {vexp.TableSegmentationProperty, vexp.CtasSegmentationProperty}:
+            if set(prop.args) != {"this"} or not isinstance(
+                prop.args.get("this"), vexp.ProjectionSegmentation
+            ):
+                self.unsupported("CREATE TABLE segmentation requires a typed segmentation child")
+                return False
+            return self._validate_create_table_segmentation(prop.args["this"])
+
+        if prop_type is vexp.KsafeProperty:
+            if any(key != "this" for key in prop.args):
+                self.unsupported("KSAFE contains unsupported fields")
+                return False
+            safety = prop.args.get("this")
+            if safety is not None and (not isinstance(safety, exp.Literal) or not safety.is_int):
+                self.unsupported("KSAFE requires an integer safety level")
+                return False
+            return True
+
+        if prop_type is vexp.TablePartitionProperty:
+            if any(
+                key not in {"this", "group", "active_partition_count"} for key in prop.args
+            ) or not isinstance(prop.args.get("this"), exp.Expr):
+                self.unsupported("PARTITION BY requires a typed partition expression")
+                return False
+            group = prop.args.get("group")
+            active = prop.args.get("active_partition_count")
+            valid = group is None or isinstance(group, exp.Expr)
+            valid = valid and (
+                active is None or (isinstance(active, exp.Literal) and active.is_int)
+            )
+            if not valid:
+                self.unsupported("PARTITION BY has an invalid GROUP BY or ACTIVEPARTITIONCOUNT")
+            return valid
+
+        if prop_type is vexp.InheritedPrivilegesProperty:
+            if any(key not in {"include", "schema"} for key in prop.args) or not isinstance(
+                prop.args.get("include"), bool
+            ):
+                self.unsupported("Inherited privileges require a Boolean INCLUDE/EXCLUDE state")
+                return False
+            schema = prop.args.get("schema")
+            if schema is not None and not isinstance(schema, bool):
+                self.unsupported("Inherited privileges SCHEMA state must be boolean")
+                return False
+            return True
+
+        if prop_type in {vexp.DiskQuotaProperty, vexp.CtasDiskQuotaProperty}:
+            quota = prop.args.get("this")
+            if (
+                set(prop.args) != {"this"}
+                or not isinstance(quota, exp.Literal)
+                or not quota.is_string
+            ):
+                self.unsupported("DISK_QUOTA requires a quoted string value")
+                return False
+            return True
+
+        if prop_type is vexp.CtasHintProperty:
+            if set(prop.args) != {"this"} or not isinstance(prop.args.get("this"), exp.Hint):
+                self.unsupported("CTAS optimizer hints require a typed Hint child")
+                return False
+            return True
+
+        if prop_type is vexp.AtEpochProperty:
+            if set(prop.args) != {"this", "kind"}:
+                self.unsupported("CTAS AT epoch contains unsupported fields")
+                return False
+            kind = prop.args.get("kind")
+            value = prop.args.get("this")
+            kind_name = kind.name if isinstance(kind, exp.Var) else None
+            valid = (
+                kind_name == "EPOCH"
+                and (
+                    (isinstance(value, exp.Var) and value.name == "LATEST")
+                    or (isinstance(value, exp.Literal) and value.is_int)
+                )
+            ) or (kind_name == "TIME" and isinstance(value, exp.Literal) and value.is_string)
+            if not valid:
+                self.unsupported(
+                    "CTAS AT requires EPOCH with LATEST or an integer, or TIME with a string"
+                )
+            return valid
+
+        if prop_type is vexp.EncodedByProperty:
+            raw_columns = prop.args.get("expressions")
+            if (
+                set(prop.args) != {"expressions"}
+                or not isinstance(raw_columns, list)
+                or not raw_columns
+            ):
+                self.unsupported("ENCODED BY requires a nonempty typed column list")
+                return False
+            return all(
+                self._validate_ctas_column_node(column, require_design=True)
+                for column in raw_columns
+            )
+
+        if prop_type is exp.LikeProperty:
+            if any(key not in {"this", "expressions"} for key in prop.args):
+                self.unsupported("CREATE TABLE LIKE contains unsupported fields")
+                return False
+            valid = self._validate_analysis_table_target(
+                prop.args.get("this"), "CREATE TABLE LIKE source"
+            )
+            options = prop.args.get("expressions")
+            if options is None:
+                options = []
+            if not isinstance(options, list) or len(options) > 1:
+                self.unsupported("CREATE TABLE LIKE accepts at most one projection-copy option")
+                return False
+            if options:
+                option = options[0]
+                valid = self._validate_create_table_like_option(option) and valid
+            return valid
+
+        self.unsupported(f"Unsupported Vertica CREATE TABLE property {prop_type.__name__}")
+        return False
+
+    def _validate_create_table_segmentation(
+        self, segmentation: vexp.ProjectionSegmentation
+    ) -> bool:
+        allowed = {"this", "segmented", "all_nodes", "nodes", "offset"}
+        if any(key not in allowed for key in segmentation.args):
+            self.unsupported("CREATE TABLE segmentation contains unsupported fields")
+            return False
+        segmented = segmentation.args.get("segmented")
+        all_nodes = segmentation.args.get("all_nodes")
+        nodes = segmentation.args.get("nodes")
+        offset = segmentation.args.get("offset")
+        value = segmentation.args.get("this")
+        valid = isinstance(segmented, bool) and all_nodes is True
+        valid = valid and (nodes is None or (isinstance(nodes, list) and not nodes))
+        valid = valid and offset is None
+        valid = valid and (
+            (segmented and isinstance(value, exp.Expr)) or (not segmented and value is None)
+        )
+        if not valid:
+            self.unsupported(
+                "CREATE TABLE segmentation requires [UN]SEGMENTED, ALL NODES, and no OFFSET"
+            )
+        return valid
+
+    def _validate_ctas_column_node(self, column: exp.Expr, *, require_design: bool) -> bool:
+        if isinstance(column, exp.Identifier):
+            if require_design:
+                self.unsupported("ENCODED BY columns require ENCODING or ACCESSRANK")
+                return False
+            return True
+        if type(column) is vexp.GroupedProjectionColumns:
+            grouped = column.args.get("expressions")
+            if not isinstance(grouped, list):
+                self.unsupported("GROUPED requires a typed column list")
+                return False
+            valid = (
+                set(column.args) == {"expressions"}
+                and len(grouped) >= 2
+                and all(isinstance(item, exp.Identifier) for item in grouped)
+            )
+            if not valid:
+                self.unsupported("GROUPED requires at least two identifier columns")
+            return valid
+        if type(column) is not vexp.ProjectionColumn:
+            self.unsupported("CTAS column lists require identifiers or typed projection columns")
+            return False
+        if any(
+            key not in {"this", "encoding", "access_rank"} for key in column.args
+        ) or not isinstance(column.args.get("this"), exp.Identifier):
+            self.unsupported("CTAS projection columns require an identifier")
+            return False
+        encoding = column.args.get("encoding")
+        access_rank = column.args.get("access_rank")
+        valid = encoding is None or isinstance(encoding, exp.Var)
+        valid = valid and (
+            access_rank is None or (isinstance(access_rank, exp.Literal) and access_rank.is_int)
+        )
+        valid = valid and (not require_design or encoding is not None or access_rank is not None)
+        if not valid:
+            self.unsupported("CTAS projection columns have invalid ENCODING or ACCESSRANK fields")
+        return valid
+
+    def _validate_create_table_like_option(self, option: object) -> bool:
+        if type(option) is not exp.Property or set(option.args) != {"this", "value"}:
+            self.unsupported("CREATE TABLE LIKE projection options require a typed property")
+            return False
+        action = option.args.get("this")
+        value = option.args.get("value")
+        valid = (
+            isinstance(action, exp.Var)
+            and action.name in {"INCLUDING", "EXCLUDING"}
+            and isinstance(value, exp.Var)
+            and value.name == "PROJECTIONS"
+        )
+        if not valid:
+            self.unsupported("CREATE TABLE LIKE supports INCLUDING or EXCLUDING PROJECTIONS")
+        return valid
 
     def alter_sql(self, expression: exp.Alter) -> str:
         if expression.kind == "ROLE":

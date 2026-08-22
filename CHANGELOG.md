@@ -62,6 +62,10 @@ plugin interface.
   level, including malformed ON COMMIT/physical-design/list tails, duplicate or
   contradictory temporary scopes, generic-command fallback, and raw Python
   failure paths, while preserving every valid permanent and temporary form.
+- Added a whole-tree canonical CREATE TABLE generation preflight before
+  property ordering or rendering, with strict definition/LIKE/CTAS shape,
+  property/container, temporary-scope, mutual-exclusion, typed-child, and
+  foreign-field validation for direct and nested programmatic ASTs.
 - Aligned CREATE TABLE, INSERT, SELECT INTO, and DROP TABLE targets on one
   source-backed identifier contract: one to three parts, schema-required outer
   qualification, documented quoted/unquoted Unicode rules, valid UTF-8, a

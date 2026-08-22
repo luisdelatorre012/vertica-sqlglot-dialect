@@ -106,6 +106,164 @@ def test_create_table_generator_enforces_clause_order_without_mutation() -> None
     assert properties.expressions == reversed_properties
 
 
+def _add_create_property(sql: str, prop: exp.Expr) -> exp.Create:
+    expression = parse_one(sql, read="vertica")
+    assert isinstance(expression, exp.Create)
+    properties = expression.args.get("properties")
+    if properties is None:
+        properties = exp.Properties(expressions=[])
+        expression.set("properties", properties)
+    assert isinstance(properties, exp.Properties)
+    properties.append("expressions", prop)
+    return expression
+
+
+def _property_from(sql: str, property_type: type[exp.Expr]) -> exp.Expr:
+    expression = parse_one(sql, read="vertica")
+    prop = expression.find(property_type)
+    assert prop is not None
+    return prop.copy()
+
+
+def _invalid_create_table_ast(case: str) -> exp.Create:
+    if case == "local-without-temporary":
+        return _add_create_property("CREATE TABLE t (id BIGINT)", vexp.LocalProperty())
+    if case == "contradictory-scopes":
+        return _add_create_property(
+            "CREATE GLOBAL TEMPORARY TABLE t (id BIGINT)", vexp.LocalProperty()
+        )
+    if case == "permanent-on-commit":
+        return _add_create_property("CREATE TABLE t (id BIGINT)", exp.OnCommitProperty(delete=True))
+    if case == "local-quota":
+        return _add_create_property(
+            "CREATE LOCAL TEMPORARY TABLE t (id BIGINT)",
+            vexp.DiskQuotaProperty(this=exp.Literal.string("1G")),
+        )
+    if case == "temporary-ctas-segmentation":
+        segmentation = _property_from(
+            "CREATE TABLE source_copy AS SELECT id FROM source SEGMENTED BY HASH(id) ALL NODES",
+            vexp.CtasSegmentationProperty,
+        )
+        return _add_create_property("CREATE TEMPORARY TABLE t AS SELECT 1 AS id", segmentation)
+    if case == "ctas-no-projection":
+        return _add_create_property(
+            "CREATE TEMPORARY TABLE t AS SELECT 1 AS id", vexp.NoProjectionProperty()
+        )
+    if case == "definition-at-epoch":
+        epoch = _property_from(
+            "CREATE TABLE snapshot AS AT EPOCH LATEST SELECT 1 AS id",
+            vexp.AtEpochProperty,
+        )
+        return _add_create_property("CREATE TABLE t (id BIGINT)", epoch)
+    if case == "wrong-properties-container":
+        expression = parse_one("CREATE TABLE t (id BIGINT)", read="vertica")
+        expression.set("properties", exp.Literal.string("not properties"))
+        return expression
+    if case == "wrong-property-node":
+        expression = parse_one("CREATE TABLE t (id BIGINT)", read="vertica")
+        expression.set("properties", exp.Properties(expressions=[exp.Literal.number(1)]))
+        return expression
+    if case == "empty-properties-container":
+        expression = parse_one("CREATE TABLE t (id BIGINT)", read="vertica")
+        expression.set("properties", exp.Properties(expressions=[]))
+        return expression
+    if case == "duplicate-property":
+        return _add_create_property(
+            "CREATE GLOBAL TEMPORARY TABLE t (id BIGINT)", exp.GlobalProperty()
+        )
+    if case == "falsey-foreign-create-field":
+        expression = parse_one("CREATE TABLE t (id BIGINT)", read="vertica")
+        expression.set("foreign_extra", False)
+        return expression
+    if case == "mixed-definition-columns":
+        expression = parse_one("CREATE TABLE t (id BIGINT)", read="vertica")
+        assert isinstance(expression.this, exp.Schema)
+        expression.this.append("expressions", exp.to_identifier("untyped"))
+        return expression
+    if case == "like-with-query":
+        expression = parse_one("CREATE TABLE t LIKE source", read="vertica")
+        expression.set("expression", exp.select("1"))
+        return expression
+    if case == "ctas-with-definition-schema":
+        expression = parse_one("CREATE TABLE t AS SELECT 1 AS id", read="vertica")
+        definition = parse_one("CREATE TABLE x (id BIGINT)", read="vertica")
+        expression.set("this", definition.this.copy())
+        return expression
+    if case == "missing-form":
+        return exp.Create(this=exp.to_table("t"), kind="TABLE")
+    if case == "non-string-table-kind":
+        expression = parse_one("CREATE TABLE t (id BIGINT)", read="vertica")
+        expression.set("kind", exp.var("TABLE"))
+        return expression
+    if case == "invalid-on-commit-state":
+        expression = parse_one(
+            "CREATE TEMPORARY TABLE t (id BIGINT) ON COMMIT DELETE ROWS", read="vertica"
+        )
+        on_commit = expression.find(exp.OnCommitProperty)
+        assert on_commit is not None
+        on_commit.set("delete", "yes")
+        return expression
+    if case == "invalid-encoded-by-child":
+        expression = parse_one(
+            "CREATE TABLE t AS SELECT 1 AS id ENCODED BY id ENCODING RLE", read="vertica"
+        )
+        encoded = expression.find(vexp.EncodedByProperty)
+        assert encoded is not None
+        encoded.set("expressions", [exp.to_identifier("id")])
+        return expression
+    if case == "invalid-like-option":
+        expression = parse_one("CREATE TABLE t LIKE source INCLUDING PROJECTIONS", read="vertica")
+        like = expression.find(exp.LikeProperty)
+        assert like is not None
+        like.set(
+            "expressions",
+            [exp.Property(this=exp.var("INCLUDING"), value=exp.var("CONSTRAINTS"))],
+        )
+        return expression
+    raise AssertionError(f"unknown CREATE TABLE mutation case: {case}")
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "local-without-temporary",
+        "contradictory-scopes",
+        "permanent-on-commit",
+        "local-quota",
+        "temporary-ctas-segmentation",
+        "ctas-no-projection",
+        "definition-at-epoch",
+        "wrong-properties-container",
+        "wrong-property-node",
+        "empty-properties-container",
+        "duplicate-property",
+        "falsey-foreign-create-field",
+        "mixed-definition-columns",
+        "like-with-query",
+        "ctas-with-definition-schema",
+        "missing-form",
+        "non-string-table-kind",
+        "invalid-on-commit-state",
+        "invalid-encoded-by-child",
+        "invalid-like-option",
+    ],
+)
+def test_create_table_programmatic_mutation_matrix_fails_atomically(case: str) -> None:
+    expression = _invalid_create_table_ast(case)
+    with pytest.raises(UnsupportedError):
+        expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["local-without-temporary", "like-with-query", "temporary-ctas-segmentation"],
+)
+def test_nested_create_table_mutations_fail_atomically(case: str) -> None:
+    nested = exp.Paren(this=_invalid_create_table_ast(case))
+    with pytest.raises(UnsupportedError):
+        nested.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+
+
 @pytest.mark.parametrize(
     ("sql", "message"),
     [

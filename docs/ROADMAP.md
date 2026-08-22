@@ -172,7 +172,16 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   variants fail atomically at every parser error level without returning a
   truncated plain SELECT or SelectInto. Legal WITH, nested, TIMESERIES,
   parenthesized, and set-operation compositions remain typed and analyzable.
-  Q19 is the next eligible task.
+  Q19 is complete: canonical CREATE TABLE roots are classified as definition,
+  LIKE, or CTAS and structurally validated before property location, sorting,
+  or text emission. The validator owns every admitted property/container,
+  duplicate and mutual-exclusion rule, temporary scope/commit/quota state,
+  CTAS-only and definition-only fields, and installed canonical CREATE extras;
+  malformed direct and nested programmatic trees now fail atomically with
+  `UnsupportedError`, while valid property ordering, foreign-parsed plain
+  CREATE TABLE interoperability, target validation, query analysis, and Q05's
+  embedded-property foreign contract remain stable. Q20 is the next eligible
+  task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
