@@ -205,11 +205,13 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   qualification, optimization, and lineage no longer misclassify them as
   duplicate FROM sources across aliases, joins, subqueries/CTEs, compound
   queries, or AT-prefixed roots; lock rendering, serialization, strict
-  generation, and foreign behavior remain stable. AT-prefixed WITH queries
-  still fail when a parenthesized set branch owns ORDER BY/LIMIT, while their
-  leading-comment ownership is not generation-stable (Q24). Q24 is now the
-  lowest-numbered remaining task; Q25 is the sole recertification gate.
-  Milestone 1 remains reopened.
+  generation, and foreign behavior remain stable. Q24 is complete:
+  AT-prefixed plain/subordinate/materialization-hinted WITH queries now compose
+  with parenthesized UNION/INTERSECT/EXCEPT branches carrying branch-local and
+  whole-compound tails; the outer-WITH validator recognizes only true wrapper
+  subqueries, and historical-root comments render from one stable owner at the
+  `AT` prefix across compact and pretty cycles. Q25 is now the sole remaining
+  task and recertification gate. Milestone 1 remains reopened.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

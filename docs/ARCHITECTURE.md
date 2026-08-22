@@ -297,15 +297,19 @@ public legacy load/generation class so serialized dumps created before Q13
 continue to load and emit identical Vertica SQL, but new parsing never emits
 it.
 
-The same recertification workload found a separate composition gap at the
-historical-root/outer-WITH boundary. An AT-prefixed query with a WITH clause
-and a parenthesized set branch carrying branch-local ORDER BY/LIMIT raises the
-Q14 CTE-placement diagnostic even though the 26.2 SELECT and set-operation
-productions permit the combination. A leading comment on an AT-prefixed WITH
-query also moves from the historical SELECT boundary to the first CTE alias
-after one generate/reparse cycle: the AST compares equal, but a second
-generation is not text-stable. Task Q24 owns both tightly related AT+WITH
-attachment defects; the independent CTAS snapshot property is unaffected.
+Q24 closes the historical-root/outer-WITH composition boundary found by the
+first recertification workload. SQLGlot represents a parenthesized set operand
+that carries branch-local ORDER BY/LIMIT as a wrapper `exp.Subquery`; the Q14
+outer-WITH validator formerly accepted only bare SELECT and set-operation
+children and therefore emitted a false CTE-placement diagnostic. It now
+recurses through only a true wrapper subquery, so AT-prefixed WITH queries
+compose with UNION/INTERSECT/EXCEPT branches without broadening the allowed
+query-root contract. Historical-root comments remain owned by the typed
+`AtEpoch*` root, but its Vertica renderer consumes them explicitly at the `AT`
+prefix before delegating to SELECT/set rendering. This prevents inherited
+renderers from relocating a leading comment to a CTE, SELECT body, or set
+operator and makes compact and pretty generate/reparse cycles text-stable.
+The independent CTAS snapshot property is unaffected.
 
 The pre-existing, structurally unrelated CTAS-only `AtEpochProperty` snapshot
 property (`_parse_at_epoch_property`, wired only into the CTAS

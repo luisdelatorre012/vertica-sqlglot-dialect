@@ -105,6 +105,168 @@ def test_prefix_scopes_a_with_clause_and_a_union_chain() -> None:
     assert expression.args.get("with_") is not None
 
 
+@pytest.mark.parametrize(
+    ("sql", "expected", "root_type"),
+    [
+        (
+            "AT EPOCH LATEST WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION (SELECT a FROM u ORDER BY a LIMIT 1)",
+            "AT EPOCH LATEST WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION (SELECT a FROM u ORDER BY a LIMIT 1)",
+            vexp.AtEpochUnion,
+        ),
+        (
+            "AT EPOCH 7 WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION ALL (SELECT a FROM u ORDER BY a LIMIT 1)",
+            "AT EPOCH 7 WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION ALL (SELECT a FROM u ORDER BY a LIMIT 1)",
+            vexp.AtEpochUnion,
+        ),
+        (
+            "AT TIME '2024-01-01' WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION DISTINCT (SELECT a FROM u ORDER BY a LIMIT 1)",
+            "AT TIME '2024-01-01' WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION (SELECT a FROM u ORDER BY a LIMIT 1)",
+            vexp.AtEpochUnion,
+        ),
+        (
+            "AT EPOCH LATEST WITH c AS (WITH d AS (SELECT a FROM t) SELECT a FROM d) "
+            "SELECT a FROM c INTERSECT DISTINCT (SELECT a FROM u ORDER BY a LIMIT 1)",
+            "AT EPOCH LATEST WITH c AS (WITH d AS (SELECT a FROM t) SELECT a FROM d) "
+            "SELECT a FROM c INTERSECT (SELECT a FROM u ORDER BY a LIMIT 1)",
+            vexp.AtEpochIntersect,
+        ),
+        (
+            "AT EPOCH 9 WITH /*+ENABLE_WITH_CLAUSE_MATERIALIZATION */ "
+            "c AS (SELECT a FROM t) SELECT a FROM c EXCEPT DISTINCT "
+            "(SELECT a FROM u ORDER BY a LIMIT 1)",
+            "AT EPOCH 9 WITH /*+ ENABLE_WITH_CLAUSE_MATERIALIZATION */ "
+            "c AS (SELECT a FROM t) SELECT a FROM c EXCEPT "
+            "(SELECT a FROM u ORDER BY a LIMIT 1)",
+            vexp.AtEpochExcept,
+        ),
+        (
+            "AT TIME '2024-01-02' WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c MINUS (SELECT a FROM u ORDER BY a LIMIT 1) "
+            "ORDER BY a LIMIT 2",
+            "AT TIME '2024-01-02' WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c EXCEPT (SELECT a FROM u ORDER BY a LIMIT 1) "
+            "ORDER BY a LIMIT 2",
+            vexp.AtEpochExcept,
+        ),
+    ],
+)
+@pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
+def test_prefix_with_and_parenthesized_set_branches_compose(
+    sql: str,
+    expected: str,
+    root_type: type[exp.SetOperation],
+    error_level: ErrorLevel,
+) -> None:
+    expression = parse_one(sql, read="vertica", error_level=error_level)
+    assert type(expression) is root_type
+    assert isinstance(expression.args.get("with_"), exp.With)
+    assert isinstance(expression.expression, exp.Subquery)
+    assert expression.sql(dialect="vertica") == expected
+
+    pretty = expression.sql(dialect="vertica", pretty=True)
+    assert parse_one(pretty, read="vertica") == expression
+    assert exp.Expr.load(expression.dump()) == expression
+
+
+@pytest.mark.parametrize(
+    ("sql", "comment"),
+    [
+        (
+            "/* before_at */ AT EPOCH LATEST WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION ALL SELECT a FROM u",
+            "before_at",
+        ),
+        (
+            "AT /* after_at */ EPOCH LATEST WITH c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION ALL SELECT a FROM u",
+            "after_at",
+        ),
+        (
+            "AT EPOCH LATEST WITH /* with_boundary */ c AS (SELECT a FROM t) "
+            "SELECT a FROM c UNION ALL SELECT a FROM u",
+            "with_boundary",
+        ),
+    ],
+)
+def test_prefix_comments_have_one_stable_historical_root_owner(sql: str, comment: str) -> None:
+    expression = parse_one(sql, read="vertica")
+    assert isinstance(expression, vexp.AtEpochUnion)
+    assert expression.comments and any(comment in value for value in expression.comments)
+    assert [node for node in expression.walk() if node.comments] == [expression]
+
+    compact = expression.sql(dialect="vertica")
+    pretty = expression.sql(dialect="vertica", pretty=True)
+    for generated in (compact, pretty):
+        assert generated.lstrip().startswith(f"/* {comment} */")
+        assert generated.lstrip()[len(f"/* {comment} */") :].lstrip().startswith("AT EPOCH LATEST")
+        reparsed = parse_one(generated, read="vertica")
+        assert reparsed == expression
+        assert reparsed.sql(dialect="vertica", pretty=generated == pretty) == generated
+
+
+def test_set_boundary_comment_remains_on_its_source_and_is_text_stable() -> None:
+    expression = parse_one(
+        "AT EPOCH LATEST WITH c AS (SELECT a FROM t) "
+        "SELECT a FROM c /* set_boundary */ UNION ALL SELECT a FROM u",
+        read="vertica",
+    )
+    comment_owners = [node for node in expression.walk() if node.comments]
+    assert len(comment_owners) == 1
+    assert isinstance(comment_owners[0], exp.Table)
+
+    generated = expression.sql(dialect="vertica")
+    reparsed = parse_one(generated, read="vertica")
+    assert reparsed == expression
+    assert reparsed.sql(dialect="vertica") == generated
+
+
+def test_composed_historical_set_root_parent_and_analysis_contract() -> None:
+    sql = (
+        "AT EPOCH LATEST WITH c AS (SELECT a FROM t) "
+        "SELECT a FROM c UNION ALL (SELECT a FROM u ORDER BY a LIMIT 1)"
+    )
+    schema = {"t": {"a": "INT"}, "u": {"a": "INT"}}
+    expression = parse_at_epoch_query(sql, sql)
+    assert isinstance(expression, vexp.AtEpochUnion)
+    assert isinstance(expression.expression, exp.Subquery)
+    assert expression.expression.parent is expression
+    assert expression.expression.arg_key == "expression"
+    assert expression.args["with_"].parent is expression
+
+    for analysis in (qualify, optimize):
+        analyzed = analysis(expression.copy(), dialect="vertica", schema=schema)
+        assert isinstance(analyzed, vexp.AtEpochUnion)
+        assert list(traverse_scope(analyzed))
+        assert analyzed.sql(dialect="vertica").startswith("AT EPOCH LATEST")
+
+    lineage_names = {
+        node.name for node in lineage("a", expression, schema=schema, dialect="vertica").walk()
+    }
+    assert lineage_names >= {"t.a", "u.a"}
+
+
+@pytest.mark.parametrize("dialect", FOREIGN_DIALECTS)
+@pytest.mark.parametrize("unsupported_level", ALL_UNSUPPORTED_LEVELS)
+def test_composed_historical_set_root_fails_atomically_abroad(
+    dialect: str, unsupported_level: ErrorLevel
+) -> None:
+    expression = parse_one(
+        "AT EPOCH LATEST WITH c AS (SELECT a FROM t) "
+        "SELECT a FROM c UNION ALL (SELECT a FROM u ORDER BY a LIMIT 1)",
+        read="vertica",
+    )
+    nested = exp.select("*").from_(expression.subquery("historical"))
+    for candidate in (expression, nested):
+        with pytest.raises(ValueError, match="AtEpochUnion"):
+            candidate.sql(dialect=dialect, unsupported_level=unsupported_level)
+
+
 def test_multi_statement_boundaries() -> None:
     statements = parse("AT EPOCH LATEST SELECT 1; AT EPOCH 2 SELECT 2", read="vertica")
     assert len(statements) == 2

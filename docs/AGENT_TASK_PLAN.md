@@ -132,6 +132,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   Q24; Q25 is now the Milestone 1 recertification gate.
 - Completed **Q23 — FOR UPDATE target analysis safety**. Q24 is the
   lowest-numbered remaining task.
+- Completed **Q24 — AT epoch WITH compound-query composition**. Q25 is the
+  lowest-numbered remaining task and is the Milestone 1 recertification gate.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -282,7 +284,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q21 | DONE   | SELECT inherited-field closure                | Q20                 | `fix: close inherited select fields`                     |
 | Q22 | DONE   | Query-extension guaranteed-raise conformance  | Q20, Q21            | `fix: make query extensions fail closed`                 |
 | Q23 | DONE   | FOR UPDATE target analysis safety             | Q20–Q22             | `fix: make for update targets analyzer safe`             |
-| Q24 | TODO   | AT epoch WITH compound-query composition      | Q23                 | `fix: compose historical ctes and set branches`          |
+| Q24 | DONE   | AT epoch WITH compound-query composition      | Q23                 | `fix: compose historical ctes and set branches`          |
 | Q25 | TODO   | Milestone 1 recertification gate              | Q23–Q24             | `test: recertify milestone one analysis surface`         |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
@@ -2920,7 +2922,7 @@ check`, and installed-wheel `python -I` smoke (`SELECT a FROM t FOR UPDATE OF
 t`, returning `Select`) passed. Milestone 1 remains reopened; Q24 is the next
 eligible task and Q25 alone owns recertification.
 
-### Q24 — AT epoch WITH compound-query composition — `TODO`
+### Q24 — AT epoch WITH compound-query composition — `DONE`
 
 **Outcome.** Make the already-supported historical prefix, WITH clause, and
 set-operation branch-tail contracts compose without false CTE-placement
@@ -2947,6 +2949,53 @@ CTAS-only `AtEpochProperty`; and Q23's independent lock-target analysis fix.
 [UNION clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/union-clause/),
 [INTERSECT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/intersect-clause/),
 and [EXCEPT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/except-clause/).
+
+**Completion record.** Re-opened all five exact 26.2 primary sources and
+found no material grammar contradiction. SELECT still places `[ AT epoch ]`
+before optional WITH and the complete set-operation production; WITH still
+defines side-effect-free query-expression CTE bodies; UNION explicitly permits
+parenthesized branch-local ORDER BY/LIMIT/OFFSET; and INTERSECT/EXCEPT likewise
+permit parenthesized non-rightmost branch tails plus whole-compound tails.
+
+Audited installed SQLGlot 30.13's statement/SELECT/WITH/set parsers, canonical
+Subquery and set nodes, comment rendering, and the Q13/Q14 promotion and
+validation hooks. The false Q14 diagnostic had one structural cause:
+SQLGlot represents a parenthesized set operand carrying branch-local tails as
+an `exp.Subquery` wrapper, while `_is_valid_with_root` recursed through only
+bare SELECT and set-operation children. The validator now unwraps only a true
+wrapper Subquery, preserving the closed SELECT/set allowlist while admitting
+the documented AT + WITH + parenthesized UNION/INTERSECT/EXCEPT composition at
+IMMEDIATE, RAISE, WARN, and IGNORE. Plain, subordinate, and clause-level
+materialization-hinted WITH forms; `EPOCH LATEST`, integer EPOCH, and TIME;
+UNION default/DISTINCT/ALL, INTERSECT DISTINCT, EXCEPT DISTINCT, and
+MINUS-to-EXCEPT canonicalization; branch-local and whole-compound ORDER BY/
+LIMIT tails; compact/pretty regeneration; dump/load; parent metadata; direct
+qualification, optimization, scope traversal, and lineage are pinned.
+
+The independent comment defect came from letting inherited SELECT/set
+renderers see comments owned by the promoted historical root: those renderers
+placed a root comment on the SELECT body or set operator before the outer
+historical transform completed. `atepochquery_sql` now consumes the root's
+comments on the generator's working copy and renders them explicitly at the
+`AT` prefix. The typed `AtEpoch*` root remains the single owner, compact and
+pretty generate/reparse cycles are both AST- and text-stable, and the public
+tree is not mutated. Strict malformed-root generation remains atomic, and the
+composed historical set root fails directly and when nested in PostgreSQL,
+DuckDB, MySQL, and SQLite at RAISE/WARN/IGNORE. The CTAS-only
+`AtEpochProperty`, Q23 lock-target contract, and all other grammar are
+unchanged.
+
+The focused `test_at_epoch_query.py` module passed 219 tests and the updated
+recertification workload module passed 68; the combined historical-query,
+workload, CTE, set-operation, SELECT-tail, hint, official-query, and AST-safety
+neighborhood passed 1,019 tests. The final default CPython 3.12.6 release gate
+passed 7,997 tests at 92.29% branch coverage with Ruff lint/formatting, strict
+mypy, and diff checks clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed 7,997 tests, with 3.15
+treating deprecations as errors. The sdist/wheel build, clean force-install,
+`pip check`, and installed-wheel `python -I` smoke (an AT-prefixed WITH UNION
+with a parenthesized branch-local ORDER BY/LIMIT, returning `AtEpochUnion`)
+passed. Milestone 1 remains reopened; Q25 alone owns recertification.
 
 ### Q25 — Milestone 1 recertification gate — `TODO`
 

@@ -555,18 +555,21 @@ def test_recertification_negative_scripts_fail_without_swallowing_the_suffix(
 
 
 @pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
-def test_at_epoch_with_parenthesized_set_branch_is_recertification_blocker(
+def test_at_epoch_with_parenthesized_set_branch_composes(
     error_level: ErrorLevel,
 ) -> None:
     sql = (
         "AT EPOCH LATEST WITH c AS (SELECT a FROM t) "
         "SELECT a FROM c UNION ALL (SELECT a FROM u ORDER BY a LIMIT 1)"
     )
-    with pytest.raises(ParseError, match="Vertica WITH must precede a SELECT query"):
-        parse_one(sql, read="vertica", error_level=error_level)
+    expression = parse_one(sql, read="vertica", error_level=error_level)
+    assert isinstance(expression, vexp.AtEpochUnion)
+    assert expression.args.get("with_") is not None
+    assert isinstance(expression.expression, exp.Subquery)
+    assert expression.sql(dialect="vertica") == sql
 
 
-def test_at_epoch_with_leading_comment_is_recertification_blocker() -> None:
+def test_at_epoch_with_leading_comment_is_generation_stable() -> None:
     expression = parse_one(
         "/* lead */ AT EPOCH LATEST WITH c AS (SELECT a FROM t) SELECT a FROM c",
         read="vertica",
@@ -575,7 +578,8 @@ def test_at_epoch_with_leading_comment_is_recertification_blocker() -> None:
     reparsed = parse_one(generated, read="vertica")
 
     assert reparsed == expression
-    assert reparsed.sql(dialect="vertica") != generated
+    assert generated.startswith("/* lead */ AT EPOCH LATEST")
+    assert reparsed.sql(dialect="vertica") == generated
 
 
 def test_for_update_of_target_is_recertification_analysis_safe() -> None:

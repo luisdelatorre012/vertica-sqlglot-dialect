@@ -1190,10 +1190,14 @@ class VerticaParser(PostgresParser):
                 "AT epoch requires a SELECT or supported set-operation query"
             )
 
-        had_with = query.args.get("with_") is not None
+        with_expression = query.args.get("with_")
+        had_with = with_expression is not None
+        with_comments = (
+            with_expression.pop_comments() if isinstance(with_expression, exp.With) else []
+        )
         result = self.expression(
             root,
-            comments=[*comments, *query.pop_comments()],
+            comments=[*comments, *with_comments, *query.pop_comments()],
         )
         result.meta.update(query.meta)
         result.meta["vertica_at_epoch_had_with"] = had_with
@@ -1628,6 +1632,8 @@ class VerticaParser(PostgresParser):
 
     @classmethod
     def _is_valid_with_root(cls, expression: exp.Expr | None) -> bool:
+        if isinstance(expression, exp.Subquery) and expression.is_wrapper:
+            return cls._is_valid_with_root(expression.this)
         if isinstance(expression, exp.Select):
             return bool(expression.expressions)
         if type(expression) in {exp.Union, exp.Intersect, exp.Except}:

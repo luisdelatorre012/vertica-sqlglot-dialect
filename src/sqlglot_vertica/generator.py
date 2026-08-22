@@ -5591,6 +5591,10 @@ class VerticaGenerator(PostgresGenerator):
         | vexp.AtEpochIntersect
         | vexp.AtEpochExcept,
     ) -> str:
+        # Historical-root comments belong to the statement prefix. Letting the
+        # inherited SELECT/set renderers see them relocates a leading comment to
+        # the SELECT body or set operator, so render and consume them at ``AT``.
+        at_sql = self.maybe_comment("AT", comments=expression.pop_comments(), separated=True)
         legacy = type(expression) is vexp.AtEpochQuery
         kind_key = "kind" if legacy else "at_epoch_kind"
         value_key = "value" if legacy else "at_epoch_value"
@@ -5634,7 +5638,7 @@ class VerticaGenerator(PostgresGenerator):
             self.unsupported("Historical query requires a supported query root")
             return ""
 
-        return f"AT {self.sql(kind)} {self.sql(value)} {query_sql}"
+        return f"{at_sql} {self.sql(kind)} {self.sql(value)} {query_sql}"
 
     def tablepartitionproperty_sql(self, expression: vexp.TablePartitionProperty) -> str:
         sql = f"PARTITION BY {self.sql(expression, 'this')}"

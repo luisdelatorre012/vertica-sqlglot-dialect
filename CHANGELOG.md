@@ -11,13 +11,13 @@ plugin interface.
   prerelease-aware CI and installed-wheel smoke coverage for both runtimes.
 - Added stable Vertica AST nodes for syntax that cannot be represented by the
   canonical SQLGlot tree without semantic loss.
-- Extended the Milestone 1 workload corpus through the Q09–Q23 remediation
+- Extended the Milestone 1 workload corpus through the Q09–Q24 remediation
   surface, including end-to-end raw-source lineage and all-level negative
   scripts. `FOR UPDATE OF` targets no longer collide with selected sources
   during scope traversal, qualification, optimization, or lineage; the
-  recertification attempt remains open because AT-prefixed WITH queries do not
-  yet compose with parenthesized set-branch tails or retain stable
-  leading-comment ownership.
+  AT-prefixed WITH queries now compose with parenthesized UNION/INTERSECT/
+  EXCEPT branch tails, and historical-root comments retain stable ownership at
+  the `AT` prefix. The recertification decision remains Q25's responsibility.
 - Added native ARRAY, SET, ROW, and qualified INTERVAL parsing and generation.
 - Added Vertica timestamp, datetime, LISTAGG, and mathematical-operator
   semantics.
