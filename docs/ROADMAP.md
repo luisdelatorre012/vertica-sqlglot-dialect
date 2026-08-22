@@ -102,8 +102,8 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   superseded Q08's certification conclusion while preserving that positive
   corpus as historical evidence. The audit found uncovered formal-negative,
   losslessness, fail-closed, and direct-analysis blockers and scheduled
-  Q09–Q21 in `AGENT_TASK_PLAN.md`; Milestone 1 is reopened until its current
-  Q21 recertification gate and every preceding Q task are `DONE`. Q09 is
+  Q09–Q23 in `AGENT_TASK_PLAN.md`; Milestone 1 is reopened until its current
+  Q23 recertification gate and every preceding Q task are `DONE`. Q09 is
   complete: parser-produced `GROUP BY` clauses now use a canonical-compatible
   ordered Group subclass so ordinary expressions and repeated/interleaved
   `ROLLUP`, `CUBE`, and `GROUPING SETS` constructs regenerate in source order;
@@ -180,8 +180,17 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   malformed direct and nested programmatic trees now fail atomically with
   `UnsupportedError`, while valid property ordering, foreign-parsed plain
   CREATE TABLE interoperability, target validation, query analysis, and Q05's
-  embedded-property foreign contract remain stable. Q20 is the next eligible
-  task.
+  embedded-property foreign contract remain stable. Q20 is complete: its
+  formal-negative audit froze the installed SQLGlot field inventory,
+  consolidated the Q09–Q19
+  all-level negative contract, and revalidated the deliberate `ALL`/`LIMIT
+  ALL`/`MINUS`, QUALIFY, SEMI/ANTI, and APPLY canonicalizations or lowerings.
+  It found two distinct product gaps without changing production code: Q21
+  will close undocumented inherited SELECT/projection/order/table-reference
+  fields that currently emit foreign SQL or disappear, and Q22 will make
+  malformed TIMESERIES/MATCH/INTERPOLATE paths fail at `WARN`/`IGNORE` rather
+  than return partial ASTs. The former Q21 recertification gate is therefore
+  renumbered Q23 and remains ineligible until both fixes are complete.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
@@ -300,7 +309,7 @@ Implemented catalog P0:
   left as a named server-side residual.
 
 Remaining (all Milestone 2; deferred while the reopened Milestone 1 tasks
-Q09–Q21 remain incomplete):
+Q09–Q23 remain incomplete):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);

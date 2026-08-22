@@ -212,8 +212,30 @@ SEMI/ANTI join with one ON predicate becomes an equivalent correlated
 and hinted forms fail instead of emitting foreign syntax or losing metadata.
 CROSS/OUTER APPLY retains SQLGlot's canonical `Lateral` representation and
 generates respectively as `INNER JOIN LATERAL ... ON TRUE` or
-`LEFT JOIN LATERAL ... ON TRUE`. Q20 owns the later full audit of these
-architecture-approved equivalence classes; Q12 does not broaden them.
+`LEFT JOIN LATERAL ... ON TRUE`. Q20 revalidated all four lowerings against
+the installed generator and pins their exact Vertica output alongside
+QUALIFY's established derived-table lowering. These are the complete
+architecture-approved inherited query lowerings; Q12 does not broaden them.
+
+Q20 froze the installed SQLGlot 30.13 field inventory for `Select`,
+`SetOperation`, `Join`, `Table`, `TableSample`, `With`/`CTE`, row tails,
+ordering, `Into`, `Create`, `Insert`, and `Drop`. The audit classifies each
+field as documented Vertica syntax, one of the explicit canonicalizations or
+lowerings above, an existing Q09–Q19 fail-closed boundary, or a scheduled
+product gap. Two independent gaps remain before recertification. First,
+undocumented ordinary query/relation fields can still escape the contract:
+named WINDOW, CONNECT BY, LATERAL VIEW, table ONLY/historical `AT (...)`,
+ORDER BY WITH FILL, star EXCLUDE/EXCEPT, and foreign TABLESAMPLE variants
+currently emit foreign-looking SQL, while PIVOT and DISTRIBUTE/SORT/CLUSTER BY
+are parsed into typed fields and then silently disappear during Vertica
+generation. Q21 owns the complete SELECT/projection/relation field closure,
+including strict programmatic validation; until then these forms are pinned as
+residuals, not supported syntax. Second, several pre-existing custom query-
+extension parsers still call level-dependent error paths: malformed
+TIMESERIES, MATCH, and INTERPOLATE inputs raise at `IMMEDIATE`/`RAISE` but can
+return partial custom ASTs at `WARN`/`IGNORE`. Q22 owns their guaranteed-raise
+and strict-generation closure. Neither gap is an approved lowering or
+canonicalization, and neither is waived by the historical Q08 positive gate.
 
 A clause that scopes an entire top-level query rather than one `exp.Select`
 must still expose the concrete query shape to SQLGlot analysis. The SELECT

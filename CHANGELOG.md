@@ -18,6 +18,11 @@ plugin interface.
   source-exact collection/regex/conversion functions, in-call analytic NULL
   treatment, and special window partition modes.
 - Added TIMESERIES, INTERPOLATE, MATCH, and partitioned LIMIT query clauses.
+- Added a formal Milestone 1 negative-audit corpus that freezes SQLGlot 30.13's
+  exposed query/lifecycle fields, consolidates Q09–Q19 fail-closed boundaries,
+  revalidates the approved query canonicalizations/lowerings, and pins two
+  remaining remediation queues: inherited SELECT/relation-field closure and
+  guaranteed-raise handling for malformed query extensions.
 - Added source-ordered multilevel `GROUP BY` ASTs that preserve arbitrary
   interleaving and repetition of ordinary expressions, `ROLLUP`, `CUBE`, and
   `GROUPING SETS`, plus typed `GBYTYPE(HASH|PIPE)` hints and strict rejection

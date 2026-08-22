@@ -92,11 +92,11 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   `SELECT INTO` tail atomicity, and programmatic `CREATE TABLE` generation.
   Q08 therefore remains `DONE` as a historical positive gate, while
   **Milestone 1 is reopened and is not certified**.
-- Tasks Q09–Q21 below are the bounded remediation, formal-negative audit, and
+- Tasks Q09–Q23 below are the bounded remediation, formal-negative audit, and
   recertification queue. Milestone 2
-  (P16–P35) is ineligible until every Q task is `DONE`; Q21 is the current
-  recertification gate and must remain the highest-numbered Q task if Q20
-  schedules another bounded fix.
+  (P16–P35) is ineligible until every Q task is `DONE`; Q23 is the current
+  recertification gate. Q20 scheduled Q21 and Q22 from two distinct audit
+  findings before renumbering the former Q21 gate to Q23.
 - Completed **Q09 — ordered multilevel GROUP BY losslessness**. Q10 is the
   lowest-numbered remaining task.
 - Completed **Q10 — set-operation modifier conformance**. Q11 is the
@@ -118,6 +118,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 - Completed **Q18 — SELECT INTO placement and tail atomicity**.
 - Completed **Q19 — CREATE TABLE strict AST generation contract**. Q20 is the
   lowest-numbered remaining task.
+- Completed **Q20 — Milestone 1 formal-syntax negative audit**. The audit
+  scheduled Q21 and Q22; Q21 is the lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -264,12 +266,14 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q17 | DONE   | Analysis table-target identifier conformance     | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
 | Q18 | DONE   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
 | Q19 | DONE   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
-| Q20 | TODO   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
-| Q21 | TODO   | Milestone 1 recertification gate              | Q20                 | `test: recertify milestone one analysis surface`         |
+| Q20 | DONE   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
+| Q21 | TODO   | SELECT inherited-field closure                | Q20                 | `fix: close inherited select fields`                     |
+| Q22 | TODO   | Query-extension guaranteed-raise conformance  | Q20, Q21            | `fix: make query extensions fail closed`                 |
+| Q23 | TODO   | Milestone 1 recertification gate              | Q20–Q22             | `test: recertify milestone one analysis surface`         |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred until every Milestone 1 Q task is `DONE`; Q21 is the current final
+Deferred until every Milestone 1 Q task is `DONE`; Q23 is the current final
 gate. Milestone 2 task numbering, dependencies, and specifications are
 intentionally unchanged from the prior plan revision.
 
@@ -540,7 +544,7 @@ active backlog starts at the Milestone 1 section that follows.
 The bounded tasks below close verified gaps between the completed foundation
 and the milestone goal — parsing, analyzing, and regenerating
 `SELECT`/CTE/temporary-table workloads. Q01–Q08 preserve their historical
-completion records. The 2026-08-21 audit reopened the milestone with Q09–Q21
+completion records. The 2026-08-21 audit reopened the milestone with Q09–Q23
 because several named residuals were milestone blockers and the positive Q08
 corpus did not exercise the required formal-negative boundaries. No
 database-management capability is in scope in this milestone.
@@ -2550,7 +2554,7 @@ The sdist/wheel build, clean force-install, `pip check`, and installed-wheel
 `python -I` smoke (`CREATE GLOBAL TEMPORARY TABLE q19_guard (id BIGINT) ON
 COMMIT DELETE ROWS`, returning `Create`) passed.
 
-### Q20 — Milestone 1 formal-syntax negative audit — `TODO`
+### Q20 — Milestone 1 formal-syntax negative audit — `DONE`
 
 **Outcome.** Prove that the remediated Milestone 1 surface owns every inherited
 SQLGlot parse/generate field it exposes, and schedule any remaining concrete
@@ -2595,12 +2599,126 @@ certification itself (the final gate owns that decision).
 temporary-table statement subtrees. Record the exact pages re-opened in the
 completion note.
 
-### Q21 — Milestone 1 recertification gate — `TODO`
+**Completion record.** Re-opened the complete 26.2 source surface named by
+Q09–Q19 and this audit: SELECT, historical queries, FROM, table-reference,
+joined-table, join syntax, natural/inner/outer joins, WHERE, the subquery
+overview and restrictions, GROUP BY plus ROLLUP/CUBE/GROUPING SETS and
+GROUPING_ID, HAVING, ORDER BY, TIMESERIES, MATCH, INTERPOLATE, LIMIT, OFFSET,
+the SQLSTATE 42601 syntax-error catalog, UNION/INTERSECT/EXCEPT/MINUS, WITH
+plus recursion and materialization, INTO TABLE, CREATE TABLE, CREATE TEMPORARY
+TABLE, INSERT, and DROP TABLE. No new material source contradiction was found;
+the already-recorded Q01 scoped-temporary-CTAS formal split, Q09 CUBE editorial
+slips, and Q11 LIMIT/relative LIMIT-OFFSET display conflicts remain the same
+explicitly documented choices.
+
+Added `tests/test_milestone_one_formal_negatives.py` with 89 tests. A frozen
+SQLGlot 30.13 `arg_types` inventory covers `Select`, `SetOperation`, `Join`,
+`Table`, `TableSample`, `With`, `CTE`, `Limit`, `Offset`, `Lock`, `Order`,
+`Ordered`, `Into`, `Create`, `Insert`, and `Drop`, so dependency field drift
+becomes an explicit future audit event. A consolidated 11-form matrix runs one
+representative fixed boundary from every Q09–Q19 area at IMMEDIATE, RAISE,
+WARN, and IGNORE. Positive pins revalidate explicit SELECT ALL, deliberate
+LIMIT ALL clause-absence, MINUS-to-EXCEPT canonicalization, QUALIFY's derived-
+table lowering, left SEMI/ANTI to correlated `[NOT] EXISTS`, and CROSS/OUTER
+APPLY to INNER/LEFT LATERAL JOIN. The audit also re-read installed parser,
+generator, query/DDL/DML expression, scope, optimizer, and lowering source
+rather than relying on recalled SQLGlot behavior.
+
+Two independent product gaps were reproduced and pinned without production-
+code changes, per this task's exclusion. First, SQLGlot's inherited ordinary
+query surface still admits undocumented WINDOW, CONNECT BY, LATERAL VIEW,
+table ONLY/historical `AT (...)`, ORDER BY WITH FILL, star EXCLUDE/EXCEPT, and
+foreign TABLESAMPLE variants that emit foreign-looking Vertica SQL; PIVOT and
+DISTRIBUTE/SORT/CLUSTER BY are worse because their typed fields silently
+disappear during generation. This is scheduled as Q21, with the former Q21
+gate renumbered. Second, malformed TIMESERIES, MATCH, and INTERPOLATE required-
+component paths raise correctly at IMMEDIATE/RAISE but return partial custom
+ASTs at WARN/IGNORE; this distinct guaranteed-raise problem is scheduled as
+Q22. The recertification gate is now Q23 and remains highest-numbered. Updated
+`ARCHITECTURE.md` with the complete classification and explicit residuals;
+corrected `COVERAGE.md`'s overbroad Generic SELECT status to Partial and named
+both queues; updated `ROADMAP.md`, `CHANGELOG.md`, this dashboard, gate cross-
+references, and Milestone 2 deferral text. `AGENTS.md` already stated the gate
+condition generically as every Q task being DONE, so it required no edit.
+
+The focused audit module passed 89 tests; the combined Q09–Q19, query-
+extension, and workload neighborhood passed 2,476. The default CPython 3.12.6
+release gate passed 7,530 tests at 92.53% branch coverage with Ruff lint and
+formatting, strict mypy, and diff checks clean. Isolated CPython 3.9.25,
+3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed 7,530
+tests, with 3.15 treating deprecations as errors. The sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel `python -I` smoke (`SELECT a
+FROM t LIMIT ALL`, returning canonical `Select` and regenerating without the
+semantic-no-op clause) passed. Milestone 1 remains reopened; Q20 audits and
+schedules its residuals but does not certify the milestone.
+
+### Q21 — SELECT inherited-field closure — `TODO`
+
+**Outcome.** Close the Q20 audit gap where undocumented inherited SELECT,
+projection, ordering, and table-reference fields can parse and either emit
+foreign SQL or disappear during Vertica generation.
+
+**Required work.** Re-open the 26.2 SELECT, FROM/table-reference, ORDER BY,
+and TABLESAMPLE syntax and audit every installed SQLGlot 30.13 `Select`,
+`Subquery`, `Table`, `TableSample`, `Order`, `Ordered`, `Lateral`, `Pivot`,
+and related query field against the Q20 frozen inventory. Preserve documented
+Vertica syntax and the architecture-approved QUALIFY, left SEMI/ANTI, and
+CROSS/OUTER APPLY lowerings only. Reject or explicitly validate every other
+source and programmatic field before generation, including named WINDOW,
+CONNECT BY, LATERAL VIEW, PIVOT/UNPIVOT, DISTRIBUTE/SORT/CLUSTER BY, star
+EXCLUDE/EXCEPT/REPLACE modifiers, ORDER BY WITH FILL, table ONLY/historical
+`AT (...)` forms, and undocumented TABLESAMPLE methods, ROWS, or REPEATABLE
+options. No recognized form may produce foreign Vertica SQL or be silently
+dropped. Source negatives must raise `ParseError` at IMMEDIATE, RAISE, WARN,
+and IGNORE; direct and nested programmatic mutations must raise atomically at
+strict generation. Replace Q20's residual pins with those closed contracts and
+retain documented `TABLESAMPLE(percent)`, ordinary aliases/subqueries, query
+analysis, comments, and multi-statement boundaries.
+
+**Explicit exclusions.** The separate malformed custom query-extension paths
+scheduled as Q22; new SELECT grammar; server-side sampling randomness/range;
+catalog-aware column resolution; and changes to the approved semantic
+lowerings.
+
+**Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/),
+[FROM clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/from-clause/),
+the FROM subtree's table-reference page,
+[ORDER BY clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/order-by-clause/),
+and the architecture classification recorded by Q20.
+
+### Q22 — query-extension guaranteed-raise conformance — `TODO`
+
+**Outcome.** Make recognized malformed TIMESERIES, MATCH, and INTERPOLATE
+syntax fail with `ParseError` at every parser error level instead of returning
+partial custom ASTs at `WARN`/`IGNORE`.
+
+**Required work.** Re-open the 26.2 TIMESERIES, MATCH, and INTERPOLATE pages
+and audit their parser helpers for plain `raise_error`, missing required-child
+construction, assertions, and permissive fall-through. Add a dedicated
+guaranteed-raise boundary for each affected family (or one narrowly shared
+query-extension boundary when the diagnostics and control flow are genuinely
+identical). Cover every existing malformed fixture at IMMEDIATE, RAISE, WARN,
+and IGNORE, including a missing TIMESERIES interval or ORDER BY, missing MATCH
+definitions or malformed pattern/row clauses, and a missing INTERPOLATE
+operand. Strict generation must validate every custom node field and reject
+direct/nested malformed programmatic trees atomically. Replace Q20's residual
+pins with fail-closed matrices while preserving valid parsing, compact/pretty
+round trips, serialization, optimizer/type behavior, and foreign atomicity.
+
+**Explicit exclusions.** Q21's inherited ordinary SELECT/relation fields;
+new event/time-series grammar; and documented server-only TIMESERIES, MATCH,
+or INTERPOLATE semantic restrictions.
+
+**Primary sources.** [TIMESERIES](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/timeseries-clause/),
+[MATCH](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/match-clause/),
+and [INTERPOLATE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/predicates/interpolate/).
+
+### Q23 — Milestone 1 recertification gate — `TODO`
 
 **Outcome.** Re-prove the complete analysis surface end to end and certify
 Milestone 1 only if every remediation and formal-negative boundary holds.
 
-**Required work.** Introduce no new grammar. Re-read the Q09–Q20 completion
+**Required work.** Introduce no new grammar. Re-read the Q09–Q22 completion
 records and extend the realistic workload corpus so it exercises ordered
 multilevel grouping, legal set-operation modifiers and branch tails,
 documented joins and SELECT tails, direct analyzer-safe AT-prefixed SELECT and
@@ -2637,13 +2755,13 @@ Milestone 2 becomes eligible only after the final recertification task is
 **Explicit exclusions.** New grammar, Milestone 2 implementation, live-server
 catalog semantics, and silent waiver of any failing or untested boundary.
 
-**Primary sources.** Re-open every page named by Q09–Q20 as needed to verify
+**Primary sources.** Re-open every page named by Q09–Q22 as needed to verify
 the final documented contract.
 
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 
 Every Milestone 2 task is deferred until every Milestone 1 Q task is `DONE`;
-Q21 is the current final gate. The detailed P16–P35
+Q23 is the current final gate. The detailed P16–P35
 specifications — outcome, required work, exclusions, primary sources, and
 completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
