@@ -62,6 +62,11 @@ plugin interface.
   level, including malformed ON COMMIT/physical-design/list tails, duplicate or
   contradictory temporary scopes, generic-command fallback, and raw Python
   failure paths, while preserving every valid permanent and temporary form.
+- Aligned CREATE TABLE, INSERT, SELECT INTO, and DROP TABLE targets on one
+  source-backed identifier contract: one to three parts, schema-required outer
+  qualification, documented quoted/unquoted Unicode rules, valid UTF-8, a
+  128-byte per-component limit, and strict programmatic-AST rejection before
+  generation.
 - Added semantic CREATE/ALTER/DROP SEQUENCE plus complete SCHEMA and VIEW
   lifecycles with typed metadata actions, equal-cardinality multi-renames,
   ordered multi-target drops, exact schema dependency policies, and strict view

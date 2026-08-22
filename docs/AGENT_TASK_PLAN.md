@@ -113,6 +113,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   lowest-numbered remaining task.
 - Completed **Q16 — INSERT fail-closed parser conformance**. Q17 is the
   lowest-numbered remaining task.
+- Completed **Q17 — analysis table-target identifier conformance**. Q18 is the
+  lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -256,7 +258,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q14 | DONE   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
 | Q15 | DONE   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
 | Q16 | DONE   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
-| Q17 | TODO   | Analysis table-target identifier conformance  | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
+| Q17 | DONE   | Analysis table-target identifier conformance     | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
 | Q18 | TODO   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
 | Q19 | TODO   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
 | Q20 | TODO   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
@@ -2316,7 +2318,7 @@ tests, with 3.15 treating deprecations as errors. The sdist/wheel build, clean
 force-install, `pip check`, and installed-wheel `python -I` smoke (`INSERT INTO
 q16_target SELECT 1`, returning `Insert`) passed.
 
-### Q17 — analysis table-target identifier conformance — `TODO`
+### Q17 — analysis table-target identifier conformance — `DONE`
 
 **Outcome.** Give every Milestone 1 table-target family one consistent,
 source-backed identifier and qualification contract in both parsing and
@@ -2353,6 +2355,44 @@ tokenizer rewrite.
 [INSERT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/insert/),
 [INTO TABLE clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/into-table-clause/),
 and [DROP TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-table/).
+
+**Completion record.** Re-opened all five 26.2 primary sources and found no
+material contradiction. Every statement grammar admits one-, two-, and
+three-part table targets and requires a schema whenever a namespace/database
+qualifier is present. The temporary SELECT INTO production labels its first
+qualifier `database` rather than `{namespace|database}`, but the syntactic
+three-part shape is identical and the page's parameter text discusses both
+modes, so no AST-level family exception exists. The identifier page confirms
+the 128-byte per-component limit, ASCII letter/underscore unquoted start,
+ASCII letter/digit/underscore/dollar/Unicode-letter continuation, arbitrary
+quoted payloads, case-insensitive comparison, Unicode case folding, and
+source-case storage; empty object names and invalid UTF-8 remain invalid.
+
+Added one shared parser validator used by CREATE TABLE definition/LIKE/CTAS,
+INSERT, permanent/temporary SELECT INTO, and single/multi-target DROP TABLE.
+It rejects missing/empty components, catalog-without-schema shapes,
+four-part `Dot` trees, invalid unquoted characters, unpaired surrogates, and
+129-byte ASCII or multibyte components through each family's existing
+guaranteed-raise boundary at IMMEDIATE, RAISE, WARN, and IGNORE. The matching
+generator validator runs before text emission for canonical/programmatic
+CREATE, INSERT, INTO/IntoTableClause, and DROP trees, rejects wrong child
+types and even falsey extra fields with `UnsupportedError`, and preserves
+valid foreign-parsed canonical targets. Valid 127/128-byte ASCII and
+multibyte boundaries, quoted Unicode/reserved payloads, contextual unquoted
+names, source casing, all three qualification depths, comments, neighboring
+query aliases, temporary forms, compact/pretty round trips, and
+parse/generate/reparse equality are pinned in
+`tests/test_table_target_identifiers.py`.
+
+The new focused module passed 492 tests; together with CREATE TABLE, INSERT,
+SELECT INTO, and DROP TABLE neighbors, 1,357 tests passed. The default CPython
+3.12.6 release gate passed 7,344 tests at 92.99% branch coverage with Ruff
+lint/formatting, strict mypy, and diff checks clean. Isolated CPython 3.9.25,
+3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed 7,344
+tests, with 3.15 treating deprecations as errors. The sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel `python -I` smoke
+(`CREATE TABLE db.s.q17_identifier_target (id BIGINT)`, returning `Create`)
+passed.
 
 ### Q18 — SELECT INTO placement and tail atomicity — `TODO`
 

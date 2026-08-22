@@ -526,6 +526,21 @@ explicit `RESTRICT`. Compound CREATE SCHEMA bodies remain fail-closed and
 separately planned. Namespace mode, current-database resolution, ownership,
 object dependencies, and quota relationships remain catalog/server checks.
 
+Milestone 1 table targets share one lexical and structural contract across
+CREATE TABLE definition/LIKE/CTAS, INSERT, SELECT INTO, and DROP TABLE. A
+target is an `exp.Table` containing exactly one table identifier, an optional
+schema, and an optional namespace/database qualifier; the outer qualifier is
+invalid without the schema, and a fourth part cannot hide in an `exp.Dot`.
+Every component is nonempty valid UTF-8 and at most 128 bytes. Unquoted names
+start with an ASCII letter or underscore and continue with ASCII letters,
+digits, underscore, dollar, or Unicode letters; quoted names retain arbitrary
+valid payloads and source case, including reserved words. Parser validation
+runs through the owning statement family's guaranteed-raise boundary, while
+one shared generator validator rejects malformed canonical/programmatic
+`Table`/`Identifier` children, including wrong types and falsey extra fields,
+before any SQL is returned. This boundary is intentionally target-specific;
+source-relation, column, and alias identifiers retain their own contracts.
+
 Table drops complete the same lifecycle pattern with a split representation.
 Single-target `DROP TABLE` remains canonical `exp.Drop` because SQLGlot
 preserves `IF EXISTS`, up-to-three-part qualification, and `CASCADE` exactly,

@@ -157,8 +157,16 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   prefixes/tails, and leftover clauses raise `ParseError` at IMMEDIATE, RAISE,
   WARN, and IGNORE rather than normalizing input or returning a blank partial
   AST. Valid DEFAULT VALUES, multi-row VALUES, INSERT-SELECT, and the Q14
-  target-following WITH form remain canonical and analyzable. Q17 is the next
-  eligible task.
+  target-following WITH form remain canonical and analyzable. Q17 is complete:
+  CREATE TABLE definition/LIKE/CTAS, INSERT, permanent/temporary SELECT INTO,
+  and DROP TABLE now share one source-backed one-/two-/three-part target
+  contract with schema-required outer qualification, documented quoted and
+  unquoted lexical rules, valid UTF-8, a 128-byte limit per component, and
+  strict programmatic-AST validation before generation. Boundary tests cover
+  127/128/129-byte ASCII and multibyte names, Unicode/reserved payloads,
+  unpaired surrogates, empty/missing/four-part shapes, source casing, comments,
+  aliases in neighboring legal positions, and all parser error levels. Q18 is
+  the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

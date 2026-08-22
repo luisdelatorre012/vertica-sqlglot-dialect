@@ -1176,6 +1176,11 @@ class VerticaGenerator(PostgresGenerator):
     def insert_sql(self, expression: exp.Insert) -> str:
         if not self._valid_dml(vdml.insert_errors(expression)):
             return ""
+        target = expression.this
+        if isinstance(target, exp.Schema):
+            target = target.this
+        if not self._validate_analysis_table_target(target, "INSERT target"):
+            return ""
         return super().insert_sql(expression)
 
     def merge_sql(self, expression: exp.Merge) -> str:
@@ -1435,6 +1440,13 @@ class VerticaGenerator(PostgresGenerator):
         if expression.kind == "ROLE":
             return self._create_role_sql(expression)
 
+        if expression.kind == "TABLE":
+            target = expression.this
+            if isinstance(target, exp.Schema):
+                target = target.this
+            if not self._validate_analysis_table_target(target, "CREATE TABLE target"):
+                return ""
+
         properties = expression.args.get("properties")
         property_order = (
             self.TABLE_PROPERTY_ORDER
@@ -1583,20 +1595,43 @@ class VerticaGenerator(PostgresGenerator):
         return self._drop_table_sql(expression, require_multiple=True)
 
     def _validate_drop_table_name(self, expression: object, label: str) -> bool:
+        return self._validate_analysis_table_target(expression, label)
+
+    def _validate_analysis_table_target(self, expression: object, label: str) -> bool:
+        """Validate the shared one-to-three-part Milestone 1 table target."""
+
         if not isinstance(expression, exp.Table):
-            self.unsupported(f"{label} requires a qualified table-shaped name")
+            self.unsupported(f"{label} requires a one-, two-, or three-part table name")
             return False
+
         valid = True
-        if self._has_user_extras(expression, {"this", "db", "catalog"}):
+        if any(key not in {"this", "db", "catalog"} for key in expression.args):
             self.unsupported(f"{label} contains unsupported table fields")
             valid = False
-        parts = [expression.args.get("catalog"), expression.args.get("db"), expression.this]
-        if parts[0] is not None and parts[1] is None:
+
+        catalog = expression.args.get("catalog")
+        schema = expression.args.get("db")
+        name = expression.args.get("this")
+        if catalog is not None and schema is None:
             self.unsupported(f"{label} cannot have a namespace or database without a schema")
             valid = False
-        for part_label, part in zip(("namespace/database", "schema", "table"), parts):
-            if part is not None:
-                valid = self._validate_user_identifier(part, f"{label} {part_label}") and valid
+
+        for part_label, identifier in zip(
+            ("namespace/database", "schema", "table"), (catalog, schema, name)
+        ):
+            if identifier is None:
+                if part_label == "table":
+                    self.unsupported(f"{label} requires a table name")
+                    valid = False
+                continue
+            if not isinstance(identifier, exp.Identifier):
+                self.unsupported(f"{label} {part_label} requires an identifier")
+                valid = False
+                continue
+            if any(key not in {"this", "quoted"} for key in identifier.args):
+                self.unsupported(f"{label} {part_label} contains unsupported identifier fields")
+                valid = False
+            valid = self._validate_user_identifier(identifier, f"{label} {part_label}") and valid
         return valid
 
     def _drop_table_sql(self, expression: exp.Drop, require_multiple: bool) -> str:
@@ -5732,6 +5767,8 @@ class VerticaGenerator(PostgresGenerator):
         if any(expression.args.get(key) for key in ("unlogged", "bulk_collect", "expressions")):
             self.unsupported("Vertica INTO supports only one plain table target")
             return ""
+        if not self._validate_analysis_table_target(expression.this, "INTO target"):
+            return ""
         return super().into_sql(expression)
 
     def intotableclause_sql(self, expression: vexp.IntoTableClause) -> str:
@@ -5742,16 +5779,7 @@ class VerticaGenerator(PostgresGenerator):
             return ""
 
         target = expression.args.get("this")
-        if (
-            not isinstance(target, exp.Table)
-            or self._has_user_extras(target, {"this", "db", "catalog"})
-            or not isinstance(target.this, exp.Identifier)
-            or any(
-                part is not None and not isinstance(part, exp.Identifier)
-                for part in (target.args.get("db"), target.args.get("catalog"))
-            )
-        ):
-            self.unsupported("INTO requires one table name with at most three qualifier parts")
+        if not self._validate_analysis_table_target(target, "INTO target"):
             return ""
 
         temporary = expression.args.get("temporary")

@@ -1920,6 +1920,12 @@ class VerticaParser(PostgresParser):
         errors = vdml.insert_errors(insert)
         if errors:
             self._raise_insert_error(errors[0])
+        insert_target = insert.this
+        if isinstance(insert_target, exp.Schema):
+            insert_target = insert_target.this
+        self._validate_analysis_table_target(
+            insert_target, "INSERT target", self._raise_insert_error
+        )
         if self._curr.token_type != TokenType.SENTINEL:
             self._raise_insert_error(f"Unexpected Vertica INSERT clause at {self._curr.text!r}")
         return insert
@@ -4016,6 +4022,65 @@ class VerticaParser(PostgresParser):
             self.check_errors()
         if self.error_level in {ErrorLevel.IGNORE, ErrorLevel.WARN}:
             raise ParseError(message)
+
+    def _validate_analysis_table_target(
+        self,
+        table: object,
+        label: str,
+        raise_error: t.Callable[[str], None],
+    ) -> exp.Table:
+        """Validate the shared one-to-three-part Milestone 1 table target."""
+
+        if not isinstance(table, exp.Table) or any(
+            key not in {"this", "db", "catalog"} for key in table.args
+        ):
+            raise_error(f"{label} requires a one-, two-, or three-part table name")
+        assert isinstance(table, exp.Table)
+
+        catalog = table.args.get("catalog")
+        schema = table.args.get("db")
+        name = table.args.get("this")
+        if catalog is not None and schema is None:
+            raise_error(f"{label} cannot specify a namespace or database without a schema")
+
+        for part_label, identifier in zip(
+            ("namespace/database", "schema", "table"), (catalog, schema, name)
+        ):
+            if identifier is None:
+                if part_label == "table":
+                    raise_error(f"{label} requires a table name")
+                continue
+            if not isinstance(identifier, exp.Identifier):
+                raise_error(f"{label} {part_label} requires an identifier")
+            assert isinstance(identifier, exp.Identifier)
+            self._validate_analysis_table_identifier(
+                identifier, f"{label} {part_label}", raise_error
+            )
+        return table
+
+    def _validate_analysis_table_identifier(
+        self,
+        identifier: exp.Identifier,
+        label: str,
+        raise_error: t.Callable[[str], None],
+    ) -> None:
+        if any(key not in {"this", "quoted"} for key in identifier.args):
+            raise_error(f"{label} contains unsupported identifier fields")
+        quoted = identifier.args.get("quoted", False)
+        if not isinstance(quoted, bool):
+            raise_error(f"{label} quoted flag must be boolean")
+        if not isinstance(identifier.this, str) or not identifier.this:
+            raise_error(f"{label} requires a nonempty identifier")
+        assert isinstance(identifier.this, str)
+        if not quoted and not self._is_connection_policy_identifier(identifier.this):
+            raise_error(f"{label} requires a valid unquoted identifier")
+        try:
+            size = len(identifier.this.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise_error(f"{label} must be valid UTF-8")
+        else:
+            if size > 128:
+                raise_error(f"{label} cannot exceed 128 UTF-8 bytes")
 
     def _match_user_object(self, *, advance: bool = True) -> bool:
         matched = (
@@ -7259,6 +7324,9 @@ class VerticaParser(PostgresParser):
         if not table:
             self._raise_create_table_error("CREATE TABLE requires a table name")
         assert table is not None
+        self._validate_analysis_table_target(
+            table, "CREATE TABLE target", self._raise_create_table_error
+        )
 
         properties: list[exp.Expr] = []
         if scope == "GLOBAL":
@@ -8092,12 +8160,11 @@ class VerticaParser(PostgresParser):
         spelling = self._prev.text.upper() if temporary else None
         self._match(TokenType.TABLE)
 
-        target = self._parse_table_parts()
-        if not isinstance(target, exp.Table) or not isinstance(target.this, exp.Identifier):
-            self._raise_select_into_error(
-                "INTO requires one table name with at most three qualifier parts"
-            )
-            return None
+        target = self._validate_analysis_table_target(
+            self._parse_table_parts(), "INTO target", self._raise_select_into_error
+        )
+        if self._is_connected():
+            self._raise_select_into_error("INTO target contains an invalid identifier character")
         if self._match(TokenType.COMMA, advance=False):
             self._raise_select_into_error("INTO accepts exactly one table target")
         if self._match(TokenType.L_PAREN, advance=False):
@@ -8647,13 +8714,9 @@ class VerticaParser(PostgresParser):
 
     def _parse_drop_table_name(self) -> exp.Table:
         name = self._parse_table_parts(schema=True)
-        if not isinstance(name, exp.Table) or not isinstance(name.this, exp.Identifier):
-            self._raise_drop_table_error("DROP TABLE requires a table name")
-        assert isinstance(name, exp.Table)
-        for component in (name.args.get("catalog"), name.args.get("db"), name.this):
-            if isinstance(component, exp.Identifier):
-                self._validate_user_name_component(component, "DROP TABLE")
-        return name
+        return self._validate_analysis_table_target(
+            name, "DROP TABLE target", self._raise_drop_table_error
+        )
 
     def _parse_drop_table(self, exists: bool) -> exp.Drop:
         if exists:
