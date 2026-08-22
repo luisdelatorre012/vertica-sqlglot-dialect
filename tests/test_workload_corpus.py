@@ -6,10 +6,10 @@ temporary CTAS; definition-form temporary tables; ``INSERT ... SELECT`` and
 ``INSERT ... WITH``; ``SELECT ... INTO`` temporary targets; and multi-target
 ``DROP TABLE`` cleanup -- into the kind of end-to-end scripts an analysis
 workload actually runs, rather than the isolated single-statement cases each
-family's own test module already covers. Q23 extends that proof through the
-Q09--Q22 remediation surface. This module introduces no new grammar; it only
-proves the surface holds together across statement boundaries and through the
-public analysis APIs.
+family's own test module already covers. Q25 extends that proof through the
+complete Q09--Q24 remediation surface. This module introduces no new grammar;
+it only proves the surface holds together across statement boundaries and
+through the public analysis APIs.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ RECURSIVE_ARCHIVE_PIPELINE_TYPES: list[type[exp.Expr]] = [
     vexp.DropTables,
 ]
 
-# Q23's recertification workload composes every remediated query family with
+# Q25's recertification workload composes every remediated query family with
 # the temporary-table lifecycle. It deliberately keeps catalog-dependent
 # validity out of scope: the fixture proves syntax, AST shape, regeneration,
 # and analysis traversal only.

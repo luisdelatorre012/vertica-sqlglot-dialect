@@ -92,10 +92,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   `SELECT INTO` tail atomicity, and programmatic `CREATE TABLE` generation.
   Q08 therefore remains `DONE` as a historical positive gate, while
   **Milestone 1 is reopened and is not certified**.
-- Tasks Q09–Q25 below are the bounded remediation, formal-negative audit, and
-  recertification queue. Milestone 2
-  (P16–P35) is ineligible until every Q task is `DONE`; Q25 is the current
-  recertification gate. Q20 scheduled Q21 and Q22 from two distinct audit
+- Tasks Q09–Q25 below are the completed remediation, formal-negative audit,
+  and recertification queue. Q20 scheduled Q21 and Q22 from two distinct audit
   findings before renumbering the former Q21 gate to Q23. The first Q23 gate
   attempt on 2026-08-22 found two further analyzer/composition blockers and
   scheduled them as Q23 and Q24 before renumbering the gate to Q25.
@@ -132,8 +130,10 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   Q24; Q25 is now the Milestone 1 recertification gate.
 - Completed **Q23 — FOR UPDATE target analysis safety**. Q24 is the
   lowest-numbered remaining task.
-- Completed **Q24 — AT epoch WITH compound-query composition**. Q25 is the
-  lowest-numbered remaining task and is the Milestone 1 recertification gate.
+- Completed **Q24 — AT epoch WITH compound-query composition**.
+- Completed **Q25 — Milestone 1 recertification gate** on 2026-08-22. The
+  complete analysis parsing surface is certified; every Q task is `DONE`,
+  Milestone 2 is eligible, and P16 is the lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -285,13 +285,13 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q22 | DONE   | Query-extension guaranteed-raise conformance  | Q20, Q21            | `fix: make query extensions fail closed`                 |
 | Q23 | DONE   | FOR UPDATE target analysis safety             | Q20–Q22             | `fix: make for update targets analyzer safe`             |
 | Q24 | DONE   | AT epoch WITH compound-query composition      | Q23                 | `fix: compose historical ctes and set branches`          |
-| Q25 | TODO   | Milestone 1 recertification gate              | Q23–Q24             | `test: recertify milestone one analysis surface`         |
+| Q25 | DONE   | Milestone 1 recertification gate              | Q23–Q24             | `test: recertify milestone one analysis surface`         |
 
-### Milestone 2 — administration and remaining DDL (deferred)
+### Milestone 2 — administration and remaining DDL (eligible)
 
-Deferred until every Milestone 1 Q task is `DONE`; Q25 is the current final
-gate. Milestone 2 task numbering, dependencies, and specifications are
-intentionally unchanged from the prior plan revision.
+Eligible now that every Milestone 1 Q task is `DONE`. Milestone 2 task
+numbering, dependencies, and specifications are intentionally unchanged from
+the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -2997,7 +2997,7 @@ treating deprecations as errors. The sdist/wheel build, clean force-install,
 with a parenthesized branch-local ORDER BY/LIMIT, returning `AtEpochUnion`)
 passed. Milestone 1 remains reopened; Q25 alone owns recertification.
 
-### Q25 — Milestone 1 recertification gate — `TODO`
+### Q25 — Milestone 1 recertification gate — `DONE`
 
 **Outcome.** Re-prove the complete analysis surface end to end and certify
 Milestone 1 only if every remediation and formal-negative boundary holds.
@@ -3042,11 +3042,55 @@ catalog semantics, and silent waiver of any failing or untested boundary.
 **Primary sources.** Re-open every page named by Q09–Q24 as needed to verify
 the final documented contract.
 
-## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
+**Completion record.** Re-read every Q09–Q24 completion record and the full
+architecture, coverage, and roadmap contracts. Re-opened the 26.2 SELECT,
+GROUP BY/ROLLUP/CUBE/GROUPING SETS/GROUPING_ID, UNION/INTERSECT/EXCEPT/MINUS,
+LIMIT/OFFSET and SQLSTATE 42601, FROM/table-reference/joined-table and join
+guides, historical-query, WITH/recursion/materialization, ORDER BY, CREATE
+TABLE, CREATE TEMPORARY TABLE, INSERT, INTO TABLE, DROP TABLE, identifiers,
+TIMESERIES, MATCH, and INTERPOLATE sources. No new material contradiction was
+found; Q01's scoped-temporary-CTAS evidence choice, Q09's recorded CUBE
+editorial slips, and Q11's LIMIT and relative LIMIT/OFFSET source conflicts
+remain the same deliberate documented boundaries.
 
-Every Milestone 2 task is deferred until every Milestone 1 Q task is `DONE`;
-Q25 is the current final gate. The detailed P16–P35
-specifications — outcome, required work, exclusions, primary sources, and
+The first gate attempt had already extended `tests/test_workload_corpus.py`
+from 8 to 68 tests. Q23 and Q24 converted its two blocker pins into positive
+regressions, so this final gate required no production change or new grammar.
+The corpus now proves ordered multilevel grouping; legal set modifiers and
+branch/compound tails; documented joins, row limits, and analyzer-safe `FOR
+UPDATE OF`; direct analyzer-visible AT-prefixed SELECT and set roots; plain,
+subordinate, recursive, and materialization-hinted CTEs; and the complete
+definition/INSERT/CTAS/SELECT-INTO/DROP temporary-table lifecycle. Compact and
+pretty generation/reparse, statement boundaries and root classes, dump/load,
+copy/transform parent metadata, comments, public-root scope traversal,
+qualification, optimization, strict AST mutation rejection, and direct/nested
+foreign failure are pinned. Six malformed query/CTE/CREATE/INSERT/INTO/query-
+extension scripts raise atomically at IMMEDIATE, RAISE, WARN, and IGNORE
+without swallowing the following statement. The lineage proof expands the
+SELECT INTO source through CTAS and nested/hinted CTEs, then through the
+definition-form temporary table's INSERT query to the raw source alias.
+
+Re-audited every Milestone 1 coverage row and deliberate residual. The named
+Partial statuses remain accurate only for documented server/catalog or wider
+feature boundaries; none is a blocker to the milestone's parsing, analyzing,
+and regeneration outcome. Updated the query, SELECT INTO, temporary-table, and
+DROP TABLE rows with Q25 evidence; updated the roadmap, changelog, task status,
+and installation-facing milestone claim. `ARCHITECTURE.md` required no change
+because Q25 introduced no contract.
+
+The focused workload module passed 68 tests. The default CPython 3.12.6 gate
+passed 7,997 tests at 92.29% branch coverage with Ruff lint/formatting, strict
+mypy, and diff checks clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed 7,997 tests, with 3.15
+treating deprecations as errors. The sdist/wheel build, clean force-install,
+`pip check`, and installed-wheel `python -I` smoke (an AT-prefixed WITH UNION
+with a parenthesized branch-local ORDER BY/LIMIT, returning `AtEpochUnion`)
+passed. **Milestone 1 — the analysis parsing surface — is recertified.**
+
+## Detailed tasks — Milestone 2: administration and remaining DDL (eligible)
+
+Every Milestone 1 Q task is `DONE`, so Milestone 2 is eligible. The detailed
+P16–P35 specifications — outcome, required work, exclusions, primary sources, and
 completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
 not part of the mandatory read while Milestone 1 is active. When a P task is

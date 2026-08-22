@@ -210,14 +210,19 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   with parenthesized UNION/INTERSECT/EXCEPT branches carrying branch-local and
   whole-compound tails; the outer-WITH validator recognizes only true wrapper
   subqueries, and historical-root comments render from one stable owner at the
-  `AT` prefix across compact and pretty cycles. Q25 is now the sole remaining
-  task and recertification gate. Milestone 1 remains reopened.
+  `AT` prefix across compact and pretty cycles. Q25 is complete: the 68-test
+  recertification corpus proves the Q09–Q24 surface end to end across realistic
+  temporary-table workloads, including public-root qualification,
+  optimization, scope traversal, raw-source lineage, all-level negative-script
+  atomicity, strict AST validation, and direct/nested foreign failure. The full
+  release gate passed on every supported CPython minor. Milestone 1 is
+  recertified as of 2026-08-22.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — remains deferred until the reopened Milestone 1 is
-  recertified.
+  (tasks P16–P35) — is now eligible after Milestone 1 recertification; P16 is
+  the next task.
 
 ## Phase 1 — core analytical SQL and physical design
 
@@ -329,8 +334,7 @@ Implemented catalog P0:
   temporary-table/single-SELECT restrictions, with CHECK expression content
   left as a named server-side residual.
 
-Remaining (all Milestone 2; deferred while the reopened Milestone 1 tasks
-Q09–Q25 remain incomplete):
+Remaining (all Milestone 2; eligible after Milestone 1 recertification):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);
