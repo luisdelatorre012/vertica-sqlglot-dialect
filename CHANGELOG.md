@@ -28,6 +28,10 @@ plugin interface.
   sort extensions, star modifiers, ordering extensions, table historical/ONLY
   forms, and foreign TABLESAMPLE variants now fail atomically, while bare
   numeric TABLESAMPLE and the approved APPLY lowerings remain supported.
+- Made TIMESERIES, MATCH, and INTERPOLATE fail closed at every parser error
+  level for malformed required components, and added strict direct/nested AST
+  validation while preserving comments, type/optimizer behavior, and foreign
+  generation atomicity.
 - Added source-ordered multilevel `GROUP BY` ASTs that preserve arbitrary
   interleaving and repetition of ordinary expressions, `ROLLUP`, `CUBE`, and
   `GROUPING SETS`, plus typed `GBYTYPE(HASH|PIPE)` hints and strict rejection

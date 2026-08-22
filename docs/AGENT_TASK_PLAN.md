@@ -122,6 +122,9 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   scheduled Q21 and Q22; Q21 is the lowest-numbered remaining task.
 - Completed **Q21 — SELECT inherited-field closure**. Q22 is the
   lowest-numbered remaining task.
+- Completed **Q22 — query-extension guaranteed-raise conformance**. Q23 is the
+  lowest-numbered remaining task and remains the Milestone 1 recertification
+  gate.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -270,7 +273,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q19 | DONE   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
 | Q20 | DONE   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
 | Q21 | DONE   | SELECT inherited-field closure                | Q20                 | `fix: close inherited select fields`                     |
-| Q22 | TODO   | Query-extension guaranteed-raise conformance  | Q20, Q21            | `fix: make query extensions fail closed`                 |
+| Q22 | DONE   | Query-extension guaranteed-raise conformance  | Q20, Q21            | `fix: make query extensions fail closed`                 |
 | Q23 | TODO   | Milestone 1 recertification gate              | Q20–Q22             | `test: recertify milestone one analysis surface`         |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
@@ -2737,7 +2740,7 @@ The sdist/wheel build, clean force-install, `pip check`, and installed-wheel
 returning `Select`) passed. Milestone 1 remains reopened; Q22 and Q23 are not
 part of this task.
 
-### Q22 — query-extension guaranteed-raise conformance — `TODO`
+### Q22 — query-extension guaranteed-raise conformance — `DONE`
 
 **Outcome.** Make recognized malformed TIMESERIES, MATCH, and INTERPOLATE
 syntax fail with `ParseError` at every parser error level instead of returning
@@ -2763,6 +2766,48 @@ or INTERPOLATE semantic restrictions.
 **Primary sources.** [TIMESERIES](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/timeseries-clause/),
 [MATCH](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/match-clause/),
 and [INTERPOLATE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/predicates/interpolate/).
+
+**Completion record.** Re-opened all three exact 26.2 primary sources and
+found no material grammar contradiction. TIMESERIES requires a slice alias,
+quoted interval, parenthesized optional PARTITION BY, and mandatory ORDER BY;
+MATCH requires ORDER BY, one or more DEFINE entries, PATTERN name/text, and
+only FIRST EVENT or ALL EVENTS as its optional ROWS MATCH mode; INTERPOLATE
+requires two operands around PREVIOUS or NEXT VALUE. Catalog- and query-shape-
+dependent restrictions remain server-side per the task's exclusion.
+
+Added dedicated `_raise_timeseries_error`, `_raise_match_error`, and
+`_raise_interpolate_error` guaranteed-raise boundaries and routed every
+recognized malformed helper path through them. Missing/malformed aliases,
+intervals, partition/order children, parentheses, definitions, patterns,
+row modes, directions, and operands now raise `ParseError` at IMMEDIATE,
+RAISE, WARN, and IGNORE instead of returning partial custom ASTs. Q20's three
+residual pins are now all-level fail-closed regressions; malformed
+multi-statement scripts prove the following statement is not swallowed.
+
+Added strict Vertica generation preflights for `TimeseriesSelect`,
+`Timeseries`, `TimeseriesSlice`, `Match`, `MatchDefinition`, and `Interpolate`.
+They validate every custom field, typed required child, finite marker, falsey
+or unknown extra, and direct/nested placement before rendering, so malformed
+programmatic trees raise atomic `UnsupportedError` instead of empty, partial,
+or raw-Python output. Valid compact/pretty round trips, dump/load, optimizer
+visibility, Boolean type metadata, and direct/nested PostgreSQL, DuckDB,
+MySQL, and SQLite atomic failure remain stable at RAISE/WARN/IGNORE. Testing
+comments exposed one adjacent pre-existing loss: SQLGlot suppresses ordinary
+comment emission on Binary subclasses, so INTERPOLATE's retained token comment
+was not regenerated. Its explicit renderer now emits that comment at the
+INTERPOLATE keyword; TIMESERIES and MATCH similarly thread their consumed
+keyword comments into their typed nodes, and all three reparse identically.
+
+The focused `test_query_extensions.py` module passed 135 tests; the combined
+query-extension, formal-negative, AST-safety, SELECT INTO, join, and CTE
+neighborhood passed 985. The final default CPython 3.12.6 release gate passed
+7,881 tests at 92.27% branch coverage with Ruff lint/formatting, strict mypy,
+and diff checks clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 each passed 7,881 tests, with 3.15 treating
+deprecations as errors. The sdist/wheel build, clean force-install, `pip
+check`, and installed-wheel `python -I` smoke (a TIMESERIES query returning
+`TimeseriesSelect`) passed. Milestone 1 remains reopened; Q23 alone owns
+recertification.
 
 ### Q23 — Milestone 1 recertification gate — `TODO`
 

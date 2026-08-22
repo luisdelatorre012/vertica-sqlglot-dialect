@@ -8502,6 +8502,8 @@ class VerticaParser(PostgresParser):
                         self._raise_select_modifier_error(
                             f"Found multiple '{modifier_token.text.upper()}' clauses"
                         )
+                    if key == "match":
+                        self._raise_match_error("Found multiple MATCH clauses")
                     self.raise_error(
                         f"Found multiple '{modifier_token.text.upper()}' clauses",
                         token=modifier_token,
@@ -8553,15 +8555,14 @@ class VerticaParser(PostgresParser):
             self._raise_select_modifier_error("TIMESERIES must precede SELECT tail clauses")
 
         if this.args.get("timeseries"):
-            self.raise_error("Found multiple TIMESERIES clauses")
+            self._raise_timeseries_error("Found multiple TIMESERIES clauses")
 
-        timeseries = self._parse_timeseries()
+        timeseries = self._parse_timeseries(comments=list(self._prev_comments or []))
         this.set("timeseries", timeseries)
         this = self._parse_base_query_modifiers(this)
 
         if not isinstance(this, exp.Select):
-            self.raise_error("TIMESERIES requires a SELECT query")
-            return this
+            self._raise_timeseries_error("TIMESERIES requires a SELECT query")
 
         result = self.expression(
             vexp.TimeseriesSelect(**this.args),
@@ -8600,26 +8601,36 @@ class VerticaParser(PostgresParser):
                     replacement.meta.update(column.meta)
                     column.replace(replacement)
 
-    def _parse_timeseries(self) -> vexp.Timeseries:
+    def _parse_timeseries(self, comments: list[str]) -> vexp.Timeseries:
         slice_name = self._parse_id_var()
         if not slice_name or not self._match(TokenType.ALIAS):
-            self.raise_error("Expected slice-name AS in TIMESERIES clause")
+            self._raise_timeseries_error("Expected slice-name AS in TIMESERIES clause")
 
         slice_interval = self._parse_bitwise()
-        if not slice_interval or not self._match(TokenType.OVER):
-            self.raise_error("Expected a slice interval followed by OVER")
+        if (
+            not isinstance(slice_interval, exp.Literal)
+            or not slice_interval.is_string
+            or not slice_interval.this
+            or not self._match(TokenType.OVER)
+        ):
+            self._raise_timeseries_error("Expected a quoted slice interval followed by OVER")
 
         if not self._match(TokenType.L_PAREN):
-            self.raise_error("Expected ( after TIMESERIES OVER")
+            self._raise_timeseries_error("Expected ( after TIMESERIES OVER")
 
         partition_by: list[exp.Expr] = []
         if self._match(TokenType.PARTITION_BY):
             partition_by = self._parse_csv(self._parse_expression)
+            if not partition_by:
+                self._raise_timeseries_error("TIMESERIES PARTITION BY requires an expression")
 
         if not self._match(TokenType.ORDER_BY, advance=False):
-            self.raise_error("TIMESERIES requires ORDER BY")
+            self._raise_timeseries_error("TIMESERIES requires ORDER BY")
         order = self._parse_order()
-        self._match_r_paren()
+        if not isinstance(order, exp.Order) or not order.expressions:
+            self._raise_timeseries_error("TIMESERIES requires ORDER BY")
+        if not self._match(TokenType.R_PAREN):
+            self._raise_timeseries_error("Expected ) after TIMESERIES OVER clause")
 
         return self.expression(
             vexp.Timeseries(
@@ -8627,22 +8638,25 @@ class VerticaParser(PostgresParser):
                 expression=slice_interval,
                 partition_by=partition_by,
                 order=order,
-            )
+            ),
+            comments=comments,
         )
 
     def _parse_interpolate_predicate(self, this: exp.Expr) -> vexp.Interpolate:
+        comments = list(self._prev_comments or [])
         direction = (
             exp.var(self._prev.text.upper()) if self._match_texts(("PREVIOUS", "NEXT")) else None
         )
         if not direction or not self._match_text_seq("VALUE"):
-            self.raise_error("Expected PREVIOUS VALUE or NEXT VALUE after INTERPOLATE")
+            self._raise_interpolate_error("Expected PREVIOUS VALUE or NEXT VALUE after INTERPOLATE")
 
         expression = self._parse_bitwise()
         if not expression:
-            self.raise_error("Expected a column after INTERPOLATE direction")
+            self._raise_interpolate_error("Expected a column after INTERPOLATE direction")
 
         return self.expression(
-            vexp.Interpolate(this=this, expression=expression, direction=direction)
+            vexp.Interpolate(this=this, expression=expression, direction=direction),
+            comments=comments,
         )
 
     def _parse_limit(
@@ -8800,47 +8814,57 @@ class VerticaParser(PostgresParser):
 
     def _parse_vertica_match(self) -> vexp.Match:
         if not self._match(TokenType.MATCH_RECOGNIZE):
-            self.raise_error("Expected MATCH")
+            self._raise_match_error("Expected MATCH")
+        comments = list(self._prev_comments or [])
         if not self._match(TokenType.L_PAREN):
-            self.raise_error("Expected ( after MATCH")
+            self._raise_match_error("Expected ( after MATCH")
 
-        partition_by = self._parse_partition_by()
+        partition_by: list[exp.Expr] = []
+        if self._match(TokenType.PARTITION_BY):
+            partition_by = self._parse_csv(self._parse_expression)
+            if not partition_by:
+                self._raise_match_error("MATCH PARTITION BY requires an expression")
         order = self._parse_order()
+        if not isinstance(order, exp.Order) or not order.expressions:
+            self._raise_match_error("MATCH requires ORDER BY")
 
         definitions: list[vexp.MatchDefinition] = []
         if self._match_text_seq("DEFINE"):
             while True:
                 name = self._parse_id_var()
                 if not name or not self._match(TokenType.ALIAS):
-                    self.raise_error("Expected event-name AS in MATCH DEFINE")
+                    self._raise_match_error("Expected event-name AS in MATCH DEFINE")
                 condition = self._parse_disjunction()
                 if not condition:
-                    self.raise_error("Expected event predicate in MATCH DEFINE")
+                    self._raise_match_error("Expected event predicate in MATCH DEFINE")
                 definitions.append(
                     self.expression(vexp.MatchDefinition(this=name, expression=condition))
                 )
                 if not self._match(TokenType.COMMA):
                     break
+        if not definitions:
+            self._raise_match_error("MATCH requires one or more DEFINE entries")
 
         if not self._match_text_seq("PATTERN"):
-            self.raise_error("MATCH requires PATTERN")
+            self._raise_match_error("MATCH requires PATTERN")
         pattern_name = self._parse_id_var()
         if not pattern_name or not self._match(TokenType.ALIAS):
-            self.raise_error("Expected pattern-name AS in MATCH PATTERN")
+            self._raise_match_error("Expected pattern-name AS in MATCH PATTERN")
         pattern = self._parse_match_pattern_text()
 
         rows_match = None
         if self._match(TokenType.ROWS):
             if not self._match_text_seq("MATCH"):
-                self.raise_error("Expected MATCH after ROWS")
+                self._raise_match_error("Expected MATCH after ROWS")
             if self._match_text_seq("FIRST", "EVENT"):
                 rows_match = exp.var("FIRST EVENT")
             elif self._match_text_seq("ALL", "EVENTS"):
                 rows_match = exp.var("ALL EVENTS")
             else:
-                self.raise_error("Expected FIRST EVENT or ALL EVENTS after ROWS MATCH")
+                self._raise_match_error("Expected FIRST EVENT or ALL EVENTS after ROWS MATCH")
 
-        self._match_r_paren()
+        if not self._match(TokenType.R_PAREN):
+            self._raise_match_error("Expected ) after MATCH clause")
         return self.expression(
             vexp.Match(
                 partition_by=partition_by,
@@ -8849,14 +8873,15 @@ class VerticaParser(PostgresParser):
                 pattern_name=pattern_name,
                 pattern=pattern,
                 rows_match=rows_match,
-            )
+            ),
+            comments=comments,
         )
 
     def _parse_match_pattern_text(self) -> exp.Var:
         if not self._match(TokenType.L_PAREN):
-            self.raise_error("Expected ( around MATCH pattern")
-        if not self._curr:
-            self.raise_error("Expected MATCH pattern")
+            self._raise_match_error("Expected ( around MATCH pattern")
+        if not self._curr or self._match(TokenType.R_PAREN, advance=False):
+            self._raise_match_error("Expected MATCH pattern")
 
         depth = 1
         start = self._curr
@@ -8872,9 +8897,27 @@ class VerticaParser(PostgresParser):
             self._advance()
 
         if depth:
-            self.raise_error("Expected ) after MATCH pattern")
+            self._raise_match_error("Expected ) after MATCH pattern")
         self._advance()
         return exp.var(self._find_sql(start, end))
+
+    def _raise_timeseries_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
+    def _raise_interpolate_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
+    def _raise_match_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
 
     def _parse_drop_role(self, exists: bool) -> exp.Drop:
         if_exists = exists or bool(self._parse_exists())

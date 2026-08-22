@@ -192,10 +192,13 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   VIEW/PIVOT, distribution/sort/cluster, star modifiers, ordering extensions,
   table ONLY/historical-AT, and foreign sampling forms fail atomically, while
   bare numeric TABLESAMPLE and the approved APPLY lowerings remain stable.
-  Q22 is now the lowest-numbered remaining task and will make malformed
-  TIMESERIES/MATCH/INTERPOLATE paths fail at `WARN`/`IGNORE` rather than return
-  partial ASTs. The recertification gate remains Q23 and is ineligible until
-  Q22 is complete.
+  Q22 is complete: TIMESERIES, MATCH, and INTERPOLATE now have family-specific
+  guaranteed-raise boundaries at every parser error level plus strict direct
+  and nested AST validation before generation. Required interval/order,
+  DEFINE/pattern/row-mode, and operand failures no longer return partial ASTs
+  at `WARN`/`IGNORE`; valid comments, serialization, optimizer/type behavior,
+  and foreign atomicity remain stable. Q23 is now the lowest-numbered remaining
+  task and remains the sole recertification gate.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

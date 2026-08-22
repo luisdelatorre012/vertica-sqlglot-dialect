@@ -320,26 +320,16 @@ def test_q21_inherited_select_fields_fail_closed(sql: str, error_level: ErrorLev
 
 
 @pytest.mark.parametrize(
-    ("sql", "node_type"),
+    "sql",
     [
-        (
-            "SELECT * FROM t TIMESERIES slice_time AS '1 minute' OVER ()",
-            exp.Select,
-        ),
-        (
-            "SELECT * FROM events MATCH (ORDER BY ts PATTERN p AS (A))",
-            exp.Select,
-        ),
-        (
-            "SELECT * FROM t WHERE a.ts INTERPOLATE PREVIOUS VALUE",
-            exp.Select,
-        ),
+        "SELECT * FROM t TIMESERIES slice_time AS '1 minute' OVER ()",
+        "SELECT * FROM events MATCH (ORDER BY ts PATTERN p AS (A))",
+        "SELECT * FROM t WHERE a.ts INTERPOLATE PREVIOUS VALUE",
     ],
 )
-@pytest.mark.parametrize("error_level", [ErrorLevel.WARN, ErrorLevel.IGNORE])
-def test_scheduled_query_extension_guaranteed_raise_gaps_are_reproducible(
-    sql: str, node_type: type[exp.Expr], error_level: ErrorLevel
-) -> None:
-    """Q22 will turn these permissive-level partial ASTs into ParseError."""
+@pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
+def test_query_extension_required_components_fail_closed(sql: str, error_level: ErrorLevel) -> None:
+    """Q22 closes the permissive-level partial-AST paths found by Q20."""
 
-    assert isinstance(parse_one(sql, read="vertica", error_level=error_level), node_type)
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica", error_level=error_level)

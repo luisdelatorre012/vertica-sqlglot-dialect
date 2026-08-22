@@ -544,7 +544,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.TableSegmentationProperty: lambda self, expression: self.sql(expression, "this"),
         vexp.Timeseries: lambda self, expression: self.timeseries_sql(expression),
         vexp.TimeseriesSelect: lambda self, expression: self.select_sql(expression),
-        vexp.TimeseriesSlice: lambda self, expression: self.sql(expression, "this"),
+        vexp.TimeseriesSlice: lambda self, expression: self.timeseriesslice_sql(expression),
         vexp.UDxFactorySpec: lambda self, expression: self.udxfactoryspec_sql(expression),
         vexp.UpdateDefaultRelation: lambda self, expression: self.updatedefaultrelation_sql(
             expression
@@ -706,6 +706,159 @@ class VerticaGenerator(PostgresGenerator):
             return False
         if not self._is_numeric_table_sample(expression.args.get("percent")):
             self.unsupported("Vertica TABLESAMPLE requires one bare numeric percentage")
+            return False
+        return True
+
+    @staticmethod
+    def _is_query_extension_identifier(expression: object) -> bool:
+        return (
+            isinstance(expression, exp.Identifier)
+            and set(expression.args) <= {"this", "quoted"}
+            and isinstance(expression.this, str)
+            and bool(expression.this)
+            and (
+                expression.args.get("quoted") is None
+                or isinstance(expression.args.get("quoted"), bool)
+            )
+        )
+
+    def _validate_timeseries(self, expression: vexp.Timeseries) -> bool:
+        if self._has_user_extras(expression, {"this", "expression", "partition_by", "order"}):
+            self.unsupported("TIMESERIES contains unsupported fields")
+            return False
+        if not self._is_query_extension_identifier(expression.args.get("this")):
+            self.unsupported("TIMESERIES requires a slice-name identifier")
+            return False
+        interval = expression.args.get("expression")
+        if (
+            not isinstance(interval, exp.Literal)
+            or not interval.is_string
+            or not isinstance(interval.this, str)
+            or not interval.this
+        ):
+            self.unsupported("TIMESERIES requires a nonempty quoted slice interval")
+            return False
+        partition_by = expression.args.get("partition_by")
+        if partition_by is not None and (
+            not isinstance(partition_by, list)
+            or any(not isinstance(item, exp.Expr) for item in partition_by)
+        ):
+            self.unsupported("TIMESERIES PARTITION BY requires expression children")
+            return False
+        order = expression.args.get("order")
+        if not isinstance(order, exp.Order) or not order.expressions:
+            self.unsupported("TIMESERIES requires a nonempty ORDER BY clause")
+            return False
+        return True
+
+    def _validate_interpolate(self, expression: vexp.Interpolate) -> bool:
+        if self._has_user_extras(expression, {"this", "expression", "direction"}):
+            self.unsupported("INTERPOLATE contains unsupported fields")
+            return False
+        if not isinstance(expression.args.get("this"), exp.Expr) or not isinstance(
+            expression.args.get("expression"), exp.Expr
+        ):
+            self.unsupported("INTERPOLATE requires two expression operands")
+            return False
+        direction = expression.args.get("direction")
+        if (
+            not isinstance(direction, exp.Var)
+            or set(direction.args) != {"this"}
+            or not isinstance(direction.this, str)
+            or direction.this.upper() not in {"PREVIOUS", "NEXT"}
+        ):
+            self.unsupported("INTERPOLATE direction must be PREVIOUS or NEXT")
+            return False
+        return True
+
+    def _validate_match_definition(self, expression: vexp.MatchDefinition) -> bool:
+        if self._has_user_extras(expression, {"this", "expression"}):
+            self.unsupported("MATCH DEFINE contains unsupported fields")
+            return False
+        if not self._is_query_extension_identifier(expression.args.get("this")):
+            self.unsupported("MATCH DEFINE requires an event-name identifier")
+            return False
+        if not isinstance(expression.args.get("expression"), exp.Expr):
+            self.unsupported("MATCH DEFINE requires an event predicate")
+            return False
+        return True
+
+    def _validate_match(self, expression: vexp.Match) -> bool:
+        allowed = {
+            "partition_by",
+            "order",
+            "definitions",
+            "pattern_name",
+            "pattern",
+            "rows_match",
+        }
+        if self._has_user_extras(expression, allowed):
+            self.unsupported("MATCH contains unsupported fields")
+            return False
+        partition_by = expression.args.get("partition_by")
+        if partition_by is not None and (
+            not isinstance(partition_by, list)
+            or any(not isinstance(item, exp.Expr) for item in partition_by)
+        ):
+            self.unsupported("MATCH PARTITION BY requires expression children")
+            return False
+        order = expression.args.get("order")
+        if not isinstance(order, exp.Order) or not order.expressions:
+            self.unsupported("MATCH requires a nonempty ORDER BY clause")
+            return False
+        definitions = expression.args.get("definitions")
+        if (
+            not isinstance(definitions, list)
+            or not definitions
+            or any(not isinstance(item, vexp.MatchDefinition) for item in definitions)
+        ):
+            self.unsupported("MATCH requires one or more typed DEFINE entries")
+            return False
+        if not all(self._validate_match_definition(item) for item in definitions):
+            return False
+        if not self._is_query_extension_identifier(expression.args.get("pattern_name")):
+            self.unsupported("MATCH PATTERN requires a pattern-name identifier")
+            return False
+        pattern = expression.args.get("pattern")
+        if (
+            not isinstance(pattern, exp.Var)
+            or set(pattern.args) != {"this"}
+            or not isinstance(pattern.this, str)
+            or not pattern.this.strip()
+        ):
+            self.unsupported("MATCH PATTERN requires nonempty pattern text")
+            return False
+        rows_match = expression.args.get("rows_match")
+        if rows_match is not None and (
+            not isinstance(rows_match, exp.Var)
+            or set(rows_match.args) != {"this"}
+            or not isinstance(rows_match.this, str)
+            or rows_match.this.upper() not in {"FIRST EVENT", "ALL EVENTS"}
+        ):
+            self.unsupported("MATCH ROWS mode must be FIRST EVENT or ALL EVENTS")
+            return False
+        return True
+
+    def _validate_select_query_extensions(self, expression: exp.Select) -> bool:
+        timeseries = expression.args.get("timeseries")
+        if isinstance(expression, vexp.TimeseriesSelect) and not isinstance(
+            timeseries, vexp.Timeseries
+        ):
+            self.unsupported("TimeseriesSelect requires a typed TIMESERIES clause")
+            return False
+        if timeseries is not None and (
+            not isinstance(timeseries, vexp.Timeseries) or not self._validate_timeseries(timeseries)
+        ):
+            if not isinstance(timeseries, vexp.Timeseries):
+                self.unsupported("Vertica SELECT requires a typed TIMESERIES clause")
+            return False
+
+        match = expression.args.get("match")
+        if match is not None and (
+            not isinstance(match, vexp.Match) or not self._validate_match(match)
+        ):
+            if not isinstance(match, vexp.Match):
+                self.unsupported("Vertica SELECT requires a typed MATCH clause")
             return False
         return True
 
@@ -6362,9 +6515,12 @@ class VerticaGenerator(PostgresGenerator):
         return Generator.respectnulls_sql(self, expression)
 
     def interpolate_sql(self, expression: vexp.Interpolate) -> str:
+        if not self._validate_interpolate(expression):
+            return ""
         direction = self.sql(expression, "direction").upper()
+        interpolate = self.maybe_comment("INTERPOLATE", comments=expression.comments)
         return (
-            f"{self.sql(expression, 'this')} INTERPOLATE {direction} VALUE "
+            f"{self.sql(expression, 'this')} {interpolate} {direction} VALUE "
             f"{self.sql(expression, 'expression')}"
         )
 
@@ -6377,9 +6533,13 @@ class VerticaGenerator(PostgresGenerator):
         return f"{self.seg('LIMIT')} {count} OVER ({partition_by}{order})"
 
     def matchdefinition_sql(self, expression: vexp.MatchDefinition) -> str:
+        if not self._validate_match_definition(expression):
+            return ""
         return f"{self.sql(expression, 'this')} AS {self.sql(expression, 'expression')}"
 
     def vertica_match_sql(self, expression: vexp.Match) -> str:
+        if not self._validate_match(expression):
+            return ""
         partition_by = self.expressions(expression, key="partition_by", flat=True)
         partition_by = f"PARTITION BY {partition_by}" if partition_by else ""
         order = self.sql(expression, "order").lstrip()
@@ -6435,6 +6595,8 @@ class VerticaGenerator(PostgresGenerator):
         return self.sep().join(clauses)
 
     def timeseries_sql(self, expression: vexp.Timeseries) -> str:
+        if not self._validate_timeseries(expression):
+            return ""
         slice_name = self.sql(expression, "this")
         slice_interval = self.sql(expression, "expression")
         partition_by = self.expressions(expression, key="partition_by", flat=True)
@@ -6444,6 +6606,14 @@ class VerticaGenerator(PostgresGenerator):
             f"{self.seg('TIMESERIES')} {slice_name} AS {slice_interval} "
             f"OVER ({partition_by}{order})"
         )
+
+    def timeseriesslice_sql(self, expression: vexp.TimeseriesSlice) -> str:
+        if self._has_user_extras(expression, {"this"}) or not self._is_query_extension_identifier(
+            expression.args.get("this")
+        ):
+            self.unsupported("TimeseriesSlice requires an identifier child")
+            return ""
+        return self.sql(expression, "this")
 
     def selectinto_sql(self, expression: vexp.SelectInto) -> str:
         if not isinstance(expression.args.get("into"), vexp.IntoTableClause):
@@ -6680,6 +6850,8 @@ class VerticaGenerator(PostgresGenerator):
         return ""
 
     def select_sql(self, expression: exp.Select) -> str:
+        if not self._validate_select_query_extensions(expression):
+            return ""
         if not self._validate_query_field_closure(expression):
             return ""
         self._validate_select_qualifier(expression)

@@ -239,13 +239,21 @@ remains admitted only as the canonical output of the approved CROSS/OUTER
 APPLY lowerings (INNER/LEFT LATERAL JOIN with `ON TRUE`), so those outputs
 still reparse while free-standing LATERAL syntax fails closed.
 
-One independent gap remains before recertification: several pre-existing
-custom query-extension parsers still call level-dependent error paths.
-Malformed TIMESERIES, MATCH, and INTERPOLATE inputs raise at
-`IMMEDIATE`/`RAISE` but can return partial custom ASTs at `WARN`/`IGNORE`.
-Q22 owns their guaranteed-raise and strict-generation closure. This gap is not
-an approved lowering or canonicalization and is not waived by the historical
-Q08 positive gate.
+Q22 closes the independent custom query-extension boundary. TIMESERIES,
+MATCH, and INTERPOLATE each route every recognized malformed required-child,
+partition/order, pattern, and row-mode path through a dedicated guaranteed-
+raise wrapper, so `IMMEDIATE`, `RAISE`, `WARN`, and `IGNORE` all produce
+`ParseError` rather than a partial custom AST. Their Vertica renderers validate
+every custom field before emitting SQL: TIMESERIES requires a typed slice name,
+nonempty quoted interval, expression-only partition list, and nonempty ORDER
+BY; MATCH requires typed ordering, DEFINE entries, pattern name/text, and a
+finite optional row mode; INTERPOLATE requires both operands and a PREVIOUS or
+NEXT marker. The `TimeseriesSelect` root and synthetic `TimeseriesSlice` leaf
+are validated with the same preflight. Invalid direct or SELECT-nested trees
+therefore raise `UnsupportedError` atomically, while valid nodes retain
+serialization, optimizer/type metadata, comments, and the existing four-
+dialect foreign-failure contract. Catalog- and query-shape-dependent event-
+series restrictions remain server-side rather than being guessed by syntax.
 
 A clause that scopes an entire top-level query rather than one `exp.Select`
 must still expose the concrete query shape to SQLGlot analysis. The SELECT
