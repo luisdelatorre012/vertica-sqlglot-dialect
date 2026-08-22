@@ -67,6 +67,11 @@ plugin interface.
   qualification, documented quoted/unquoted Unicode rules, valid UTF-8, a
   128-byte per-component limit, and strict programmatic-AST rejection before
   generation.
+- Made SELECT INTO placement and ON COMMIT tails atomic at every parser error
+  level: misplaced or duplicate clauses, target aliases, permanent temporary
+  members, and recognized incomplete variants can no longer return a truncated
+  plain SELECT or partial SelectInto, while legal query compositions remain
+  lossless.
 - Added semantic CREATE/ALTER/DROP SEQUENCE plus complete SCHEMA and VIEW
   lifecycles with typed metadata actions, equal-cardinality multi-renames,
   ordered multi-target drops, exact schema dependency policies, and strict view

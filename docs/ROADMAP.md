@@ -166,7 +166,13 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   127/128/129-byte ASCII and multibyte names, Unicode/reserved payloads,
   unpaired surrogates, empty/missing/four-part shapes, source casing, comments,
   aliases in neighboring legal positions, and all parser error levels. Q18 is
-  the next eligible task.
+  complete: SELECT INTO now owns its documented post-select-list slot and the
+  temporary target's immediate ON COMMIT tail, so misplaced/duplicate clauses,
+  target aliases, permanent temporary members, and recognized incomplete
+  variants fail atomically at every parser error level without returning a
+  truncated plain SELECT or SelectInto. Legal WITH, nested, TIMESERIES,
+  parenthesized, and set-operation compositions remain typed and analyzable.
+  Q19 is the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

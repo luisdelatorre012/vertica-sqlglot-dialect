@@ -1646,6 +1646,7 @@ class VerticaParser(PostgresParser):
             parse_subquery_alias=parse_subquery_alias,
             parse_set_operation=parse_set_operation,
         )
+        self._validate_select_into_remainder(expression)
         if (
             isinstance(
                 expression,
@@ -8131,6 +8132,21 @@ class VerticaParser(PostgresParser):
             self._advance()
         return matched
 
+    def _validate_select_into_remainder(self, expression: exp.Expr | None) -> None:
+        """Fail closed when a parsed query leaves a recognizable INTO-family tail."""
+
+        if not isinstance(expression, exp.Query):
+            return
+        if self._match(TokenType.INTO, advance=False):
+            self._raise_select_into_error(
+                "INTO must immediately follow the SELECT list and appear at most once"
+            )
+        if self._match(TokenType.ON, advance=False) and self._next.token_type == TokenType.COMMIT:
+            self._raise_select_into_error(
+                "INTO ON COMMIT must immediately follow a temporary INTO target "
+                "and appear at most once"
+            )
+
     def _parse_into(self) -> exp.Into | None:
         if not self._match(TokenType.INTO):
             return None
@@ -8169,6 +8185,11 @@ class VerticaParser(PostgresParser):
             self._raise_select_into_error("INTO accepts exactly one table target")
         if self._match(TokenType.L_PAREN, advance=False):
             self._raise_select_into_error("INTO targets do not take a column list")
+        if (
+            self._match(TokenType.ALIAS, advance=False)
+            or self._curr.token_type in self.ID_VAR_TOKENS
+        ):
+            self._raise_select_into_error("INTO targets do not take aliases")
 
         on_commit = None
         if self._match(TokenType.ON):

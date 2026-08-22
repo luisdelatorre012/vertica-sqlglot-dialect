@@ -159,6 +159,44 @@ def test_multi_statement_boundaries() -> None:
     assert type(statements[1]) is exp.Select
 
 
+def test_leading_with_composes_with_select_into() -> None:
+    sql = "WITH c AS (SELECT a FROM x) SELECT a INTO TABLE t FROM c"
+    expression = parse_select_into(sql, sql)
+    assert isinstance(expression.args.get("with_"), exp.With)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT a INTO TABLE t FROM x UNION SELECT a FROM y",
+        "SELECT a FROM x UNION SELECT a INTO TABLE t FROM y",
+        "(SELECT a INTO TABLE t FROM x) UNION SELECT a FROM y",
+    ],
+)
+def test_set_operation_positions_preserve_typed_into(sql: str) -> None:
+    expression = assert_roundtrip(sql, sql)
+    clause = expression.find(vexp.IntoTableClause)
+    assert isinstance(clause, vexp.IntoTableClause)
+    assert isinstance(clause.parent, vexp.SelectInto)
+
+
+def test_nested_select_into_roundtrips() -> None:
+    sql = "SELECT q.a FROM (SELECT a INTO TEMP TABLE t FROM x) AS q"
+    expression = assert_roundtrip(sql, sql)
+    nested = expression.find(vexp.SelectInto)
+    assert isinstance(nested, vexp.SelectInto)
+    assert isinstance(nested.args.get("into"), vexp.IntoTableClause)
+
+
+def test_comments_at_into_clause_boundaries_are_retained() -> None:
+    expression = parse_select_into(
+        "SELECT a /* before into */ INTO TEMP TABLE t /* after target */ FROM x"
+    )
+    generated = expression.sql(dialect="vertica")
+    assert "before into" in generated
+    assert "after target" in generated
+
+
 def test_leading_comment_is_retained() -> None:
     expression = parse_one("/* build scratch */ SELECT * INTO TABLE t FROM x", read="vertica")
     assert isinstance(expression, vexp.SelectInto)
@@ -256,6 +294,22 @@ def test_parent_metadata_and_copy_stability() -> None:
         "SELECT * INTO TEMP TABLE t ON COMMIT PRESERVE FROM x",
         "SELECT * INTO TEMP TABLE t ON COMMIT KEEP ROWS FROM x",
         "SELECT * INTO TEMP TABLE t ON PRESERVE ROWS FROM x",
+        # recognized misplaced and duplicate clauses
+        "SELECT * FROM x INTO TABLE t",
+        "SELECT * FROM x WHERE a = 1 INTO TEMP TABLE t",
+        "SELECT a FROM x GROUP BY a INTO TABLE t",
+        "SELECT a FROM x ORDER BY a INTO TABLE t",
+        "SELECT a FROM x LIMIT 1 INTO TABLE t",
+        "SELECT * INTO TABLE a INTO TABLE b FROM x",
+        "SELECT * INTO TEMP TABLE t ON COMMIT PRESERVE ROWS ON COMMIT DELETE ROWS FROM x",
+        "SELECT * INTO TEMP TABLE t FROM x ON COMMIT PRESERVE ROWS",
+        "SELECT * FROM x ON COMMIT DELETE ROWS",
+        "SELECT * FROM x INTO",
+        # aliases and misplaced temporary members attached to the target
+        "SELECT * INTO TABLE t AS alias FROM x",
+        "SELECT * INTO TABLE t alias FROM x",
+        'SELECT * INTO TABLE t "alias" FROM x',
+        "SELECT * INTO TABLE t TEMP FROM x",
         # foreign PostgreSQL / PL forms
         "SELECT * INTO STRICT v FROM x",
         "SELECT * INTO UNLOGGED TABLE t FROM x",
@@ -273,6 +327,22 @@ def test_parent_metadata_and_copy_stability() -> None:
 def test_recognized_invalid_into_fails_closed(sql: str, error_level: ErrorLevel) -> None:
     with pytest.raises(ParseError):
         parse_one(sql, read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "SELECT * FROM x INTO TABLE t; SELECT 2",
+        "SELECT * INTO TABLE a INTO TABLE b FROM x; SELECT 2",
+        "SELECT * INTO TEMP TABLE t FROM x ON COMMIT PRESERVE ROWS; SELECT 2",
+    ],
+)
+@pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
+def test_malformed_into_is_atomic_in_multi_statement_scripts(
+    script: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError):
+        parse(script, read="vertica", error_level=error_level)
 
 
 @pytest.mark.parametrize(

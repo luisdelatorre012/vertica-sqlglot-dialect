@@ -663,6 +663,19 @@ accepts the unscoped forms, but the Vertica generator rejects foreign-only
 fields such as `UNLOGGED` with `UnsupportedError` instead of emitting
 invalid Vertica.
 
+SELECT INTO parsing also owns its complete source-position boundary. The
+documented slot is immediately after the SELECT list, and `ON COMMIT` belongs
+immediately after a temporary target. After the inherited SELECT/set parser
+returns, a narrow remainder check recognizes only leftover `INTO` and
+`ON COMMIT` families and routes them through `_raise_select_into_error`; this
+closes misplaced and duplicate clauses at `WARN`/`IGNORE` without broadening
+the contract into a generic SELECT trailing-token policy. The legal-slot
+parser separately rejects explicit, implicit, and quoted target aliases before
+they can become a truncated `SelectInto`. Column lists, temporary-only
+members, target identifiers, comments, WITH/subquery/TIMESERIES composition,
+and every formally admitted set-operation SELECT position retain their
+existing typed contract.
+
 `ENABLE_WITH_CLAUSE_MATERIALIZATION` uses a serialized
 `MaterializedWithMarker` on each marked CTE query. This is a deliberate
 SQLGlot 30.13.x invariant:

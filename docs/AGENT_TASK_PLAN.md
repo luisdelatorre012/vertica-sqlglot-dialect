@@ -115,6 +115,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   lowest-numbered remaining task.
 - Completed **Q17 — analysis table-target identifier conformance**. Q18 is the
   lowest-numbered remaining task.
+- Completed **Q18 — SELECT INTO placement and tail atomicity**. Q19 is the
+  lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -259,7 +261,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q15 | DONE   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
 | Q16 | DONE   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
 | Q17 | DONE   | Analysis table-target identifier conformance     | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
-| Q18 | TODO   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
+| Q18 | DONE   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
 | Q19 | TODO   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
 | Q20 | TODO   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
 | Q21 | TODO   | Milestone 1 recertification gate              | Q20                 | `test: recertify milestone one analysis surface`         |
@@ -2394,7 +2396,7 @@ force-install, `pip check`, and installed-wheel `python -I` smoke
 (`CREATE TABLE db.s.q17_identifier_target (id BIGINT)`, returning `Create`)
 passed.
 
-### Q18 — SELECT INTO placement and tail atomicity — `TODO`
+### Q18 — SELECT INTO placement and tail atomicity — `DONE`
 
 **Outcome.** Reject recognized but misplaced or duplicated INTO/ON COMMIT
 syntax atomically at every parser error level, instead of returning a
@@ -2424,6 +2426,49 @@ policy.
 
 **Primary sources.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
 and [INTO TABLE clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/into-table-clause/).
+
+**Completion record.** Re-opened both exact 26.2 primary sources and found no
+material contradiction. SELECT places INTO immediately after the projection
+list and before FROM, while the INTO page places optional ON COMMIT immediately
+after a temporary target and documents no target alias or column-list form.
+The UNION, INTERSECT, and EXCEPT pages were also re-opened to resolve this
+task's set-position requirement: they define their operands as SELECT
+statements and add no INTO-specific restriction, so the existing typed clause
+remains valid in each parser-admitted SELECT operand, including a parenthesized
+one, rather than inventing an undocumented first-branch-only rule.
+
+Added `_validate_select_into_remainder` after the inherited SELECT/set parser.
+It recognizes only an unconsumed INTO token or ON COMMIT pair on a parsed query
+and routes that family through the existing guaranteed-raise
+`_raise_select_into_error` boundary. Misplaced INTO after FROM, WHERE, GROUP
+BY, ORDER BY, LIMIT, or a complete temporary query, duplicate INTO, duplicate
+or post-FROM ON COMMIT, and recognized incomplete variants now raise
+`ParseError` at IMMEDIATE, RAISE, WARN, and IGNORE instead of returning a
+truncated plain `Select` or partial `SelectInto`. The narrow recognition is
+deliberate: unrelated generic SELECT trailing-token policy remains excluded.
+The legal-slot `_parse_into` path now also rejects explicit-AS, implicit, and
+quoted target aliases, plus misplaced temporary members, before the inherited
+parser can leave them as ignored tail text. Existing column-list, temporary-
+only ON COMMIT, scope, foreign-form, and Q17 target checks remain unchanged.
+
+Expanded `tests/test_select_into.py` from 181 Q02-era tests to 255 tests. The
+new matrix covers the recognized placement/duplication/alias failures at all
+four parser levels, malformed multi-statement atomicity, comments at both
+clause boundaries, leading WITH, nested and parenthesized queries, and INTO in
+each parser-admitted set-operation position; the existing TIMESERIES,
+serialization, copy/transform parent metadata, qualification, optimization,
+lineage, strict programmatic AST, target-identifier, and direct/nested foreign
+generation contracts remain pinned. The focused module passed 255 tests, and
+the combined SELECT INTO, target-identifier, CTE, set-operation, SELECT-tail,
+query-extension, and workload suites passed 1,257. Updated architecture,
+coverage, roadmap, and changelog contracts; both primary links were already in
+`docs/SOURCES.md`. The default CPython 3.12.6 release gate passed 7,418 tests
+at 93.00% branch coverage with Ruff lint/formatting, strict mypy, and diff
+checks clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15,
+3.14.7, and 3.15.0rc1 each passed 7,418 tests, with 3.15 treating deprecations
+as errors. The sdist/wheel build, clean force-install, `pip check`, and
+installed-wheel `python -I` smoke (`SELECT a INTO LOCAL TEMP TABLE q18_target
+ON COMMIT PRESERVE ROWS FROM src`, returning `SelectInto`) passed.
 
 ### Q19 — CREATE TABLE strict AST generation contract — `TODO`
 
