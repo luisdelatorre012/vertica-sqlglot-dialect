@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlglot import ErrorLevel, exp, parse_one
+from sqlglot import ErrorLevel, exp, parse, parse_one
 from sqlglot.errors import ParseError, UnsupportedError
 
 from sqlglot_vertica import expressions as vexp
@@ -685,3 +685,106 @@ def test_create_local_temporary_table_as_foreign_generation_fails_atomically(
 def test_create_table_variants_reject_incompatible_clauses(sql: str, message: str) -> None:
     with pytest.raises(ParseError, match=message):
         parse_one(sql, read="vertica")
+
+
+CREATE_TABLE_FAIL_CLOSED_NEGATIVES = [
+    # CTAS column lists and physical design.
+    "CREATE TABLE t () AS SELECT 1",
+    "CREATE TABLE t (GROUPED(id)) AS SELECT 1",
+    "CREATE TABLE t (id ENCODING) AS SELECT 1",
+    "CREATE TABLE t (id ACCESSRANK 1.5) AS SELECT 1",
+    "CREATE TABLE t AS SELECT 1 ENCODED BY",
+    "CREATE TABLE t AS SELECT 1 ENCODED BY id",
+    "CREATE TABLE t AS SELECT 1 ENCODED BY id ENCODING",
+    "CREATE TABLE t AS SELECT 1 ENCODED BY id ACCESSRANK 1.5",
+    # Temporary-table commit and quota clauses.
+    "CREATE TEMPORARY TABLE t (id BIGINT) ON",
+    "CREATE TEMPORARY TABLE t (id BIGINT) ON PRESERVE ROWS",
+    "CREATE TEMPORARY TABLE t (id BIGINT) ON COMMIT",
+    "CREATE TEMPORARY TABLE t (id BIGINT) ON COMMIT DROP ROWS",
+    "CREATE TEMPORARY TABLE t (id BIGINT) ON COMMIT DELETE",
+    "CREATE TABLE t (id BIGINT) DISK_QUOTA 1",
+    # Ordering, segmentation, partitioning, and inherited privileges.
+    "CREATE TABLE t (id BIGINT) ORDER BY",
+    "CREATE TABLE t (id BIGINT) ORDER BY id DESC",
+    "CREATE TABLE t (id BIGINT) SEGMENTED HASH(id) ALL NODES",
+    "CREATE TABLE t (id BIGINT) SEGMENTED BY HASH(id)",
+    "CREATE TABLE t (id BIGINT) UNSEGMENTED ALL",
+    "CREATE TABLE t (id BIGINT) PARTITION BY",
+    "CREATE TABLE t (id BIGINT) PARTITION BY id GROUP BY",
+    "CREATE TABLE t (id BIGINT) PARTITION BY id ACTIVEPARTITIONCOUNT 1.5",
+    "CREATE TABLE t (id BIGINT) INCLUDE SCHEMA",
+    # Front-door CREATE TABLE modifiers and scope/temporary prefixes.
+    "CREATE GLOBAL TABLE t (id BIGINT)",
+    "CREATE LOCAL TABLE t (id BIGINT)",
+    "CREATE OR REPLACE TABLE t (id BIGINT)",
+    "CREATE GLOBAL LOCAL TEMPORARY TABLE t (id BIGINT)",
+    "CREATE LOCAL GLOBAL TEMPORARY TABLE t (id BIGINT)",
+    "CREATE TEMPORARY TEMPORARY TABLE t (id BIGINT)",
+    "CREATE GLOBAL GLOBAL TEMPORARY TABLE t (id BIGINT)",
+    "CREATE LOCAL LOCAL TEMPORARY TABLE t (id BIGINT)",
+    "CREATE GLOBAL TEMPORARY TEMPORARY TABLE t (id BIGINT)",
+    "CREATE TEMPORARY GLOBAL TABLE t (id BIGINT)",
+    "CREATE TEMPORARY LOCAL TABLE t (id BIGINT)",
+    # Missing bodies and unexpected end of input.
+    "CREATE TABLE",
+    "CREATE TABLE t",
+    "CREATE TABLE t AS",
+    "CREATE TABLE t (id BIGINT",
+    "CREATE TABLE t AS SELECT 1 ENCODED BY id ENCODING RLE,",
+]
+
+
+@pytest.mark.parametrize("sql", CREATE_TABLE_FAIL_CLOSED_NEGATIVES)
+@pytest.mark.parametrize(
+    "error_level",
+    [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE],
+)
+def test_create_table_malformed_forms_fail_closed_at_every_error_level(
+    sql: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError):
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE TABLE t (id BIGINT)",
+        "CREATE TABLE t LIKE source",
+        "CREATE TABLE t AS SELECT 1 AS id",
+        "CREATE TEMPORARY TABLE t (id BIGINT) ON COMMIT DELETE ROWS",
+        "CREATE GLOBAL TEMPORARY TABLE t AS SELECT 1 AS id",
+        "CREATE LOCAL TEMPORARY TABLE t ON COMMIT PRESERVE ROWS AS SELECT 1 AS id",
+    ],
+)
+@pytest.mark.parametrize(
+    "error_level",
+    [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE],
+)
+def test_create_table_valid_forms_survive_fail_closed_transaction(
+    sql: str, error_level: ErrorLevel
+) -> None:
+    expression = parse_one(sql, read="vertica", error_level=error_level)
+    assert isinstance(expression, exp.Create)
+    assert parse_one(expression.sql(dialect="vertica"), read="vertica") == expression
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        "CREATE TABLE ok (id BIGINT); CREATE TABLE broken () AS SELECT 1; SELECT 2",
+        "CREATE TABLE ok AS SELECT 1 AS id; CREATE TEMPORARY TABLE broken "
+        "(id BIGINT) ON COMMIT; SELECT 2",
+        "CREATE TABLE ok LIKE source; CREATE TABLE broken (id BIGINT; SELECT 2",
+    ],
+)
+@pytest.mark.parametrize(
+    "error_level",
+    [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE],
+)
+def test_create_table_malformed_multi_statement_boundaries_are_atomic(
+    script: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError):
+        parse(script, read="vertica", error_level=error_level)

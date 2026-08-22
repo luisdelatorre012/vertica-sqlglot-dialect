@@ -54,6 +54,10 @@ plugin interface.
 - Added structured CREATE PROJECTION and CREATE TABLE physical design.
 - Added semantic CTAS, LIKE, global/local temporary tables, historical
   snapshots, inherited privileges, encodings, segmentation, and quotas.
+- Made definition, LIKE, and CTAS parsing fail closed across every parser error
+  level, including malformed ON COMMIT/physical-design/list tails, duplicate or
+  contradictory temporary scopes, generic-command fallback, and raw Python
+  failure paths, while preserving every valid permanent and temporary form.
 - Added semantic CREATE/ALTER/DROP SEQUENCE plus complete SCHEMA and VIEW
   lifecycles with typed metadata actions, equal-cardinality multi-renames,
   ordered multi-target drops, exact schema dependency policies, and strict view

@@ -144,7 +144,14 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   MATERIALIZED/USING KEY/SEARCH/CYCLE modifiers. Plain, multiple, subordinate,
   recursive, clause-materialization-hinted, set-operation, and documented
   target-following INSERT forms remain analyzable, and strict generation owns
-  the complete With/CTE shape. Q15 is the next eligible task.
+  the complete With/CTE shape. Q15 is complete: definition, LIKE, and CTAS
+  parsing now run as one CREATE TABLE-scoped fail-closed transaction, so every
+  recognized malformed table clause raises `ParseError` at IMMEDIATE, RAISE,
+  WARN, and IGNORE instead of normalizing, truncating, falling back to
+  `Command`, or reaching a raw Python failure. Duplicate/contradictory scope
+  and temporary prefixes plus trailing definition/CTAS-list commas are also
+  rejected, while all valid permanent and temporary forms remain unchanged.
+  Q16 is the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

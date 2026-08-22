@@ -109,6 +109,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   lowest-numbered remaining task.
 - Completed **Q14 — WITH/CTE query-expression and placement conformance**.
   Q15 is the lowest-numbered remaining task.
+- Completed **Q15 — CREATE TABLE guaranteed-raise completion**. Q16 is the
+  lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -250,7 +252,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q12 | DONE   | Joined-table formal grammar                   | Q11                 | `fix: enforce Vertica joined table grammar`              |
 | Q13 | DONE   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
 | Q14 | DONE   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
-| Q15 | TODO   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
+| Q15 | DONE   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
 | Q16 | TODO   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
 | Q17 | TODO   | Analysis table-target identifier conformance  | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
 | Q18 | TODO   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
@@ -2160,7 +2162,7 @@ tests, with 3.15 treating deprecations as errors. The sdist/wheel build, clean
 force-install, `pip check`, and installed-wheel `python -I` smoke (subordinate
 WITH query returning `Select`) passed.
 
-### Q15 — CREATE TABLE guaranteed-raise completion — `TODO`
+### Q15 — CREATE TABLE guaranteed-raise completion — `DONE`
 
 **Outcome.** Make every recognized malformed CREATE TABLE form in the
 Milestone 1 lifecycle fail with `ParseError` at every parser error level,
@@ -2196,6 +2198,48 @@ scope is the already-semantic TABLE family, not other CREATE statement kinds.
 
 **Primary sources.** [CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/)
 and [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/).
+
+**Completion record.** Re-opened both exact 26.2 primary sources and audited
+the installed SQLGlot 30.13 CREATE parser plus every plugin CREATE TABLE
+front door and definition/LIKE/CTAS helper. No new material contradiction was
+found: the permanent grammar has definition, LIKE, and CTAS productions; the
+temporary grammar has definition and CTAS productions, one optional
+GLOBAL/LOCAL scope before TEMPORARY, and the documented ON COMMIT, physical-
+design, privilege, and quota clauses. Q01's already-recorded formal split
+that omits scope from the displayed temporary-CTAS production remains the
+deliberate operational-evidence exception and was not changed. All displayed
+comma lists require another item after each comma, so trailing commas are
+invalid in definition, CTAS name, GROUPED, and ENCODED BY lists.
+
+Made CREATE TABLE one fail-closed parser transaction: `_parse_create_table`
+temporarily uses `ErrorLevel.IMMEDIATE` while its body and inherited/shared
+helpers run, then restores the caller's configured level in `finally`. This
+is narrowly scoped to the already-semantic TABLE family and guarantees that
+plain SQLGlot `raise_error` calls in schema disambiguation, CTAS column and
+encoding parsing, ON COMMIT, quota, segmentation, ordering, partitioning,
+privilege, and end-of-input helpers cannot return at WARN/IGNORE, aggregate
+past unsafe code at RAISE, silently repair input, produce a partial AST, or
+reach an assertion/unbound local. Front-door scope-without-TEMPORARY and OR
+REPLACE errors now use `_raise_create_table_error`; a provenance-aware
+lookahead rejects duplicate or contradictory GLOBAL/LOCAL/TEMPORARY prefixes
+before generic CREATE fallback can turn them into `Command`. Added explicit
+trailing-comma checks where SQLGlot's generic CSV helper intentionally accepts
+them. Valid permanent and unscoped/GLOBAL/LOCAL temporary definition, LIKE,
+and CTAS parsing remains unchanged, including Q01 scoped CTAS and Q07
+historical-snapshot behavior. Programmatic CREATE validation remains Q19.
+
+Expanded `tests/test_create_table.py` from 122 to 314 tests with 39 malformed
+forms swept at IMMEDIATE, RAISE, WARN, and IGNORE, six valid definition/LIKE/
+CTAS controls at every level, and three malformed multi-statement scripts at
+every level. The focused module passed 314 tests; neighboring constraint,
+foreign-property, workload, projection, external-table, and CTE suites passed
+874 tests. The default CPython 3.12.6 release gate passed 6,731 tests at
+92.97% branch coverage with Ruff lint/formatting, strict mypy, and diff checks
+clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1 each passed 6,731 tests, with 3.15 treating deprecations as
+errors. The sdist/wheel build, clean force-install, `pip check`, and installed-
+wheel `python -I` smoke (`CREATE GLOBAL TEMPORARY TABLE q15_guard (id BIGINT)
+ON COMMIT DELETE ROWS`, returning `Create`) passed.
 
 ### Q16 — INSERT fail-closed parser conformance — `TODO`
 

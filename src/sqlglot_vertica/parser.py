@@ -4158,9 +4158,13 @@ class VerticaParser(PostgresParser):
             scope = self._prev.text.upper()
 
         temporary = self._match(TokenType.TEMPORARY)
+        if (scope or temporary) and self._malformed_create_table_prefix_ahead():
+            self._raise_create_table_error(
+                "CREATE TABLE accepts at most one GLOBAL or LOCAL scope before one TEMPORARY"
+            )
         if scope and not temporary:
             if self._match(TokenType.TABLE, advance=False):
-                self.raise_error("GLOBAL or LOCAL table scope requires TEMPORARY")
+                self._raise_create_table_error("GLOBAL or LOCAL table scope requires TEMPORARY")
             self._retreat(index)
             return super()._parse_create()
 
@@ -4173,9 +4177,25 @@ class VerticaParser(PostgresParser):
             return super()._parse_create()
 
         if replace:
-            self.raise_error("CREATE OR REPLACE TABLE is not supported by Vertica")
+            self._raise_create_table_error("CREATE OR REPLACE TABLE is not supported by Vertica")
 
         return self._parse_create_table(temporary=temporary, scope=scope)
+
+    def _malformed_create_table_prefix_ahead(self) -> bool:
+        """Return whether another table scope/temporary prefix precedes TABLE."""
+
+        index = self._index
+        consumed_prefix = False
+        while index < len(self._tokens):
+            token = self._tokens[index]
+            if token.token_type == TokenType.TEMPORARY or (
+                token.text.isascii() and token.text.upper() in {"GLOBAL", "LOCAL"}
+            ):
+                consumed_prefix = True
+                index += 1
+                continue
+            return consumed_prefix and token.token_type == TokenType.TABLE
+        return False
 
     def _reject_prefixed_access_policy(self, statement: str, words: list[str]) -> None:
         prefixes = {
@@ -7170,6 +7190,25 @@ class VerticaParser(PostgresParser):
             raise ParseError(message)
 
     def _parse_create_table(self, temporary: bool, scope: str | None) -> exp.Create:
+        """Parse one CREATE TABLE atomically at every configured error level.
+
+        SQLGlot's ``raise_error`` deliberately returns at WARN/IGNORE and only
+        aggregates at RAISE. CREATE TABLE uses inherited and shared helpers
+        which assume an error stops control flow, so permissive levels could
+        otherwise repair malformed clauses, return partial trees, or reach
+        assertions/unbound locals. Temporarily using IMMEDIATE contains that
+        behavior to this already-semantic family; the caller's level is always
+        restored before parsing another statement.
+        """
+
+        error_level = self.error_level
+        self.error_level = ErrorLevel.IMMEDIATE
+        try:
+            return self._parse_create_table_body(temporary=temporary, scope=scope)
+        finally:
+            self.error_level = error_level
+
+    def _parse_create_table_body(self, temporary: bool, scope: str | None) -> exp.Create:
         exists = self._parse_exists(not_=True)
         table = self._parse_table_parts(schema=True)
         if not table:
@@ -7199,6 +7238,10 @@ class VerticaParser(PostgresParser):
             if isinstance(schema, exp.Schema) and any(
                 isinstance(item, exp.ColumnDef) for item in schema.expressions
             ):
+                if self._tokens[self._index - 2].token_type == TokenType.COMMA:
+                    self._raise_create_table_error(
+                        "CREATE TABLE column definitions cannot end with a comma"
+                    )
                 return self._parse_create_table_definition(
                     schema=schema,
                     exists=exists,
@@ -7358,6 +7401,8 @@ class VerticaParser(PostgresParser):
             )
             if not encoded_columns:
                 self._raise_create_table_error("ENCODED BY requires at least one column reference")
+            if self._prev.token_type == TokenType.COMMA:
+                self._raise_create_table_error("ENCODED BY lists cannot end with a comma")
             properties.append(self.expression(vexp.EncodedByProperty(expressions=encoded_columns)))
 
         segmentation = self._parse_projection_segmentation()
@@ -7451,6 +7496,8 @@ class VerticaParser(PostgresParser):
         columns = self._parse_csv(lambda: self._parse_ctas_column(require_physical_design=False))
         if not columns:
             self.raise_error("CTAS column-name list cannot be empty")
+        if self._prev.token_type == TokenType.COMMA:
+            self._raise_create_table_error("CTAS column-name lists cannot end with a comma")
         self._match_r_paren()
         return columns
 
@@ -7459,6 +7506,8 @@ class VerticaParser(PostgresParser):
             grouped = self._parse_wrapped_csv(lambda: self._parse_id_var())
             if len(grouped) < 2:
                 self.raise_error("GROUPED requires at least two column references")
+            if self._tokens[self._index - 2].token_type == TokenType.COMMA:
+                self._raise_create_table_error("GROUPED column lists cannot end with a comma")
             return self.expression(vexp.GroupedProjectionColumns(expressions=grouped))
 
         column = self._parse_id_var()

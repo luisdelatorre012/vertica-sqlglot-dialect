@@ -699,6 +699,21 @@ the case has been confirmed to reach the non-speculative path. This is
 inherent to the existing form-disambiguation mechanism, not a defect to fix
 per statement.
 
+CREATE TABLE parsing nevertheless fails atomically at every public parser
+error level. Its complete definition/LIKE/CTAS parse runs as a narrowly scoped
+`ErrorLevel.IMMEDIATE` transaction and restores the caller's configured level
+in `finally`. This is necessary because the table family composes inherited
+and shared SQLGlot helpers whose plain `raise_error` calls otherwise return at
+WARN/IGNORE or aggregate past unsafe control flow at RAISE; malformed ON
+COMMIT, CTAS name/encoding, segmentation, quota, ordering, partition, and
+privilege clauses previously could be repaired silently, yield partial trees,
+or reach assertions/unbound locals. The transaction is confined to CREATE
+TABLE, so other CREATE families keep their own error contracts. Front-door
+scope and replacement validation still goes through the dedicated table
+wrapper, duplicate/contradictory scope and temporary prefixes are rejected
+before generic CREATE fallback, and explicit checks close the generic CSV
+helper's trailing-comma tolerance for table-definition and CTAS lists.
+
 The parser performs syntax-level validation, such as mutually exclusive COPY
 options and required clause components. Restrictions that require catalog
 types, server configuration, or semantic analysis are documented as
