@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vertica-sqlglot-dialect"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "A coverage-driven Vertica dialect plugin for SQLGlot"
 readme = "README.md"
 requires-python = ">=3.9"

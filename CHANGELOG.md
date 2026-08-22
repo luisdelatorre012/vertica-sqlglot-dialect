@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — unreleased
+## 0.2.0 — 2026-08-22
 
 This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
 plugin interface.
