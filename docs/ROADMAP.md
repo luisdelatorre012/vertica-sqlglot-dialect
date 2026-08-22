@@ -151,7 +151,14 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   `Command`, or reaching a raw Python failure. Duplicate/contradictory scope
   and temporary prefixes plus trailing definition/CTAS-list commas are also
   rejected, while all valid permanent and temporary forms remain unchanged.
-  Q16 is the next eligible task.
+  Q16 is complete: INSERT now has its own guaranteed-raise parser boundary and
+  an inherited-helper transaction, so missing INTO/targets/sources, malformed
+  target and VALUES lists, conflicting sources, target partitions, foreign
+  prefixes/tails, and leftover clauses raise `ParseError` at IMMEDIATE, RAISE,
+  WARN, and IGNORE rather than normalizing input or returning a blank partial
+  AST. Valid DEFAULT VALUES, multi-row VALUES, INSERT-SELECT, and the Q14
+  target-following WITH form remain canonical and analyzable. Q17 is the next
+  eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

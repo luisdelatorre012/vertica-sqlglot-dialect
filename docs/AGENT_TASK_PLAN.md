@@ -111,6 +111,8 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   Q15 is the lowest-numbered remaining task.
 - Completed **Q15 — CREATE TABLE guaranteed-raise completion**. Q16 is the
   lowest-numbered remaining task.
+- Completed **Q16 — INSERT fail-closed parser conformance**. Q17 is the
+  lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -253,7 +255,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q13 | DONE   | Analyzer-safe historical query roots          | Q09–Q12             | `fix: make historical queries analyzer safe`             |
 | Q14 | DONE   | WITH/CTE query-expression and placement conformance | Q13           | `fix: enforce cte query expression boundaries`           |
 | Q15 | DONE   | CREATE TABLE guaranteed-raise completion      | Q14                 | `fix: complete create table guaranteed raises`           |
-| Q16 | TODO   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
+| Q16 | DONE   | INSERT fail-closed parser conformance         | Q14, Q15            | `fix: make insert parsing fail closed`                   |
 | Q17 | TODO   | Analysis table-target identifier conformance  | Q02, Q03, Q15, Q16  | `fix: align analysis table target identifiers`           |
 | Q18 | TODO   | SELECT INTO placement and tail atomicity      | Q02, Q17            | `fix: make select into tails atomic`                     |
 | Q19 | TODO   | CREATE TABLE strict AST generation contract   | Q05, Q15, Q17       | `fix: validate create table asts`                        |
@@ -2241,7 +2243,7 @@ errors. The sdist/wheel build, clean force-install, `pip check`, and installed-
 wheel `python -I` smoke (`CREATE GLOBAL TEMPORARY TABLE q15_guard (id BIGINT)
 ON COMMIT DELETE ROWS`, returning `Create`) passed.
 
-### Q16 — INSERT fail-closed parser conformance — `TODO`
+### Q16 — INSERT fail-closed parser conformance — `DONE`
 
 **Outcome.** Make malformed INSERT syntax fail at the parser boundary at every
 error level instead of returning a normalized, unusable, or blank-rendering
@@ -2272,6 +2274,47 @@ identifier rules (Q17), and server constraint/default evaluation.
 
 **Primary sources.** [INSERT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/insert/)
 and [WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/).
+
+**Completion record.** Re-opened both exact 26.2 primary sources and audited
+installed SQLGlot 30.13's `_parse_insert`, insert-table and VALUES helpers,
+canonical `Insert` fields, parser finalization, and generator. No material
+contradiction was found. INSERT's formal grammar requires `INTO`, a named
+table with an optional nonempty column list, and exactly one of `DEFAULT
+VALUES`, one or more parenthesized nonempty VALUES rows, or a SELECT query.
+The WITH page's official INSERT example confirms the already-supported
+target-following `INSERT INTO target WITH ... SELECT` form. Catalog constraint,
+default, coercion, and projection behavior remains server-side.
+
+Added `_raise_insert_error` and made the inherited INSERT parse a narrowly
+scoped `ErrorLevel.IMMEDIATE` transaction with the caller's level restored in
+`finally`. Missing INTO and multi-table roots, every shared `insert_errors`
+result, strict target/VALUES list provenance, and unconsumed tails now route
+through the INSERT-specific guaranteed-raise boundary. IMMEDIATE, RAISE, WARN,
+and IGNORE therefore all raise `ParseError` instead of inventing INTO,
+returning a normalized or blank-rendering partial `Insert`, silently dropping
+a tail, or reaching a raw helper failure. Closed inherited acceptances for
+bare `VALUES 1`, trailing target/value/row commas, target PARTITION clauses,
+missing/conflicting sources, aliases, empty lists, RETURNING, ON CONFLICT,
+STORED, BY NAME, IF EXISTS, SETTINGS, REPLACE WHERE, and other recognized
+foreign prefixes/tails. Shared structural validation now rejects a partition
+stored on the target table as well, so parser and existing strict generator
+remain in parity; the generator audit found no independent gap requiring a
+new task.
+
+Expanded `tests/test_dml.py` from 111 to 232 tests. The negative source matrix
+runs every case at all four parser error levels; direct AST/helper cases cover
+every INSERT validator branch; valid VALUES/default/SELECT/target-following
+WITH controls run at every level; malformed multi-statement input proves the
+following statement is not swallowed; and comment, compact/pretty round-trip,
+dump/load, qualification, optimization, lineage, and strict generation
+contracts remain pinned. The focused DML module passed 232 tests and the DML,
+CTE, workload, PROFILE, and hint neighborhood passed 559. The default CPython
+3.12.6 gate passed 6,852 tests at 93.01% branch coverage with Ruff lint and
+formatting, strict mypy, and diff checks clean. Isolated CPython 3.9.25,
+3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed 6,852
+tests, with 3.15 treating deprecations as errors. The sdist/wheel build, clean
+force-install, `pip check`, and installed-wheel `python -I` smoke (`INSERT INTO
+q16_target SELECT 1`, returning `Insert`) passed.
 
 ### Q17 — analysis table-target identifier conformance — `TODO`
 

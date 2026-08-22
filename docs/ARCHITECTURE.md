@@ -714,6 +714,22 @@ wrapper, duplicate/contradictory scope and temporary prefixes are rejected
 before generic CREATE fallback, and explicit checks close the generic CSV
 helper's trailing-comma tolerance for table-definition and CTAS lists.
 
+INSERT parsing uses the same narrowly scoped transaction pattern for a
+different inherited grammar. SQLGlot's generic INSERT parser deliberately
+accepts omitted `INTO`, bare `VALUES 1`, and trailing commas, and exposes
+foreign prefix, target, source, and tail fields before the plugin's structural
+validator runs. Vertica first requires `INTO`, then runs the inherited parse at
+`ErrorLevel.IMMEDIATE` so malformed table/value helpers cannot return partial
+trees at WARN/IGNORE or aggregate past unsafe code at RAISE. The caller's
+configured level is restored in `finally`; a dedicated `_raise_insert_error`
+wrapper then owns target/source validation, strict list provenance, and any
+unconsumed INSERT tail. Consequently every recognized malformed form raises
+`ParseError` at all four public error levels rather than inventing `INTO`,
+normalizing a list, returning a blank-rendering `Insert`, or relying on strict
+generation to reject the tree. Valid `DEFAULT VALUES`, parenthesized multi-row
+`VALUES`, SELECT, and target-following WITH sources remain canonical
+`exp.Insert` trees. Catalog constraint/default evaluation stays server-side.
+
 The parser performs syntax-level validation, such as mutually exclusive COPY
 options and required clause components. Restrictions that require catalog
 types, server configuration, or semantic analysis are documented as

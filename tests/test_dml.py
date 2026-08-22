@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from sqlglot import ErrorLevel, exp, parse_one
+from sqlglot import ErrorLevel, exp, parse, parse_one
 from sqlglot.errors import ParseError, UnsupportedError
+from sqlglot.lineage import lineage
+from sqlglot.optimizer import optimize
+from sqlglot.optimizer.qualify import qualify
 
+from sqlglot_vertica import dml as vdml
 from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_roundtrip
 
@@ -275,13 +279,182 @@ def test_merge_rejects_non_vertica_grammar(sql: str, message: str) -> None:
         ("INSERT INTO target VALUES (1) RETURNING id", "does not support RETURNING"),
         ("INSERT OVERWRITE TABLE target VALUES (1)", "requires INTO"),
         ("INSERT INTO target VALUES (1) ON CONFLICT DO NOTHING", "does not support ON CONFLICT"),
+        ("INSERT INTO target PARTITION (id=1) VALUES (1)", "hints, joins, or partitions"),
+        ("INSERT INTO target STORED AS x VALUES (1)", "does not support STORED"),
+        ("INSERT INTO target BY NAME VALUES (1)", "does not support BY NAME"),
+        ("INSERT INTO target IF EXISTS VALUES (1)", "does not support IF EXISTS"),
+        ("INSERT INTO target SETTINGS x=1 VALUES (1)", "does not support SETTINGS"),
+        ("INSERT INTO target REPLACE WHERE id=1 VALUES (1)", "does not support REPLACE WHERE"),
+        ("INSERT INTO target(a,) VALUES (1)", "lists cannot end with a comma"),
+        ("INSERT INTO target VALUES (1,)", "lists cannot end with a comma"),
+        ("INSERT INTO target VALUES (1),", "requires a row after each comma"),
+        ("INSERT INTO target VALUES 1", "rows require parentheses"),
+        ("INSERT INTO target DEFAULT VALUES VALUES (1)", "exactly one source form"),
+        ("INSERT INTO target VALUES (1) SELECT 2", "Unexpected Vertica INSERT clause"),
         ("INSERT /*+JTYPE(H)*/ INTO target VALUES (1)", "only LABEL"),
         ("INSERT /*+LABEL(a),LABEL(b)*/ INTO target VALUES (1)", "exactly one LABEL"),
     ],
 )
-def test_insert_rejects_non_vertica_grammar(sql: str, message: str) -> None:
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_insert_rejects_non_vertica_grammar(
+    sql: str, message: str, error_level: ErrorLevel
+) -> None:
     with pytest.raises(ParseError, match=message):
-        parse_one(sql, read="vertica")
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "INSERT /*+LABEL(load)*/ INTO t (id, value) VALUES (1, DEFAULT), (2, 'x')",
+        "INSERT INTO t DEFAULT VALUES",
+        "INSERT INTO t SELECT id FROM source",
+        "INSERT INTO t WITH recent AS (SELECT id FROM source) SELECT id FROM recent",
+    ],
+)
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_insert_valid_forms_are_stable_at_every_error_level(
+    sql: str, error_level: ErrorLevel
+) -> None:
+    expected = parse_one(sql, read="vertica")
+    expression = parse_one(sql, read="vertica", error_level=error_level)
+    assert isinstance(expression, exp.Insert)
+    assert expression == expected
+    assert expression.sql(dialect="vertica")
+
+
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_invalid_insert_is_atomic_inside_multi_statement_input(error_level: ErrorLevel) -> None:
+    with pytest.raises(ParseError, match="VALUES rows cannot be empty"):
+        parse(
+            "INSERT INTO target VALUES (); SELECT 1",
+            read="vertica",
+            error_level=error_level,
+        )
+
+
+def test_insert_query_source_remains_analyzable() -> None:
+    insert = assert_roundtrip(
+        "/* load current rows */ INSERT INTO dst (id) "
+        "WITH recent AS (SELECT id FROM src) SELECT id FROM recent"
+    )
+    assert isinstance(insert, exp.Insert)
+    assert "load current rows" in insert.sql(dialect="vertica")
+
+    source = insert.expression
+    assert isinstance(source, exp.Query)
+    schema = {"src": {"id": "INT"}}
+    qualified = qualify(source.copy(), schema=schema)
+    optimized = optimize(source.copy(), schema=schema)
+    assert isinstance(qualified, exp.Query)
+    assert isinstance(optimized, exp.Query)
+    assert qualified.find(exp.Column).table in {"recent", "src"}
+
+    node = lineage("id", source.copy(), schema=schema)
+    assert "src.id" in {downstream.name for downstream in node.walk()}
+
+
+def _valid_insert(**args: object) -> exp.Insert:
+    values = exp.Values(expressions=[exp.Tuple(expressions=[exp.Literal.number(1)])])
+    insert_args: dict[str, object] = {"this": exp.to_table("t"), "expression": values}
+    insert_args.update(args)
+    return exp.Insert(**insert_args)
+
+
+def test_insert_validator_covers_every_structural_error() -> None:
+    aliased_values = exp.Values(
+        expressions=[exp.Tuple(expressions=[exp.Literal.number(1)])],
+        alias=exp.TableAlias(this=exp.to_identifier("rows")),
+    )
+    subquery_values = exp.Values(expressions=[exp.Tuple(expressions=[exp.select("a")])])
+    target_with_partition = exp.to_table("t")
+    target_with_partition.set(
+        "partition",
+        exp.Partition(expressions=[exp.EQ(this=exp.column("a"), expression=exp.Literal.number(1))]),
+    )
+
+    structural_cases: list[tuple[exp.Insert, str]] = [
+        (_valid_insert(hint=exp.var("LABEL")), "exactly one LABEL hint"),
+        (
+            _valid_insert(
+                hint=exp.Hint(expressions=[exp.Anonymous(this="JTYPE", expressions=[exp.var("H")])])
+            ),
+            "supports only LABEL with one argument",
+        ),
+        (exp.Insert(expression=exp.select("a")), "requires a table target"),
+        (_valid_insert(this=exp.to_table("t").as_("target")), "do not support aliases"),
+        (
+            _valid_insert(this=target_with_partition),
+            "do not support hints, joins, or partitions",
+        ),
+        (
+            exp.Insert(
+                this=exp.Schema(this=exp.to_table("t"), expressions=[]),
+                expression=exp.select("a"),
+            ),
+            "target column lists cannot be empty",
+        ),
+        (
+            exp.Insert(
+                this=exp.Schema(this=exp.to_table("t"), expressions=[exp.column("t.a")]),
+                expression=exp.select("a"),
+            ),
+            "target columns must be unqualified names",
+        ),
+        (
+            exp.Insert(
+                this=exp.Schema(this=exp.to_table("t"), expressions=[exp.to_identifier("a")]),
+                default=True,
+            ),
+            "DEFAULT VALUES cannot include a target column list",
+        ),
+        (
+            exp.Insert(this=exp.to_table("t"), default=True, expression=exp.select("a")),
+            "requires exactly one source form",
+        ),
+        (exp.Insert(this=exp.to_table("t")), "requires DEFAULT VALUES, VALUES, or a query"),
+        (_valid_insert(expression=aliased_values), "VALUES does not support an alias"),
+        (
+            _valid_insert(expression=exp.Values(expressions=[])),
+            "VALUES requires at least one row",
+        ),
+        (
+            _valid_insert(expression=exp.Values(expressions=[exp.Literal.number(1)])),
+            "VALUES rows cannot be empty",
+        ),
+        (
+            _valid_insert(expression=exp.Values(expressions=[exp.Tuple(expressions=[])])),
+            "VALUES rows cannot be empty",
+        ),
+        (_valid_insert(expression=subquery_values), "VALUES does not support subqueries"),
+        (_valid_insert(expression=exp.Literal.number(1)), "source must be VALUES or a query"),
+    ]
+    for expression, expected_error in structural_cases:
+        assert any(expected_error in error for error in vdml.insert_errors(expression))
+
+    forbidden_values: dict[str, tuple[object, str]] = {
+        "alternative": ("REPLACE", "OR alternatives"),
+        "by_name": (True, "BY NAME"),
+        "conflict": (exp.OnConflict(), "ON CONFLICT"),
+        "exists": (True, "IF EXISTS"),
+        "ignore": (True, "IGNORE"),
+        "is_function": (True, "FUNCTION targets"),
+        "overwrite": (True, "OVERWRITE"),
+        "partition": (exp.Partition(expressions=[exp.column("a")]), "PARTITION clauses"),
+        "returning": (exp.Returning(expressions=[exp.column("a")]), "RETURNING"),
+        "settings": (
+            [exp.EQ(this=exp.column("a"), expression=exp.Literal.number(1))],
+            "SETTINGS",
+        ),
+        "source": (exp.to_table("source"), "TABLE sources"),
+        "stored": (exp.var("x"), "STORED clauses"),
+        "where": (exp.Where(this=exp.true()), "REPLACE WHERE"),
+        "with_": (exp.With(expressions=[]), "a leading WITH clause"),
+    }
+    for key, (value, expected_error) in forbidden_values.items():
+        expression = _valid_insert()
+        expression.set(key, value)
+        assert any(expected_error in error for error in vdml.insert_errors(expression)), key
 
 
 @pytest.mark.parametrize(

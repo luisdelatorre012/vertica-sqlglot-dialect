@@ -48,6 +48,10 @@ plugin interface.
 - Added exact canonical INSERT, UPDATE, DELETE, MERGE, and TRUNCATE TABLE
   semantics, including both MERGE filter spellings, strict foreign-clause
   rejection, and a lineage-safe UPDATE `FROM DEFAULT` relation.
+- Made INSERT parsing fail closed at every parser error level for missing INTO,
+  malformed targets and source lists, conflicting sources, inherited foreign
+  clauses, and unexpected tails, while retaining canonical VALUES, SELECT, and
+  target-following WITH sources.
 - Added semantic executable PROFILE wrappers whose SELECT, INSERT, UPDATE,
   DELETE, COPY, and MERGE statement children remain fully traversable, while
   unsupported bodies and foreign generation fail atomically.

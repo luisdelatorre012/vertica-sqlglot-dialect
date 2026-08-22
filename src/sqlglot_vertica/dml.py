@@ -74,8 +74,8 @@ def insert_errors(expression: exp.Insert) -> list[str]:
         errors.append("Vertica INSERT requires a table target")
     elif target.args.get("alias"):
         errors.append("Vertica INSERT target tables do not support aliases")
-    elif target.args.get("hints") or target.args.get("joins"):
-        errors.append("Vertica INSERT target tables do not support hints or joins")
+    elif target.args.get("hints") or target.args.get("joins") or target.args.get("partition"):
+        errors.append("Vertica INSERT target tables do not support hints, joins, or partitions")
 
     if isinstance(expression.this, exp.Schema) and not columns:
         errors.append("Vertica INSERT target column lists cannot be empty")

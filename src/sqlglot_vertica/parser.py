@@ -1864,19 +1864,64 @@ class VerticaParser(PostgresParser):
         if errors:
             self.raise_error(errors[0])
 
+    def _raise_insert_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
+    def _validate_insert_list_tokens(self, start_index: int, insert: exp.Insert) -> None:
+        tokens = self._tokens[start_index : self._index + 1]
+        for token, next_token in zip(tokens, tokens[1:]):
+            if token.token_type == TokenType.COMMA and next_token.token_type == TokenType.R_PAREN:
+                self._raise_insert_error("Vertica INSERT lists cannot end with a comma")
+
+        source = insert.args.get("expression")
+        if not isinstance(source, exp.Values):
+            return
+
+        values_index = next(
+            (
+                index
+                for index, token in reversed(list(enumerate(tokens)))
+                if token.token_type == TokenType.VALUES
+            ),
+            None,
+        )
+        if (
+            values_index is not None
+            and values_index + 1 < len(tokens)
+            and tokens[values_index + 1].token_type != TokenType.L_PAREN
+        ):
+            self._raise_insert_error("Vertica INSERT VALUES rows require parentheses")
+
+        if tokens and tokens[-1].token_type == TokenType.COMMA:
+            self._raise_insert_error("Vertica INSERT VALUES requires a row after each comma")
+
     def _parse_insert(self) -> exp.Insert:
         index = self._index
         self._parse_hint()
         has_into = self._match(TokenType.INTO, advance=False)
         self._retreat(index)
         if not has_into:
-            self.raise_error("Vertica INSERT requires INTO")
+            self._raise_insert_error("Vertica INSERT requires INTO")
 
-        insert = super()._parse_insert()
+        configured_error_level = self.error_level
+        self.error_level = ErrorLevel.IMMEDIATE
+        try:
+            insert = super()._parse_insert()
+        finally:
+            self.error_level = configured_error_level
+
         if not isinstance(insert, exp.Insert):
-            self.raise_error("Vertica INSERT does not support multi-table forms")
-        assert isinstance(insert, exp.Insert)
-        self._raise_dml_errors(vdml.insert_errors(insert))
+            self._raise_insert_error("Vertica INSERT does not support multi-table forms")
+
+        self._validate_insert_list_tokens(index, insert)
+        errors = vdml.insert_errors(insert)
+        if errors:
+            self._raise_insert_error(errors[0])
+        if self._curr.token_type != TokenType.SENTINEL:
+            self._raise_insert_error(f"Unexpected Vertica INSERT clause at {self._curr.text!r}")
         return insert
 
     def _parse_merge(self) -> exp.Merge:
