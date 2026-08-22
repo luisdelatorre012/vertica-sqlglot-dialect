@@ -199,12 +199,17 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   at `WARN`/`IGNORE`; valid comments, serialization, optimizer/type behavior,
   and foreign atomicity remain stable. The first recertification attempt on
   2026-08-22 expanded the end-to-end workload module from 8 to 68 tests and exposed
-  two documented-composition blockers without changing production code:
-  `FOR UPDATE OF` targets are misclassified as duplicate selected sources by
-  qualification/optimization (Q23), and AT-prefixed WITH queries fail when a
-  parenthesized set branch owns ORDER BY/LIMIT while leading-comment ownership
-  is not generation-stable (Q24). Q23 is now the lowest-numbered remaining
-  task; Q25 is the sole recertification gate. Milestone 1 remains reopened.
+  two documented-composition blockers without changing production code. Q23
+  is complete: parser-produced `FOR UPDATE OF` targets now use canonical
+  identifier paths rather than selectable `Table` nodes, so scope traversal,
+  qualification, optimization, and lineage no longer misclassify them as
+  duplicate FROM sources across aliases, joins, subqueries/CTEs, compound
+  queries, or AT-prefixed roots; lock rendering, serialization, strict
+  generation, and foreign behavior remain stable. AT-prefixed WITH queries
+  still fail when a parenthesized set branch owns ORDER BY/LIMIT, while their
+  leading-comment ownership is not generation-stable (Q24). Q24 is now the
+  lowest-numbered remaining task; Q25 is the sole recertification gate.
+  Milestone 1 remains reopened.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

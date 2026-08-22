@@ -8797,7 +8797,11 @@ class VerticaParser(PostgresParser):
                 table = self._parse_table(schema=True)
                 if not isinstance(table, exp.Table) or not isinstance(table.this, exp.Identifier):
                     self._raise_select_modifier_error("FOR UPDATE OF requires table names")
-                expressions.append(table)
+                parts = [part.copy() for part in table.parts]
+                target = parts[0] if len(parts) == 1 else exp.Dot.build(parts)
+                if table.comments:
+                    target.add_comments(table.comments)
+                expressions.append(target)
                 if not self._match(TokenType.COMMA):
                     break
 

@@ -85,6 +85,122 @@ def test_documented_for_update_forms(sql: str) -> None:
     assert locks[0].args.get("update") is True
     assert locks[0].args.get("wait") is None
     assert locks[0].args.get("key") is None
+    assert not list(locks[0].find_all(exp.Table))
+
+
+def _lock_target_names(expression: exp.Expr) -> tuple[tuple[str, ...], ...]:
+    lock = expression.args["locks"][0]
+    return tuple(
+        tuple(
+            part.name
+            for part in ([target] if isinstance(target, exp.Identifier) else target.flatten())
+        )
+        for target in lock.expressions
+    )
+
+
+@pytest.mark.parametrize(
+    ("sql", "schema", "targets", "lineage_names"),
+    [
+        (
+            "SELECT a FROM t FOR UPDATE OF t",
+            {"t": {"a": "INT"}},
+            (("t",),),
+            {"a", "t.a"},
+        ),
+        (
+            "SELECT x.a AS a FROM t AS x FOR UPDATE OF x",
+            {"t": {"a": "INT"}},
+            (("x",),),
+            {"a", "x.a"},
+        ),
+        (
+            "SELECT t.a AS a FROM t JOIN u ON t.id = u.id FOR UPDATE OF t, u",
+            {"t": {"a": "INT", "id": "INT"}, "u": {"id": "INT"}},
+            (("t",), ("u",)),
+            {"a", "t.a"},
+        ),
+        (
+            "SELECT q.a AS a FROM (SELECT a FROM t) AS q FOR UPDATE OF q",
+            {"t": {"a": "INT"}},
+            (("q",),),
+            {"a", "q.a", "t.a"},
+        ),
+        (
+            "WITH c AS (SELECT a FROM t) SELECT c.a AS a FROM c FOR UPDATE OF c",
+            {"t": {"a": "INT"}},
+            (("c",),),
+            {"a", "c.a", "t.a"},
+        ),
+        (
+            "SELECT a FROM t UNION ALL SELECT a FROM u FOR UPDATE OF t, u",
+            {"t": {"a": "INT"}, "u": {"a": "INT"}},
+            (("t",), ("u",)),
+            {"UNION", "0", "t.a", "u.a"},
+        ),
+        (
+            "AT EPOCH LATEST SELECT a FROM t FOR UPDATE OF t",
+            {"t": {"a": "INT"}},
+            (("t",),),
+            {"a", "t.a"},
+        ),
+        (
+            "AT EPOCH 7 SELECT a FROM t INTERSECT SELECT a FROM u FOR UPDATE OF t, u",
+            {"t": {"a": "INT"}, "u": {"a": "INT"}},
+            (("t",), ("u",)),
+            {"ATEPOCHINTERSECT", "0", "t.a", "u.a"},
+        ),
+    ],
+)
+def test_for_update_targets_are_analyzer_safe(
+    sql: str,
+    schema: dict[str, dict[str, str]],
+    targets: tuple[tuple[str, ...], ...],
+    lineage_names: set[str],
+) -> None:
+    expression = assert_roundtrip(sql)
+    assert _lock_target_names(expression) == targets
+
+    scopes = traverse_scope(expression)
+    assert scopes
+    selected_sources = [scope.selected_sources for scope in scopes]
+    assert any(selected_sources)
+
+    for analyzed in (
+        qualify(expression.copy(), schema=schema, dialect="vertica"),
+        optimize(expression.copy(), schema=schema, dialect="vertica"),
+    ):
+        assert _lock_target_names(analyzed) == targets
+        assert parse_one(analyzed.sql(dialect="vertica"), read="vertica") == analyzed
+
+    node = lineage("a", expression.copy(), schema=schema, dialect="vertica")
+    assert {downstream.name for downstream in node.walk()} == lineage_names
+
+
+def test_qualified_lock_targets_serialize_copy_transform_and_keep_comments() -> None:
+    sql = 'SELECT a FROM db.s.t FOR UPDATE OF db.s.t, "LockAlias" /* lock target */'
+    expression = assert_roundtrip(sql)
+    assert _lock_target_names(expression) == (("db", "s", "t"), ("LockAlias",))
+    assert "lock target" in expression.sql(dialect="vertica")
+
+    loaded = exp.Expression.load(expression.dump())
+    copied = expression.copy()
+    transformed = copied.transform(
+        lambda node: (
+            exp.to_identifier("renamed", quoted=True)
+            if isinstance(node, exp.Identifier) and node.name == "LockAlias"
+            else node
+        )
+    )
+    assert loaded == expression
+    assert _lock_target_names(transformed) == (("db", "s", "t"), ("renamed",))
+    lock = transformed.args["locks"][0]
+    assert all(
+        target.parent is lock and target.arg_key == "expressions" for target in lock.expressions
+    )
+    qualified = lock.expressions[0]
+    assert isinstance(qualified, exp.Dot)
+    assert all(part.parent is not None for part in qualified.flatten())
 
 
 @pytest.mark.parametrize(
@@ -208,6 +324,43 @@ def mutated_select(key: str, value: object) -> exp.Select:
         mutated_select("locks", [exp.Lock(update=True, key=False)]),
         mutated_select("locks", [exp.Lock(update=True, wait=False)]),
         mutated_select("locks", [exp.Lock(update=True, expressions=[])]),
+        mutated_select("locks", [exp.Lock(update=True, expressions=[exp.column("t")])]),
+        mutated_select(
+            "locks", [exp.Lock(update=True, expressions=[exp.Identifier(this="", quoted=True)])]
+        ),
+        mutated_select(
+            "locks",
+            [
+                exp.Lock(
+                    update=True, expressions=[exp.Identifier(this="t", quoted=False, extra=False)]
+                )
+            ],
+        ),
+        mutated_select(
+            "locks",
+            [
+                exp.Lock(
+                    update=True,
+                    expressions=[
+                        exp.Dot.build([exp.to_identifier(part) for part in ("a", "b", "c", "d")])
+                    ],
+                )
+            ],
+        ),
+        mutated_select(
+            "locks",
+            [
+                exp.Lock(
+                    update=True,
+                    expressions=[
+                        exp.Table(
+                            this=exp.to_identifier("t"),
+                            alias=exp.TableAlias(this=exp.to_identifier("x")),
+                        )
+                    ],
+                )
+            ],
+        ),
         mutated_select("locks", [exp.Lock(update=True), exp.Lock(update=True)]),
         mutated_select("locks", [exp.column("lock")]),
     ],
@@ -277,3 +430,15 @@ def test_foreign_parsed_valid_canonical_tail_generates_vertica() -> None:
         expression.sql(dialect="vertica")
         == "SELECT DISTINCT a FROM t LIMIT 2 OFFSET 1 FOR UPDATE OF t"
     )
+
+
+def test_for_update_target_foreign_generation_behavior_is_unchanged() -> None:
+    expression = parse_one("SELECT a FROM t FOR UPDATE OF t, s.u", read="vertica")
+    for dialect in ("postgres", "mysql"):
+        assert (
+            expression.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
+            == "SELECT a FROM t FOR UPDATE OF t, s.u"
+        )
+    for dialect in ("duckdb", "sqlite"):
+        with pytest.raises(UnsupportedError):
+            expression.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)

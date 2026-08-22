@@ -6757,11 +6757,41 @@ class VerticaGenerator(PostgresGenerator):
                 and (
                     not isinstance(tables, list)
                     or not tables
-                    or any(not isinstance(table, exp.Table) for table in tables)
+                    or any(not self._validate_lock_target(table) for table in tables)
                 )
             )
         ):
             self.unsupported("Vertica supports only FOR UPDATE with an optional table list")
+
+    def _validate_lock_target(self, expression: object) -> bool:
+        if isinstance(expression, exp.Table):
+            return self._validate_analysis_table_target(expression, "FOR UPDATE OF target")
+
+        if isinstance(expression, exp.Identifier):
+            parts: list[exp.Identifier] = [expression]
+        elif type(expression) is exp.Dot:
+            raw_parts = list(expression.flatten())
+            if (
+                len(raw_parts) not in {2, 3}
+                or any(not isinstance(part, exp.Identifier) for part in raw_parts)
+                or any(
+                    type(node) is exp.Dot and set(node.args) != {"this", "expression"}
+                    for node in expression.walk()
+                )
+            ):
+                self.unsupported(
+                    "FOR UPDATE OF target requires a one-, two-, or three-part identifier"
+                )
+                return False
+            parts = t.cast(list[exp.Identifier], raw_parts)
+        else:
+            self.unsupported("FOR UPDATE OF target requires a one-, two-, or three-part identifier")
+            return False
+
+        valid = True
+        for part in parts:
+            valid = self._validate_user_identifier(part, "FOR UPDATE OF target") and valid
+        return valid
 
     def _validate_select_tail(self, expression: exp.Expr) -> None:
         limit = expression.args.get("limit")

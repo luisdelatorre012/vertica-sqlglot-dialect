@@ -128,8 +128,10 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   recertification attempt found that `FOR UPDATE OF` targets collide with
   ordinary query sources during qualification/optimization, and that an
   AT-prefixed query combining WITH with a parenthesized set branch fails while
-  its leading-comment ownership is unstable. Q23 is the lowest-numbered
-  remaining task; Q25 is now the Milestone 1 recertification gate.
+  its leading-comment ownership is unstable. That attempt scheduled Q23 and
+  Q24; Q25 is now the Milestone 1 recertification gate.
+- Completed **Q23 — FOR UPDATE target analysis safety**. Q24 is the
+  lowest-numbered remaining task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -279,7 +281,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q20 | DONE   | Milestone 1 formal-syntax negative audit      | Q09–Q19             | `test: audit milestone one formal negatives`             |
 | Q21 | DONE   | SELECT inherited-field closure                | Q20                 | `fix: close inherited select fields`                     |
 | Q22 | DONE   | Query-extension guaranteed-raise conformance  | Q20, Q21            | `fix: make query extensions fail closed`                 |
-| Q23 | TODO   | FOR UPDATE target analysis safety             | Q20–Q22             | `fix: make for update targets analyzer safe`             |
+| Q23 | DONE   | FOR UPDATE target analysis safety             | Q20–Q22             | `fix: make for update targets analyzer safe`             |
 | Q24 | TODO   | AT epoch WITH compound-query composition      | Q23                 | `fix: compose historical ctes and set branches`          |
 | Q25 | TODO   | Milestone 1 recertification gate              | Q23–Q24             | `test: recertify milestone one analysis surface`         |
 
@@ -2858,7 +2860,7 @@ treating deprecations as errors. The sdist/wheel build, clean force-install,
 `pip check`, and installed-wheel `python -I` smoke (an AT-prefixed UNION with
 a parenthesized branch-local ORDER BY/LIMIT, returning `AtEpochUnion`) passed.
 
-### Q23 — FOR UPDATE target analysis safety — `TODO`
+### Q23 — FOR UPDATE target analysis safety — `DONE`
 
 **Outcome.** Make the documented `FOR UPDATE OF table-name[, ...]` tail
 participate in ordinary query analysis without being mistaken for a second
@@ -2880,6 +2882,43 @@ and unrelated scope/reference behavior.
 
 **Primary source.** [SELECT](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/)
 (`FOR UPDATE [ OF table-name[,...] ]`).
+
+**Completion record.** Re-opened the exact 26.2 SELECT page and confirmed its
+formal tail remains `FOR UPDATE [ OF table-name[,...] ]`; the parameter text
+continues to describe those names as lock targets, with no material source
+contradiction. Audited installed SQLGlot 30.13's canonical `Lock` node,
+generator, scope collector, qualification, optimization, and lineage. The
+root cause was structural: `Scope._collect` records every `exp.Table` found by
+its in-scope tree walk, including the Q11 table children stored under
+`exp.Lock`, so an OF target matching a FROM table or alias entered
+`selected_sources` twice and raised `OptimizeError("Alias already used")`.
+
+Kept the outer `exp.Lock` canonical and changed only parser-produced OF target
+children to canonical `exp.Identifier` or two-/three-part `exp.Dot` paths.
+Those nodes preserve spelling, quoting, qualification, comments, parent/index
+metadata, compact/pretty rendering, and dump/load/copy/transform stability,
+but cannot be mistaken for selectable relations. Direct `traverse_scope`,
+`qualify`, `optimize`, and `lineage` now work for unaliased and aliased
+tables, multiple join targets, derived-table aliases, CTEs, whole-compound
+locks, and Q13 AT-prefixed SELECT/set roots. Strict generation validates the
+new identifier paths while retaining canonical `exp.Table` interoperability
+for foreign/programmatic locks; malformed, overqualified, empty, extra-field,
+and aliased programmatic targets fail atomically. PostgreSQL/MySQL rendering
+and DuckDB/SQLite unsupported behavior are unchanged. The Q23 blocker in the
+recertification workload is now a positive qualification/optimization/lineage
+regression; Q24's independent AT+WITH composition blockers remain pinned and
+untouched.
+
+The focused `test_select_modifiers.py` module passed 237 tests; the combined
+SELECT-tail, official-query, workload, historical-query, set-operation, and
+CTE neighborhood passed 780. The default CPython 3.12.6 release gate passed
+7,956 tests at 92.29% branch coverage with Ruff lint/formatting, strict mypy,
+and diff checks clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 each passed 7,956 tests, with 3.15 treating
+deprecations as errors. The sdist/wheel build, clean force-install, `pip
+check`, and installed-wheel `python -I` smoke (`SELECT a FROM t FOR UPDATE OF
+t`, returning `Select`) passed. Milestone 1 remains reopened; Q24 is the next
+eligible task and Q25 alone owns recertification.
 
 ### Q24 — AT epoch WITH compound-query composition — `TODO`
 

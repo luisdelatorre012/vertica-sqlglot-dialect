@@ -191,14 +191,20 @@ OFFSET. Both relative LIMIT/OFFSET source orders are therefore accepted and
 canonicalized to stable `LIMIT ... OFFSET ...`; ORDER must precede either and
 FOR UPDATE must follow both.
 
-The 2026-08-22 recertification workload found one remaining analysis boundary
-inside that otherwise strict lock contract. SQLGlot scope collection currently
-treats the canonical table child of `FOR UPDATE OF table` as another selected
-query source; if the same table or alias is already in FROM, direct `qualify`
-and `optimize` raise `OptimizeError("Alias already used: ...")`. Plain
-`FOR UPDATE` remains analyzer-safe, and parse/generate validation of OF targets
-is unchanged. Task Q23 owns making lock targets visible to the lock without
-letting them enter the selected-source map.
+Q23 closes the lock-target analysis boundary found by the 2026-08-22
+recertification workload. SQLGlot scope collection walks every canonical
+`exp.Table` in a query tree, including a table stored under `exp.Lock`, and
+therefore used to add `FOR UPDATE OF table` metadata to the selected-source
+map a second time. Parser-produced lock targets now use canonical
+`exp.Identifier`/`exp.Dot` paths instead: they retain one-, two-, and
+three-part table-name text, quoting, comments, parent metadata, serialization,
+and generic lock rendering without claiming to be selectable relations.
+`traverse_scope`, `qualify`, `optimize`, and `lineage` consequently see only
+the real FROM/JOIN/CTE/subquery sources for ordinary, compound, and
+AT-prefixed queries. The outer `exp.Lock` remains canonical; strict Vertica
+generation validates both the analyzer-safe identifier path and a canonical
+`exp.Table` arriving from a foreign/programmatic tree. PostgreSQL/MySQL
+generation and DuckDB/SQLite unsupported behavior remain unchanged.
 
 Joined tables likewise retain canonical `exp.Join` nodes, but parsing and
 generation enforce the 26.2 operator/predicate matrix. Default/explicit INNER

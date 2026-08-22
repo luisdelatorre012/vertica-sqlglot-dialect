@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 from sqlglot import ErrorLevel, exp, parse, parse_one
-from sqlglot.errors import OptimizeError, ParseError, UnsupportedError
+from sqlglot.errors import ParseError, UnsupportedError
 from sqlglot.lineage import lineage
 from sqlglot.optimizer import optimize
 from sqlglot.optimizer.qualify import qualify
@@ -578,11 +578,15 @@ def test_at_epoch_with_leading_comment_is_recertification_blocker() -> None:
     assert reparsed.sql(dialect="vertica") != generated
 
 
-def test_for_update_of_target_is_recertification_analysis_blocker() -> None:
+def test_for_update_of_target_is_recertification_analysis_safe() -> None:
     expression = parse_one("SELECT a FROM t FOR UPDATE OF t", read="vertica")
     for analysis in (qualify, optimize):
-        with pytest.raises(OptimizeError, match="Alias already used: t"):
-            analysis(expression.copy(), dialect="vertica", schema={"t": {"a": "INT"}})
+        analyzed = analysis(expression.copy(), dialect="vertica", schema={"t": {"a": "INT"}})
+        assert analyzed.sql(dialect="vertica").endswith('FOR UPDATE OF "t"')
+        assert list(traverse_scope(analyzed))
+
+    node = lineage("a", expression, dialect="vertica", schema={"t": {"a": "INT"}})
+    assert {downstream.name for downstream in node.walk()} == {"a", "t.a"}
 
 
 def test_recertification_programmatic_ast_mutations_fail_atomically() -> None:
