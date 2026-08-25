@@ -5,6 +5,10 @@
 This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
 plugin interface.
 
+- Finally recertified Milestone 1 after the complete 18-entry optimizer-hint
+  inventory, GitHub issue #2 fixture, composed positive/negative workload,
+  analysis, strict-AST, foreign-generation, seven-runtime, package-build, and
+  clean-wheel gates passed with no remaining hint blocker.
 - Preserved optimizer-hint ownership and analysis losslessly: JOIN JFMT and
   UNION ALL UTYPE now retain typed finite-domain owners across regeneration,
   analysis, serialization, set composition, and foreign generation; mixed

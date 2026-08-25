@@ -165,9 +165,10 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   and parsing atomicity** and **Q28 — optimizer-hint directive contract
   conformance** and **Q29 — optimizer-hint recertification audit** and
   **Q30 — optimizer-hint ownership and analysis losslessness**. Q30 closed
-  the four losslessness blockers found by Q29. Q31 is the replacement final
-  gate and the lowest-numbered eligible task; P16 plus all Milestone 2 work
-  remain deferred.
+  the four losslessness blockers found by Q29. Completed **Q31 — Milestone 1
+  optimizer-hint final recertification gate** on 2026-08-25. The complete
+  analysis parsing surface is certified again, every Q task is `DONE`, and
+  P16 is the lowest-numbered eligible task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -325,13 +326,13 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q28 | DONE   | Optimizer-hint directive contract conformance | Q27                 | `fix: enforce optimizer hint directive contracts`        |
 | Q29 | DONE   | Milestone 1 optimizer-hint recertification audit | Q26–Q28       | `test: recertify milestone one hint boundaries`          |
 | Q30 | DONE   | Optimizer-hint ownership and analysis losslessness | Q29           | `fix: preserve optimizer hint ownership`                 |
-| Q31 | TODO   | Milestone 1 optimizer-hint final recertification gate | Q30       | `test: finally recertify milestone one hint boundaries`  |
+| Q31 | DONE   | Milestone 1 optimizer-hint final recertification gate | Q30       | `test: finally recertify milestone one hint boundaries`  |
 
-### Milestone 2 — administration and remaining DDL (deferred)
+### Milestone 2 — administration and remaining DDL (eligible)
 
-Deferred while Q31 is incomplete. Milestone 2 becomes eligible again only
-after every Milestone 1 Q task is `DONE`. Its numbering, dependencies, and
-specifications are intentionally unchanged from the prior plan revision.
+Every Milestone 1 Q task is `DONE`, so Milestone 2 is eligible and P16 is the
+lowest-numbered remaining task. Its numbering, dependencies, and specifications
+are intentionally unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -3743,7 +3744,7 @@ with no broken requirements in a clean environment, and the installed-wheel
 UTYPE smoke query parsed and reparsed as `UnionHint`. The staged
 repository-wide pre-commit suite was also clean.
 
-### Q31 — Milestone 1 optimizer-hint final recertification gate — `TODO`
+### Q31 — Milestone 1 optimizer-hint final recertification gate — `DONE`
 
 **Outcome.** Re-run Q29's complete source inventory, issue fixture, composed
 positive/negative workload, analysis, strict-AST, foreign, and release gates
@@ -3763,10 +3764,45 @@ dependency changes, assertion weakening, release, push, and remote mutation.
 **Primary sources.** Q29–Q30's sources and completion records, GitHub issue #2,
 the complete 26.2 Hints subtree, and installed SQLGlot 30.13 sources.
 
-## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
+**Completion record.** Re-read the Q29–Q30 completion records and the complete
+architecture, coverage, roadmap, changelog, and installation-facing contracts.
+Re-opened GitHub issue #2 and the complete 26.2 Hints inventory plus every
+linked directive page (`:c`, `:v`, ALLNODES, DEPOT_FETCH, DISTRIB,
+EARLY_MATERIALIZATION, ECSMODE, ENABLE_WITH_CLAUSE_MATERIALIZATION, GBYTYPE,
+JFMT, JTYPE, LABEL, PROJS, SKIP_PROJS, SKIP_STATISTICS, SYNTACTIC_JOIN, UTYPE,
+and VERBATIM); every endpoint returned successfully and no material source
+contradiction was found. Re-audited installed SQLGlot 30.13's tokenizer comment
+scanner, Hint parser and node, set-operation parser/generator, JOIN/table hint
+rendering, qualification, optimization, and type annotation paths.
 
-Q30–Q31 are incomplete, so Milestone 2 is deferred until every Milestone 1 Q
-task is again `DONE`. The detailed P16–P35 specifications — outcome, required work,
+Q30's regressions already convert all four Q29 findings into positive
+assertions: JFMT remains at its JOIN owner, UTYPE remains on its exact UNION ALL
+owner, mixed CTAS LABEL/prose/hinted-WITH comments emit once from one typed
+owner, and quoted or unquoted LABEL scalar identity survives qualification,
+optimization, and type annotation without warnings. The frozen 18-entry
+inventory, exact issue #2 fixture, composed positive workload, all-level
+negative scripts, compact/pretty regeneration, dump/load, copy/transform
+parents, scope, qualification, optimization, type annotation, lineage,
+strict-AST rejection, and direct/nested foreign atomicity all passed without
+another product gap. The four deliberately Generic opaque directives remain
+lossless at their documented owners and are not advertised as domain-validated
+Semantic support.
+
+The focused hint/workload gate passed 593 tests. The default Python 3.12.6
+release gate passed 8,504 tests at 92.26% branch coverage with Ruff formatting
+and lint, strict mypy, and `git diff --check` clean. Isolated Python 3.9.25,
+3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed all
+8,504 tests; 3.15 treated deprecation warnings as errors. The sdist and wheel
+built, the exact wheel force-installed with no broken requirements in a clean
+environment, and the installed-wheel issue-style leading-comment plus
+whitespace-before-plus WITH/JOIN/GROUP BY smoke parsed and reparsed as a
+canonical `Select`. **Milestone 1 — the analysis parsing surface — is finally
+recertified.** P16 is now eligible; no Milestone 2 work was started.
+
+## Detailed tasks — Milestone 2: administration and remaining DDL (eligible)
+
+Every Milestone 1 Q task is now `DONE`, so Milestone 2 is eligible and P16 is
+next. The detailed P16–P35 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
 not part of the mandatory read while Milestone 1 is active. When a P task is

@@ -242,14 +242,16 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   composition emits the prose once from one property owner; and unquoted or
   quoted LABEL scalar identity survives qualification, optimization, and type
   annotation. The four protected Generic directives remain unchanged. Q31 is
-  the replacement final gate, so Milestone 1 remains reopened and Milestone 2
-  deferred; Q31 is next.
+  complete: the final source inventory, issue fixture, composed positive and
+  negative workloads, analysis, strict-AST, foreign, default/seven-runtime,
+  build, clean-wheel, and installed-wheel smoke gates all passed. Milestone 1
+  is recertified on 2026-08-25, and P16 is now the next eligible task.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — remains deferred until Q31 completes and Milestone 1 is
-  recertified again.
+  (tasks P16–P35) — is now eligible after Q31 recertified Milestone 1; P16 is
+  next.
 
 ## Phase 1 — core analytical SQL and physical design
 
@@ -361,7 +363,7 @@ Implemented catalog P0:
   temporary-table/single-SELECT restrictions, with CHECK expression content
   left as a named server-side residual.
 
-Remaining (all Milestone 2; eligible after Milestone 1 recertification):
+Remaining (all Milestone 2; now eligible after Milestone 1 recertification):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);

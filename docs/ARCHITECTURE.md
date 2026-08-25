@@ -935,8 +935,9 @@ onto both the property and query. Compact and pretty generation therefore
 emit it once and remain text-stable. Finally, unquoted LABEL values canonicalize
 from SQLGlot's column-shaped hint argument to scalar `Var` children; quoted
 labels remain string literals. Qualification, optimization, and type
-annotation no longer reinterpret either form as a query column. Q31 remains
-the replacement certification gate.
+annotation no longer reinterpret either form as a query column. Q31's complete
+source, issue-fixture, analysis, strict-AST, foreign, seven-runtime, and
+clean-wheel gate recertified this combined contract on 2026-08-25.
 
 ## Generator policy
 
