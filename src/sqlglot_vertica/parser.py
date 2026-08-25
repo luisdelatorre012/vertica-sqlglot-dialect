@@ -2053,6 +2053,8 @@ class VerticaParser(PostgresParser):
                 self._raise_select_field_error("Vertica ORDER BY does not support SIBLINGS")
             if isinstance(node, exp.Ordered) and node.args.get("with_fill") is not None:
                 self._raise_select_field_error("Vertica ORDER BY does not support WITH FILL")
+            if isinstance(node, vexp.VerticaOrdered):
+                self._validate_explicit_null_order(node)
             if isinstance(node, exp.Star) and any(
                 value is not None for value in node.args.values()
             ):
@@ -2091,23 +2093,116 @@ class VerticaParser(PostgresParser):
     def _parse_ordered(
         self, parse_method: t.Callable[[], exp.Expr | None] | None = None
     ) -> exp.Ordered | None:
-        start = self._index
-        expression = super()._parse_ordered(parse_method=parse_method)
-        consumed = self._tokens[start : self._index]
-        for token, next_token in zip(consumed, consumed[1:]):
-            if (
-                token.token_type == TokenType.VAR
-                and token.text.isascii()
-                and token.text.upper() == "NULLS"
-                and next_token.text.isascii()
-                and next_token.text.upper() in {"FIRST", "LAST"}
-            ):
+        this = parse_method() if parse_method else self._parse_disjunction()
+        if not this:
+            return None
+
+        if this.name.upper() == "ALL" and self.dialect.SUPPORTS_ORDER_BY_ALL:
+            this = exp.var("ALL")
+
+        asc = self._match(TokenType.ASC)
+        desc: bool | None = True if self._match(TokenType.DESC) else (False if asc else None)
+
+        nulls = None
+        if self._match_null_order_keyword("NULLS"):
+            for value in ("FIRST", "LAST", "AUTO"):
+                if self._match_null_order_keyword(value):
+                    nulls = self.expression(exp.var(value))
+                    break
+            if nulls is None:
                 self._raise_select_field_error(
-                    "Vertica ORDER BY does not support explicit NULLS FIRST or NULLS LAST"
+                    "Vertica NULLS placement requires FIRST, LAST, or AUTO"
                 )
-        if expression is not None and expression.args.get("with_fill") is not None:
+
+        if nulls is not None and (
+            self._match_null_order_keyword("NULLS", advance=False)
+            or any(
+                self._match_null_order_keyword(value, advance=False)
+                for value in ("FIRST", "LAST", "AUTO")
+            )
+        ):
+            self._raise_select_field_error("Vertica order items accept one NULLS placement")
+        if nulls is None and any(
+            self._match_null_order_keyword(value, advance=False)
+            for value in ("FIRST", "LAST", "AUTO")
+        ):
+            self._raise_select_field_error(
+                "FIRST, LAST, and AUTO require a preceding NULLS keyword"
+            )
+
+        if self._match_text_seq("WITH", "FILL"):
+            with_fill = self.expression(
+                exp.WithFill(
+                    from_=self._match(TokenType.FROM) and self._parse_bitwise(),
+                    to=self._match_text_seq("TO") and self._parse_bitwise(),
+                    step=self._match_text_seq("STEP") and self._parse_bitwise(),
+                    interpolate=self._parse_interpolate(),
+                )
+            )
+        else:
+            with_fill = None
+
+        expression: exp.Ordered = (
+            vexp.VerticaOrdered(
+                this=this,
+                desc=desc,
+                nulls_first=nulls.name == "FIRST",
+                nulls=nulls,
+                with_fill=with_fill,
+            )
+            if nulls is not None
+            else exp.Ordered(
+                this=this,
+                desc=desc,
+                nulls_first=bool(
+                    (
+                        (not desc and self.dialect.NULL_ORDERING == "nulls_are_small")
+                        or (desc and self.dialect.NULL_ORDERING != "nulls_are_small")
+                    )
+                    and self.dialect.NULL_ORDERING != "nulls_are_last"
+                ),
+                with_fill=with_fill,
+            )
+        )
+        expression = self.expression(expression)
+        if expression.args.get("with_fill") is not None:
             self._raise_select_field_error("Vertica ORDER BY does not support WITH FILL")
         return expression
+
+    def _match_null_order_keyword(self, word: str, *, advance: bool = True) -> bool:
+        token_types = {"FIRST": TokenType.FIRST}
+        matched = (
+            self._curr is not None
+            and self._curr.token_type == token_types.get(word, TokenType.VAR)
+            and self._curr.text.isascii()
+            and self._curr.text.upper() == word
+        )
+        if matched and advance:
+            self._advance()
+        return matched
+
+    def _validate_explicit_null_order(self, expression: vexp.VerticaOrdered) -> None:
+        value = expression.args.get("nulls")
+        if not isinstance(value, exp.Var) or value.name not in {"FIRST", "LAST", "AUTO"}:
+            self._raise_select_field_error("Vertica NULLS placement is malformed")
+
+        if expression.find_ancestor(vexp.Timeseries, vexp.Match):
+            self._raise_select_field_error(
+                "TIMESERIES and MATCH ordering do not support explicit NULLS placement"
+            )
+
+        if expression.find_ancestor(vexp.PartitionedLimit):
+            if value.name == "AUTO":
+                self._raise_select_field_error("Partitioned LIMIT does not support NULLS AUTO")
+            return
+
+        if expression.find_ancestor(exp.Window, exp.WithinGroup):
+            return
+
+        if value.name == "AUTO":
+            self._raise_select_field_error(
+                "NULLS AUTO is supported only by analytic windows and WITHIN GROUP"
+            )
 
     def _parse_table(
         self,
@@ -9600,6 +9695,10 @@ class VerticaParser(PostgresParser):
 
         order = query.args.get("order")
         if order:
+            if order.find(vexp.VerticaOrdered):
+                self._raise_select_field_error(
+                    "Physical projection ORDER BY does not support explicit NULLS placement"
+                )
             query.set("order", None)
 
         segmentation = self._parse_projection_segmentation()

@@ -166,9 +166,22 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   conformance** and **Q29 — optimizer-hint recertification audit** and
   **Q30 — optimizer-hint ownership and analysis losslessness**. Q30 closed
   the four losslessness blockers found by Q29. Completed **Q31 — Milestone 1
-  optimizer-hint final recertification gate** on 2026-08-25. The complete
-  analysis parsing surface is certified again, every Q task is `DONE`, and
-  P16 is the lowest-numbered eligible task.
+  optimizer-hint final recertification gate** on 2026-08-25. At that point the
+  complete analysis parsing surface was certified again, every then-existing Q
+  task was `DONE`, and P16 became eligible.
+- On 2026-08-25 a user report showed that the parser deliberately rejects
+  `NULLS FIRST` and `NULLS LAST` even though Vertica accepts explicit NULL
+  placement. The Q21 token-provenance guard raises the false diagnostic from
+  every `_parse_ordered` owner, so it also blocks forms that the 26.2 window
+  order, partitioned LIMIT, ordered-aggregate, and Top-K projection pages
+  explicitly document. The ordinary SELECT ORDER BY page omits the qualifiers
+  and describes datatype-dependent defaults, so Q32 must record that source/
+  operational conflict while implementing the user-directed accepted contract
+  losslessly rather than deleting the guard and relying on SQLGlot's default-
+  ordering Boolean. Q33 is the replacement recertification gate. Q31 remains
+  `DONE` as historical evidence, but **Milestone 1 is reopened** and P16 is
+  deferred. Completed **Q32 — explicit NULL-ordering conformance**; Q33 is the
+  lowest-numbered remaining task and alone owns recertification.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -290,7 +303,7 @@ task may be `IN_PROGRESS` across all tables.
 | P14 | DONE   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | DONE   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
 
-### Milestone 1 — analysis parsing surface (reopened by issue #2 and hint audit)
+### Milestone 1 — analysis parsing surface (reopened by NULL-ordering regression)
 
 Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 
@@ -327,12 +340,15 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q29 | DONE   | Milestone 1 optimizer-hint recertification audit | Q26–Q28       | `test: recertify milestone one hint boundaries`          |
 | Q30 | DONE   | Optimizer-hint ownership and analysis losslessness | Q29           | `fix: preserve optimizer hint ownership`                 |
 | Q31 | DONE   | Milestone 1 optimizer-hint final recertification gate | Q30       | `test: finally recertify milestone one hint boundaries`  |
+| Q32 | DONE   | Explicit NULL-ordering conformance             | Q31                | `fix: support explicit null ordering`                     |
+| Q33 | TODO   | Milestone 1 NULL-ordering recertification gate | Q32                | `test: recertify milestone one null ordering`             |
 
-### Milestone 2 — administration and remaining DDL (eligible)
+### Milestone 2 — administration and remaining DDL (deferred)
 
-Every Milestone 1 Q task is `DONE`, so Milestone 2 is eligible and P16 is the
-lowest-numbered remaining task. Its numbering, dependencies, and specifications
-are intentionally unchanged from the prior plan revision.
+Q33 is not `DONE`, so milestone precedence defers every Milestone 2 task. P16
+remains the lowest-numbered Milestone 2 task and becomes eligible only after
+Q33 is `DONE`. P16–P35 numbering, dependencies, and
+specifications are intentionally unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -3799,10 +3815,199 @@ whitespace-before-plus WITH/JOIN/GROUP BY smoke parsed and reparsed as a
 canonical `Select`. **Milestone 1 — the analysis parsing surface — is finally
 recertified.** P16 is now eligible; no Milestone 2 work was started.
 
-## Detailed tasks — Milestone 2: administration and remaining DDL (eligible)
+### Q32 — explicit NULL-ordering conformance — `DONE`
 
-Every Milestone 1 Q task is now `DONE`, so Milestone 2 is eligible and P16 is
-next. The detailed P16–P35 specifications — outcome, required work,
+**Outcome.** Accept and losslessly preserve Vertica's explicit NULL-placement
+syntax at every documented ordering owner, correcting Q21's blanket false
+rejection without weakening the remaining strict ORDER BY field contract.
+
+**Required work.** Re-open the 26.2 ordinary ORDER BY, window order,
+partitioned LIMIT, WITHIN GROUP ORDER BY, NULL sort order, and Top-K projection
+pages before implementation. Record the source conflict precisely: the
+ordinary SELECT ORDER BY formal syntax displays only `[ASC|DESC]` and describes
+datatype-dependent default NULL placement, while the window and WITHIN GROUP
+productions explicitly admit `NULLS {FIRST|LAST|AUTO}`, partitioned LIMIT
+admits `NULLS {FIRST|LAST}`, and Top-K projection explicitly says its window
+order supports `NULLS FIRST/LAST`. The user's report that ordinary Vertica
+ORDER BY accepts `NULLS FIRST/LAST` is the required product contract for this
+task. Capture a server version and minimal successful fixture if a live Vertica
+connection is available; if one is not available, retain the user-directed
+ordinary-query acceptance as an explicit operational-evidence exception and
+do not repeat Q21's omission-based rejection.
+
+Audit every installed SQLGlot 30.13 ordering path before choosing the AST:
+`Dialect.NULL_ORDERING`, `Parser._parse_ordered`, `Generator.ordered_sql`,
+canonical `exp.Order`/`exp.Ordered`, optimizer rewrites, and each plugin owner
+of `_parse_ordered`. Q21's current override scans the consumed tokens and
+raises `Vertica ORDER BY does not support explicit NULLS FIRST or NULLS LAST`
+without knowing whether the owner is an outer query, analytic window,
+partitioned LIMIT, ordered aggregate, or projection. Remove that blanket
+rejection and replace it with an owner-aware contract:
+
+- ordinary SELECT, subquery, CTE, set-branch, and whole-compound ORDER BY
+  accepts explicit `NULLS FIRST` and `NULLS LAST` with omitted, `ASC`, or
+  `DESC` direction;
+- analytic window ORDER BY and WITHIN GROUP ORDER BY accept `FIRST`, `LAST`,
+  and their separately documented `AUTO` value;
+- partitioned `LIMIT ... OVER` and Top-K projection window ordering accept
+  `FIRST` and `LAST`, but not `AUTO`; and
+- physical-design ORDER BY forms that do not use one of those documented
+  window productions retain their existing stricter grammar.
+
+The representation must preserve whether NULL placement was explicit and, for
+documented owners, which spelling was used. Canonical `exp.Ordered` stores a
+required `nulls_first` Boolean even when the source omitted the clause, and the
+Vertica dialect inherits PostgreSQL's single `nulls_are_large` default even
+though ordinary Vertica defaults depend on the expression datatype. Therefore
+deleting the parser guard or changing `NULL_ORDERING` is insufficient: either
+choice conflates omitted syntax with an explicit qualifier and can drop a
+source-written `NULLS LAST`/`FIRST` during generation. Add typed provenance or
+a canonical-compatible custom ordered node, document its programmatic-AST
+contract, and keep an unqualified order item unqualified on output without
+guessing its datatype.
+
+Add a focused matrix for all direction × NULL-placement combinations,
+multiple mixed order items, expressions and ordinals, comments, outer and
+branch-local/whole-compound tails, subqueries, CTEs, analyzer-safe AT-prefixed
+roots, analytic windows, ordered aggregates, partitioned LIMIT, and Top-K
+projection. Assert compact and pretty parse/generate/reparse equality,
+`dump()`/load, copy/transform parent metadata, type annotation, scope
+traversal, qualification, optimization, and lineage; prove those operations
+do not erase or fabricate explicit placement. Replace Q21's two negative
+fixtures with positive regressions while retaining its SIBLINGS/WITH FILL and
+other inherited-field negatives.
+
+Malformed or context-invalid forms — bare `NULLS`, unknown values, duplicate
+placement, trailing FIRST/LAST tokens, and `AUTO` outside its documented
+owners — must raise `ParseError` at `IMMEDIATE`, `RAISE`, `WARN`, and `IGNORE`
+without returning a partial query or swallowing a following statement. Strict
+Vertica generation must validate direct and nested ordered nodes, explicit-
+placement provenance, direction/value types, owner placement, falsey extras,
+and legacy canonical `exp.Ordered` interoperability before emitting text; it
+must never silently omit an explicit qualifier or fabricate one from the
+datatype-dependent default. Give any custom node an intentional direct/nested
+PostgreSQL, DuckDB, MySQL, and SQLite policy: use a documented semantics-
+preserving lowering only where the target can express the exact placement,
+otherwise fail atomically.
+
+Update Q21's architecture classification, the SELECT/window/ordered-aggregate/
+partitioned-LIMIT/projection coverage rows, the known datatype-dependent
+default boundary, source inventory, roadmap, changelog, and this task's status.
+Use an ordinary `SELECT ... ORDER BY ... NULLS LAST` query returning `Select`
+as the installed-wheel smoke, then run the complete common release gate.
+
+**Explicit exclusions.** No evaluation of result-row order or optimizer plan
+quality; no schema/catalog inference of the default placement; no change to
+projection storage ordering beyond the cited Top-K window production; no new
+ORDER SIBLINGS/WITH FILL syntax; no unrelated window-frame, aggregate, LIMIT,
+or physical-design grammar; no SQLGlot dependency change; and no release,
+push, or remote mutation.
+
+**Primary sources.** [ORDER BY clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/order-by-clause/),
+[Window order clause](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/window-clauses/window-order-clause/),
+[LIMIT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/limit-clause/),
+[WITHIN GROUP ORDER BY clause](https://docs.vertica.com/26.2.x/en/sql-reference/functions/aggregate-functions/within-group-order-by-clause/),
+[NULL sort order](https://docs.vertica.com/26.2.x/en/data-analysis/query-optimization/analytic-functions/null-sort-order/),
+[Top-K projection](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-projection/top-k-projection/),
+the user-reported Vertica acceptance, and installed SQLGlot 30.13 ordering
+parser/AST/generator/optimizer sources.
+
+**Implementation pointers (non-normative, verified 2026-08-25).** The false
+diagnostic is emitted by `VerticaParser._parse_ordered`, which records its
+start index, delegates to SQLGlot, scans the consumed tokens for `NULLS`
+followed by `FIRST`/`LAST`, and calls `_raise_select_field_error`; because the
+same override is reused everywhere, direct probes fail for ordinary SELECT,
+`ROW_NUMBER() OVER (...)`, `LIMIT ... OVER (...)`, and `LISTAGG(...) WITHIN
+GROUP (...)`. Q21 pins the ordinary FIRST/LAST forms in
+`test_inherited_query_source_forms_fail_closed`. The strict generator currently
+accepts only a Boolean `exp.Ordered.nulls_first` and delegates rendering to
+SQLGlot. Under the inherited `nulls_are_large` default, canonical SQLGlot can
+omit an explicit qualifier when it matches that assumed default, proving that
+removing only the parser rejection would not be lossless.
+
+**Completion record.** Re-opened all six 26.2 primary pages and audited the
+installed SQLGlot 30.13 parser, `Ordered`/`Order` AST, generator, dialect NULL
+default, and optimizer paths. The documented conflict remains material:
+ordinary ORDER BY shows only ASC/DESC and datatype-dependent default placement,
+while analytic windows and WITHIN GROUP explicitly admit FIRST/LAST/AUTO,
+partitioned LIMIT admits FIRST/LAST, and Top-K projection explicitly supports
+FIRST/LAST. No live Vertica connection is configured in this repository, so
+the user-reported ordinary-query acceptance is retained as the task-authorized
+operational-evidence exception rather than inferred from the ordinary page's
+omission.
+
+Added `VerticaOrdered(exp.Ordered)` with a typed `nulls` child that exists only
+when FIRST, LAST, or AUTO was written. Omitted items remain canonical
+`exp.Ordered`, so generation never guesses a qualifier from SQLGlot's single
+PostgreSQL-derived default Boolean. Ordinary, nested, CTE, set-branch,
+compound-tail, and AT-prefixed ordering accepts FIRST/LAST; analytic windows
+and WITHIN GROUP additionally accept AUTO; partitioned LIMIT and Top-K accept
+FIRST/LAST only. TIMESERIES, MATCH, and physical projection/table storage
+ordering retain their narrower grammar. Malformed, duplicate, trailing, and
+wrong-owner qualifiers raise `ParseError` at IMMEDIATE, RAISE, WARN, and
+IGNORE without swallowing a following statement. Strict generation validates
+the custom value, Boolean/direction consistency, owner, child shape, falsey
+extras, and legacy canonical interoperability before output. Explicit custom
+items fail atomically when direct or nested in PostgreSQL, DuckDB, MySQL, and
+SQLite, while Vertica compact/pretty output, dump/load, copy/transform parents,
+type annotation, scope traversal, qualification, optimization, and lineage
+preserve the exact qualifier.
+
+Added `tests/test_null_ordering.py` (82 focused tests) and converted Q21's two
+former rejection fixtures to positive coverage. The affected ordering/query
+neighborhood passed 1,307 tests. The default Python 3.12.6 release gate passed
+8,579 tests at 92.24% branch coverage with Ruff formatting/lint, strict mypy,
+and diff checks clean. Isolated Python 3.9.25, 3.10.20, 3.11.15, 3.12.13,
+3.13.15, 3.14.7, and 3.15.0rc1 each passed all 8,579 tests; 3.15 treated
+deprecation warnings as errors. The sdist and wheel built, the exact wheel
+force-installed with no broken requirements in a clean environment, and the
+installed-wheel ordinary `NULLS LAST` smoke returned `Select`. Milestone 1
+remains reopened; Q33 alone owns recertification and P16 remains deferred.
+
+### Q33 — Milestone 1 NULL-ordering recertification gate — `TODO`
+
+**Outcome.** Re-certify the analysis parsing surface only after Q32 proves
+explicit NULL placement is lossless, analyzer-stable, context-correct, and
+atomic across every affected ordering owner.
+
+**Required work.** Introduce no new production grammar. Re-read Q21, Q31, and
+Q32's completion records and re-open Q32's primary sources. Extend the
+realistic workload gate with ordinary explicit FIRST/LAST order items, an
+analytic window, an ordered aggregate, partitioned LIMIT, a parenthesized
+set-operation branch and whole-compound tail, an AT-prefixed/CTE composition,
+and the applicable Top-K projection control. Exercise mixed explicit and
+omitted order items so the corpus proves the AST never guesses or emits a
+datatype-dependent default.
+
+Add all-four-error-level negative multi-statement scripts for malformed NULL
+placement and wrong-owner `AUTO`, plus strict direct/nested AST and foreign-
+generation coverage. Re-run compact/pretty regeneration, parse-after-generate,
+serialization, copy/transform parents, type annotation, public scope,
+qualification, optimization, lineage, the complete focused ordering/query
+neighborhood, default coverage gate, all seven isolated CPython runtimes,
+sdist/wheel build, clean-wheel install, installed-wheel smoke, staged
+repository-wide hooks, and diff hygiene.
+
+If every check passes, update the coverage matrix, roadmap, changelog,
+README/installation-facing milestone statement, dashboard, and Current state
+with exact evidence, mark Q33 `DONE`, and state that Milestone 1 is recertified
+and P16 is again eligible. If another ordering product gap is found, do not fix
+it in the gate or weaken an assertion; schedule the smallest bounded Q task,
+keep certification withdrawn, and leave Milestone 2 deferred.
+
+**Explicit exclusions.** Production changes, server data/plan verification,
+new ordering grammar, dependency changes, assertion weakening, release, push,
+and remote mutation.
+
+**Primary sources.** Q32's sources and completion record, the Q21 inherited-
+field closure record, the Q31 final recertification record, and installed
+SQLGlot 30.13 ordering/analysis implementations.
+
+## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
+
+Q33 is not `DONE`, so Milestone 2 remains deferred. P16 becomes next only after
+Q33 completes and expressly recertifies Milestone 1. The
+detailed P16–P35 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
 not part of the mandatory read while Milestone 1 is active. When a P task is

@@ -242,8 +242,8 @@ TABLESAMPLE, ORDER/Ordered, Lateral, Pivot, and Star nodes are checked before
 they can escape the query parser, and the same whole-tree preflight runs before
 PostgreSQL's SELECT preprocessing can lower or discard a field. Named WINDOW,
 CONNECT BY, LATERAL VIEW, PIVOT/UNPIVOT, DISTRIBUTE/SORT/CLUSTER BY, star
-EXCLUDE/EXCEPT/REPLACE, ORDER SIBLINGS BY/WITH FILL and explicit NULLS
-ordering, table ONLY/historical `AT (...)`, and method/ROWS/PERCENT/REPEATABLE
+EXCLUDE/EXCEPT/REPLACE, ORDER SIBLINGS BY/WITH FILL, table ONLY/historical
+`AT (...)`, and method/ROWS/PERCENT/REPEATABLE
 TABLESAMPLE variants now raise `ParseError` at every parser error level.
 Strict direct and nested generation rejects those fields, falsey mutations,
 unknown fields, and malformed child shapes with `UnsupportedError` before an
@@ -253,6 +253,26 @@ subqueries; numeric range and sampling behavior remain server checks. LATERAL
 remains admitted only as the canonical output of the approved CROSS/OUTER
 APPLY lowerings (INNER/LEFT LATERAL JOIN with `ON TRUE`), so those outputs
 still reparse while free-standing LATERAL syntax fails closed.
+
+Q32 corrects Q21's former blanket rejection of explicit NULL placement.
+Parser-written qualifiers use `VerticaOrdered(exp.Ordered)`, whose typed
+`nulls` child records source-explicit `FIRST`, `LAST`, or `AUTO`; ordering with
+no qualifier remains canonical `exp.Ordered`. This distinction is necessary
+because canonical SQLGlot always stores a `nulls_first` Boolean derived from
+one dialect-wide default, while Vertica's ordinary-query default depends on
+the ordered expression's datatype. Ordinary query, subquery, CTE, set-branch,
+compound-tail, and historical-root ordering accepts explicit FIRST/LAST.
+Analytic windows and WITHIN GROUP additionally accept AUTO. Partitioned LIMIT,
+including the Top-K projection production, accepts FIRST/LAST but rejects
+AUTO. TIMESERIES, MATCH, and physical projection/table storage ordering retain
+their narrower grammar. Malformed, duplicate, and wrong-owner qualifiers fail
+through the query family's guaranteed-raise path at every parser error level.
+Strict generation validates provenance, finite values, Boolean/direction
+consistency, owner placement, and unknown fields before rendering the exact
+written qualifier. Omitted parser output never fabricates one. Explicit custom
+items fail atomically in PostgreSQL, DuckDB, MySQL, and SQLite rather than
+letting a foreign default silently alter their placement; canonical Ordered
+trees remain available for legacy/programmatic interoperability.
 
 Q22 closes the independent custom query-extension boundary. TIMESERIES,
 MATCH, and INTERPOLATE each route every recognized malformed required-child,

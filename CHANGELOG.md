@@ -6,6 +6,11 @@ This release recertifies the analysis parsing surface after the complete
 optimizer-hint provenance, directive-contract, ownership, and losslessness
 audit.
 
+- Added lossless explicit NULL placement across ordinary query ordering,
+  analytic windows, WITHIN GROUP aggregates, partitioned LIMIT, and Top-K
+  projections. Typed provenance preserves FIRST/LAST/AUTO without guessing
+  datatype-dependent defaults; wrong-owner AUTO and malformed forms fail
+  atomically, and physical storage ordering retains its stricter grammar.
 - Finally recertified Milestone 1 after the complete 18-entry optimizer-hint
   inventory, GitHub issue #2 fixture, composed positive/negative workload,
   analysis, strict-AST, foreign-generation, seven-runtime, package-build, and

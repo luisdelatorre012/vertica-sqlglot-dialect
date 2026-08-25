@@ -501,6 +501,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.MatchDefinition: lambda self, expression: self.matchdefinition_sql(expression),
         vexp.NoProjectionProperty: lambda *_: "NO PROJECTION",
         vexp.PartitionedLimit: lambda self, expression: self.partitionedlimit_sql(expression),
+        vexp.VerticaOrdered: lambda self, expression: self.verticaordered_sql(expression),
         vexp.ProjectionColumn: lambda self, expression: self.projectioncolumn_sql(expression),
         vexp.ProjectionSegmentation: lambda self, expression: self.projectionsegmentation_sql(
             expression
@@ -1112,15 +1113,52 @@ class VerticaGenerator(PostgresGenerator):
 
         elif isinstance(expression, exp.Ordered):
             desc = expression.args.get("desc")
+            explicit_nulls = expression.args.get("nulls")
             if (
-                self._has_user_extras(expression, set(exp.Ordered.arg_types))
+                self._has_user_extras(
+                    expression,
+                    set(vexp.VerticaOrdered.arg_types)
+                    if isinstance(expression, vexp.VerticaOrdered)
+                    else set(exp.Ordered.arg_types),
+                )
                 or not isinstance(expression.args.get("this"), exp.Expr)
                 or (desc is not None and type(desc) is not bool)
                 or type(expression.args.get("nulls_first")) is not bool
                 or expression.args.get("with_fill") is not None
+                or (
+                    isinstance(expression, vexp.VerticaOrdered)
+                    and (
+                        not isinstance(explicit_nulls, exp.Var)
+                        or explicit_nulls.name not in {"FIRST", "LAST", "AUTO"}
+                        or expression.args.get("nulls_first")
+                        is not (explicit_nulls.name == "FIRST")
+                    )
+                )
             ):
-                self.unsupported("Vertica ORDER BY supports only expression and ASC or DESC")
+                self.unsupported("Vertica ORDER BY contains a malformed ordered item")
                 return False
+
+            if isinstance(expression, vexp.VerticaOrdered):
+                assert isinstance(explicit_nulls, exp.Var)
+                if expression.find_ancestor(vexp.Timeseries, vexp.Match):
+                    self.unsupported(
+                        "TIMESERIES and MATCH ordering do not support explicit NULLS placement"
+                    )
+                    return False
+                if expression.find_ancestor(vexp.CreateProjection) and not expression.find_ancestor(
+                    vexp.PartitionedLimit
+                ):
+                    self.unsupported(
+                        "Physical projection ORDER BY does not support explicit NULLS placement"
+                    )
+                    return False
+                if explicit_nulls.name == "AUTO" and not expression.find_ancestor(
+                    exp.Window, exp.WithinGroup
+                ):
+                    self.unsupported(
+                        "NULLS AUTO is supported only by analytic windows and WITHIN GROUP"
+                    )
+                    return False
 
         elif isinstance(expression, exp.Star):
             if self._has_user_extras(expression, set(exp.Star.arg_types)) or any(
@@ -6993,6 +7031,16 @@ class VerticaGenerator(PostgresGenerator):
         if not self._validate_query_field_closure(expression):
             return ""
         return super().ordered_sql(expression)
+
+    def verticaordered_sql(self, expression: vexp.VerticaOrdered) -> str:
+        if not self._validate_query_field_closure(expression):
+            return ""
+        nulls = expression.args["nulls"]
+        assert isinstance(nulls, exp.Var)
+        this = self.sql(expression, "this")
+        desc = expression.args.get("desc")
+        direction = " DESC" if desc else (" ASC" if desc is False else "")
+        return f"{this}{direction} NULLS {nulls.name}"
 
     def star_sql(self, expression: exp.Star) -> str:
         if not self._validate_query_field_closure(expression):

@@ -1504,6 +1504,15 @@ class PartitionedLimit(exp.Limit):
     }
 
 
+class VerticaOrdered(exp.Ordered):
+    """An order item carrying source-explicit Vertica NULL placement."""
+
+    arg_types: t.ClassVar = {
+        **exp.Ordered.arg_types,
+        "nulls": True,
+    }
+
+
 class MatchDefinition(exp.Expression):
     """A named event predicate in a Vertica MATCH clause."""
 

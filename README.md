@@ -24,8 +24,9 @@ The current development baseline is:
 Python 3.15 support is tested against the latest available prerelease until
 CPython 3.15 reaches general availability.
 
-Milestone 1, the complete analysis parsing surface for SELECT/CTE and
-temporary-table workloads, is certified across the supported runtime matrix.
+Milestone 1's prior certification remains reopened while Q33 recertifies Q32's
+completed explicit `NULLS FIRST`/`NULLS LAST` ordering correction. Milestone 2
+remains deferred until that gate passes.
 
 The SQLGlot dependency is intentionally bounded to one minor line because
 dialect parser/generator subclass APIs can change between minor releases. The

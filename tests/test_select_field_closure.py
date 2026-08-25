@@ -64,8 +64,6 @@ def test_documented_tablesample_and_ordinary_query_forms_roundtrip(sql: str, exp
         "SELECT * FROM t TABLESAMPLE (a)",
         "SELECT a FROM t ORDER SIBLINGS BY a",
         "SELECT a FROM t ORDER BY a WITH FILL",
-        "SELECT a FROM t ORDER BY a NULLS FIRST",
-        "SELECT a FROM t ORDER BY a NULLS LAST",
         "SELECT * EXCLUDE (a) FROM t",
         "SELECT * EXCEPT (a) FROM t",
         "SELECT * REPLACE (a AS b) FROM t",
