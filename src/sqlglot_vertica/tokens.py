@@ -9,3 +9,7 @@ class DirectedPostfixComment(str):
 
 class MisplacedDirectedComment(str):
     """A directed annotation scanned before a complete value expression."""
+
+
+class OptimizerHintComment(str):
+    """A comment scanned from the exact ``/*+`` optimizer-hint delimiter."""

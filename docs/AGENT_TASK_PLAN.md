@@ -131,9 +131,38 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 - Completed **Q23 — FOR UPDATE target analysis safety**. Q24 is the
   lowest-numbered remaining task.
 - Completed **Q24 — AT epoch WITH compound-query composition**.
-- Completed **Q25 — Milestone 1 recertification gate** on 2026-08-22. The
-  complete analysis parsing surface is certified; every Q task is `DONE`,
-  Milestone 2 is eligible, and P16 is the lowest-numbered remaining task.
+- Completed **Q25 — Milestone 1 recertification gate** on 2026-08-22. At that
+  point the complete analysis parsing surface was certified and Milestone 2
+  became eligible; that certification is now superseded by the issue #2 audit
+  below.
+- On 2026-08-25, [GitHub issue #2](https://github.com/luisdelatorre012/vertica-sqlglot-dialect/issues/2)
+  reported that a realistic WITH/join/GROUP BY query fails under
+  `parse(sql_text, read="vertica")` when preceded by a metadata block containing
+  bare `--` separator comments. The exact fixture reproduces at every parser
+  error level as `Failed to parse '[]' into Hint`; deleting only the bare
+  separators makes the unchanged SQL body parse as a canonical `Select` with a
+  `With`, two joins, and `VerticaGroup`. The shared optimizer-hint extractor is
+  attempting to parse every ordinary comment as `exp.Hint`; empty bodies raise,
+  and ordinary line/block comments whose text matches an allowed hint name are
+  incorrectly promoted even though the documented hint delimiter is `/*+`.
+- A source-backed adjacent audit on the same date confirmed two independent
+  product gaps beyond issue #2. First, the separate GROUP BY path promotes
+  ordinary `-- GBYTYPE(HASH)` and `/* GBYTYPE(HASH) */` comments into a real
+  `/*+GBYTYPE(HASH)*/` hint at every parser error level, while the documented
+  whitespace-before-plus spelling `/* + GBYTYPE(HASH) */` is treated as prose.
+  Genuine but malformed optimizer-hint comments can also lose their plus
+  delimiter, move to another owner, or disappear entirely; a malformed INSERT
+  LABEL reaches a raw `AttributeError` instead of `ParseError`. Second, the
+  modeled hint sites accept source-invalid directive shapes at every error
+  level, including `JTYPE(X)`, one- or three-argument `DISTRIB`, argument-bearing
+  `ENABLE_WITH_CLAUSE_MATERIALIZATION`/`ALLNODES`/`SYNTACTIC_JOIN`/`VERBATIM`,
+  empty projection lists, zero- or multi-argument LABEL, expression-valued
+  LABEL, and 129-octet labels. Q27 and Q28 own those bounded remediations; Q29
+  is the replacement recertification gate and full 26.2 hint-inventory audit.
+- Q25 remains `DONE` as historical gate evidence, but Milestone 1 is reopened
+  until Q26–Q29 are all `DONE`. Completed **Q26 — optimizer-hint comment
+  provenance and issue #2 regression**. Q27 is the lowest-numbered eligible
+  task; P16 and all Milestone 2 work are deferred meanwhile.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -255,7 +284,7 @@ task may be `IN_PROGRESS` across all tables.
 | P14 | DONE   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | DONE   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
 
-### Milestone 1 — analysis parsing surface
+### Milestone 1 — analysis parsing surface (reopened by issue #2 and hint audit)
 
 Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 
@@ -286,12 +315,16 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q23 | DONE   | FOR UPDATE target analysis safety             | Q20–Q22             | `fix: make for update targets analyzer safe`             |
 | Q24 | DONE   | AT epoch WITH compound-query composition      | Q23                 | `fix: compose historical ctes and set branches`          |
 | Q25 | DONE   | Milestone 1 recertification gate              | Q23–Q24             | `test: recertify milestone one analysis surface`         |
+| Q26 | DONE   | Optimizer-hint comment provenance and issue #2 regression | Q25       | `fix: preserve ordinary comments around optimizer hints` |
+| Q27 | TODO   | Optimizer-hint delimiter and parsing atomicity | Q26                | `fix: make optimizer hint parsing atomic`                 |
+| Q28 | TODO   | Optimizer-hint directive contract conformance | Q27                 | `fix: enforce optimizer hint directive contracts`        |
+| Q29 | TODO   | Milestone 1 optimizer-hint recertification gate | Q26–Q28           | `test: recertify milestone one hint boundaries`          |
 
-### Milestone 2 — administration and remaining DDL (eligible)
+### Milestone 2 — administration and remaining DDL (deferred)
 
-Eligible now that every Milestone 1 Q task is `DONE`. Milestone 2 task
-numbering, dependencies, and specifications are intentionally unchanged from
-the prior plan revision.
+Deferred while Q26–Q29 are incomplete. Milestone 2 becomes eligible again only
+after every Milestone 1 Q task is `DONE`. Its numbering, dependencies, and
+specifications are intentionally unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -3087,11 +3120,417 @@ treating deprecations as errors. The sdist/wheel build, clean force-install,
 with a parenthesized branch-local ORDER BY/LIMIT, returning `AtEpochUnion`)
 passed. **Milestone 1 — the analysis parsing surface — is recertified.**
 
-## Detailed tasks — Milestone 2: administration and remaining DDL (eligible)
+### Q26 — optimizer-hint comment provenance and issue #2 regression — `DONE`
 
-Every Milestone 1 Q task is `DONE`, so Milestone 2 is eligible. The detailed
-P16–P35 specifications — outcome, required work, exclusions, primary sources, and
-completion records — are maintained verbatim in
+**Outcome.** Make ordinary comments inert at every optimizer-hint extraction
+site so the exact metadata-prefixed WITH query from GitHub issue #2 parses,
+analyzes, and regenerates normally. Only comments with genuine optimizer-hint
+delimiter provenance may become structured hints; empty or prose comments must
+never be parsed as `exp.Hint`, raise an inner-parser exception, or acquire hint
+semantics. Complete the reported regression without absorbing the independent
+delimiter/atomicity and directive-contract gaps now assigned to Q27 and Q28;
+Milestone 1 remains reopened through Q29.
+
+**Required work.** Re-open issue #2 and copy its SQL body verbatim into a
+durable regression fixture. Re-open the 26.2 optimizer-hints page and audit the
+installed SQLGlot 30.13 tokenizer/comment scanner, `exp.maybe_parse`,
+`parse_one(..., into=exp.Hint)`, and Hint AST contract. Audit the plugin's
+`_VerticaTokenizerCore._scan_comment`, internal comment marker classes,
+`_optimizer_hint_from_comment`, `_extract_optimizer_hints`, and every shared
+consumer: WITH, table and table-alias hints, JOIN hints, and CTAS hints. Also
+baseline the independent SELECT/EXPLAIN/DML/COPY Hint-token path, GBYTYPE
+handling, and directed-query annotation provenance. Q27 and Q28 own the known
+defects in those neighboring paths, so Q26 must record controls without
+normalizing or broadening those contracts.
+
+Retain whether a stored comment came from a real plus-delimited optimizer hint
+(an internal `str` subtype analogous to `DirectedPostfixComment` is the
+preferred existing-repository pattern, but an equally typed mechanism is
+acceptable). Classify by that provenance before invoking the Hint parser.
+Ordinary `-- ...` and non-plus `/* ... */` comments must bypass
+`exp.maybe_parse` entirely, including empty/whitespace-only bodies, punctuation
+that cannot parse into a Hint, and text that happens to equal an allowed hint
+name. Do not solve the issue by broadly catching every inner exception and
+silently demoting genuine malformed `/*+...*/` hints to prose; preserve and pin
+the existing accepted-hint and invalid-hint contracts after provenance has
+been established. Preserve comment order and the existing typed output of
+valid `ENABLE_WITH_CLAUSE_MATERIALIZATION`, `PROJS`/`SKIP_PROJS`,
+`JTYPE`/`DISTRIB`, and CTAS `LABEL` hints. Empty comment delimiters may retain
+SQLGlot's existing canonicalization (a content-free `--` can disappear during
+generation); nonempty metadata comments must remain attached in source order
+and must not be rewritten as `/*+` hints.
+
+The exact issue fixture must succeed through `sqlglot.parse`, not only
+`parse_one`, and return one non-`Command` canonical `Select` with a plain
+`With`, the `ROW_NUMBER` window, INNER and LEFT joins, and `VerticaGroup`.
+Assert compact and pretty generate/reparse equality, `dump()`/load, copy,
+transform/parent metadata, scope traversal, qualification, optimization, and
+column-lineage smoke for the unchanged query body. The issue's nonempty
+metadata comments must survive generation/reparse; do not assert byte-exact
+preservation of empty separators or original line-comment delimiters that
+SQLGlot canonicalizes globally.
+
+Add a focused public-parser matrix, preferably in `tests/test_hints.py`, with:
+
+- bare `--`, whitespace-only line comments, empty/whitespace block comments,
+  and parse-hostile punctuation comments at each shared extraction position
+  (leading/inline WITH, table without alias, table alias, JOIN, and CTAS);
+- ordinary line and block comments whose bodies are exactly the allowed hint
+  spellings for that position, proving they remain comments and create no
+  `exp.Hint` or Vertica hint wrapper without plus provenance;
+- each corresponding valid `/*+...*/` hint, plus a mixed sequence of ordinary,
+  empty, and genuine hint comments, proving only the genuine hint is promoted
+  and ordinary-comment order is stable;
+- the minimal issue reproducer and the exact issue #2 SQL at `IMMEDIATE`,
+  `RAISE`, `WARN`, and `IGNORE`, proving no nested `ParseError`/`TokenError`,
+  partial AST, warning, or swallowed following statement;
+- compact/pretty round trips, multi-statement boundaries, serialization, and
+  neighboring SELECT/EXPLAIN/DML/COPY, GBYTYPE, and directed-annotation
+  controls so tokenizer provenance does not regress another hint family.
+
+Update `ARCHITECTURE.md` with the comment-provenance boundary,
+`docs/COVERAGE.md`'s Comments and optimizer hints row with the new regression
+contract, `docs/ROADMAP.md`, and `CHANGELOG.md`. On successful completion,
+update this Current state/dashboard to record Q26 `DONE`, the exact focused and
+release-gate counts, and Q27 as the next eligible task. Leave Milestone 1
+reopened and P16 deferred through Q29. Use a compact blank-comment/CTE query
+returning `Select` as the installed-wheel smoke. If the audit finds another
+independent product gap not already owned by Q27 or Q28, schedule a new bounded
+Q task and leave the milestone reopened rather than expanding Q26.
+
+**Explicit exclusions.** No SELECT/CTE/join/GROUP BY grammar change (the issue
+body parses unchanged once its bare separator comments are removed); no new
+optimizer-hint names, placements, or semantic lowering; no requirement to
+preserve comment delimiter style or content-free separators byte-for-byte; no
+SQLGlot dependency change or upstream patch; no server optimizer-effect
+validation; no Q27 delimiter/atomicity or Q28 directive-domain remediation; and
+no GitHub issue mutation, release, push, or remote comment.
+
+**Primary sources.** [GitHub issue #2](https://github.com/luisdelatorre012/vertica-sqlglot-dialect/issues/2),
+[Hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/),
+and the installed SQLGlot 30.13 `TokenizerCore._scan_comment`,
+`sqlglot.expressions.core.maybe_parse`, parser Hint-body, and token-comment
+attachment implementations.
+
+**Implementation pointers (non-normative, verified 2026-08-25).** The current
+failure is in `_optimizer_hint_from_comment`: it unconditionally calls
+`exp.maybe_parse(comment.strip(), into=exp.Hint, dialect=self.dialect)`, and
+`maybe_parse` delegates directly to `parse_one` rather than returning `None`
+on invalid input. A bare `--` is stored on the WITH token as the empty string,
+so the nested Hint parser raises `Failed to parse '[]' into Hint` before the CTE
+body is reached, independently of the outer parser's `ErrorLevel`. The same
+helper is reused for table, alias, JOIN, and CTAS comments, and each minimal
+`/* */` fixture currently fails identically. Separately, a non-plus ordinary
+comment such as `-- ENABLE_WITH_CLAUSE_MATERIALIZATION` or
+`/* JTYPE(H) */` is currently promoted to a structured hint because delimiter
+provenance was discarded and allowed-name filtering occurs only after parsing.
+The custom tokenizer already retains provenance for directed-query comments,
+providing the nearest pattern for a plugin-local fix. The pre-task
+`tests/test_hints.py` baseline is 21 passing tests and contains neither an
+empty-comment case nor an allowed-name ordinary-comment collision.
+
+**Completion record.** Re-opened GitHub issue #2 through the public GitHub API
+and copied its SQL body verbatim into `tests/test_hints.py`; re-opened the 26.2
+Hints page and audited installed SQLGlot 30.13's `TokenizerCore._scan_comment`,
+token comment attachment, `exp.Hint`, `exp.maybe_parse`, and Hint-body parser,
+plus every plugin shared extractor consumer and the independent SELECT/
+EXPLAIN/DML/COPY, GBYTYPE, and directed-annotation paths. The source confirms
+`/*+...*/` as the optimizer-hint delimiter and separately says whitespace can
+generally surround the plus; exact-plus provenance is Q26's existing entrance,
+while whitespace-before-plus support remains the already-scheduled Q27 boundary.
+
+Added the internal `OptimizerHintComment(str)` marker and taught
+`_VerticaTokenizerCore._scan_comment` to apply it only to comments scanned from
+SQLGlot's exact `/*+` hint start. `_optimizer_hint_from_comment` now rejects a
+plain `str` before calling `exp.maybe_parse`, so empty/whitespace/prose line or
+block comments and ordinary comments whose text equals an allowed directive
+never enter the nested Hint parser or acquire structured semantics. Genuine
+exact-plus comments retain the existing WITH, table/alias, JOIN, and CTAS typed
+outputs and invalid-hint behavior; Q27's delimiter/atomicity and Q28's
+directive-domain contracts were not broadened. The shared-site audit also
+proved nonempty ordinary CTAS comments were left on the already-consumed `AS`
+token and disappeared during generation; the CTAS parser now attaches the
+post-extraction ordinary remainder to the query, preserving it without changing
+valid CTAS hint ownership.
+
+Expanded `tests/test_hints.py` from 21 to 68 tests. The matrix covers bare and
+whitespace-only line comments, empty/whitespace/parse-hostile block comments,
+and allowed-name collisions at WITH, unaliased table, table alias, JOIN, and
+CTAS positions; exact-plus and mixed ordinary/genuine controls; tokenizer
+marker identity; the verbatim issue fixture at IMMEDIATE, RAISE, WARN, and
+IGNORE; a following-statement sentinel; compact/pretty generation and reparse,
+dump/load, copy/identity-transform parents, scope traversal, qualification,
+optimization, and `col_h` lineage to `t3.col_g`. The issue fixture returns one
+canonical `Select` with a plain `With`, `ROW_NUMBER` window, INNER and LEFT
+joins, and `VerticaGroup`; its nonempty metadata comments survive canonical
+generation while content-free separators may disappear as allowed. Neighboring
+hint, GROUP BY, DML, CREATE TABLE, directed-query, and workload suites passed
+1,002 tests. Updated architecture, coverage, roadmap, source inventory, and
+changelog contracts.
+
+The default CPython 3.12.6 gate passed 8,044 tests at 92.28% branch coverage
+with Ruff lint/formatting, strict mypy, and diff checks clean. Isolated CPython
+3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed
+8,044 tests, with 3.15 treating deprecations as errors. Broken UV trampoline
+targets for the documented 3.14 and 3.15 shims were repaired to those exact
+releases before the final complete matrix; no runtime was skipped. The
+sdist/wheel build, clean force-install, `pip check`, and installed-wheel
+`python -I` smoke (a blank-comment WITH query returning canonical `Select`)
+passed. Milestone 1 remains reopened; Q27 is next and P16 remains deferred.
+
+### Q27 — optimizer-hint delimiter and parsing atomicity — `TODO`
+
+**Outcome.** Close the independent lexical and structural boundary exposed by
+the issue #2 provenance audit. An ordinary comment must never acquire optimizer
+semantics, every genuine optimizer-hint delimiter must retain that identity,
+and a genuine but structurally malformed hint must fail atomically as
+`ParseError` at `IMMEDIATE`, `RAISE`, `WARN`, and `IGNORE` instead of becoming
+prose, moving to a neighboring node, disappearing, returning a partial AST, or
+raising a raw implementation exception.
+
+**Required work.** Re-open the 26.2 Hints page, especially its formal delimiter
+syntax and statement that whitespace is generally allowed before and after the
+plus character, and compare it with the installed SQLGlot 30.13 tokenizer,
+Hint-token parser, comment attachment, and `ErrorLevel` machinery. Audit every
+plugin hint entrance rather than only Q26's shared comment extractor: SELECT,
+EXPLAIN, WITH, table and alias, JOIN, GROUP BY, CTAS, INSERT/UPDATE/DELETE/MERGE,
+and COPY. Preserve the Q26 distinction between ordinary comments and
+optimizer-hint provenance through tokenization, attachment, AST construction,
+copy/transform, serialization, and generation.
+
+Accept both compact `/*+hint*/` and the documented whitespace-before-plus form
+`/* + hint */`, canonicalizing successful output to the repository's existing
+`/*+ ... */` spelling. Do not confuse a plus elsewhere in ordinary prose with a
+hint opener. The independent GROUP BY scanner must require optimizer-hint
+provenance before recognizing `GBYTYPE`; ordinary line and block comments whose
+complete body is `GBYTYPE(HASH)` or `GBYTYPE(PIPE)` must remain ordinary and
+must not regenerate with `/*+`. Genuine well-formed hints whose directive name
+or arguments are outside the currently modeled contract must at least retain
+their plus-delimited identity through this task; Q28 owns the semantic
+name/placement/arity/domain decision.
+
+Create one shared guaranteed-raise structural boundary for genuine malformed
+hint bodies. Cover empty/whitespace-only hint bodies, unmatched parentheses,
+trailing commas, closed comments containing truncated directive syntax, and
+non-expression children produced by SQLGlot recovery. Do not let outer `WARN`
+or `IGNORE` weaken this recognized Vertica boundary or let validators
+dereference an unexpected string as a directive. A malformed hint in a
+multi-statement script must not swallow, merge with, or return the following
+valid statement. Strict Vertica generation must likewise reject structurally
+malformed direct and nested `exp.Hint` trees atomically, without returning a
+prefix or silently filtering a child.
+
+Add focused tests, preferably extending `tests/test_hints.py` and the existing
+GROUP BY/DML/CTAS modules, for:
+
+- line and non-plus block `GBYTYPE(HASH|PIPE)` collisions versus exact-plus and
+  whitespace-before-plus genuine hints, including multiple adjacent ordinary
+  comments and compact/pretty canonical output;
+- malformed exact-plus and whitespace-before-plus bodies at every listed hint
+  position and parser error level, with warning capture proving no downgraded
+  diagnostic path and with a following-statement atomicity sentinel;
+- the current raw-exception reproducer `INSERT /*+LABEL(*/ INTO t VALUES (1)`,
+  plus WITH/JOIN/table cases that currently lose `+` and CTAS cases that
+  currently drop the hint completely;
+- valid neighboring controls for every existing structured hint wrapper,
+  directed-query `:c`/`:v` annotations, ordinary comments containing unrelated
+  plus signs, and comments before/after parenthesized or compound queries;
+- dump/load, copy/transform parent metadata, compact/pretty reparse equality,
+  scope traversal, qualification, optimization, and lineage for a mixed valid
+  SELECT/WITH/table/JOIN/GROUP BY hint query; and
+- malformed programmatic Hint children at the direct owner and nested in each
+  custom Vertica wrapper, proving strict generation fails before output.
+
+Update the comment/hint provenance and guaranteed-raise contracts in
+`ARCHITECTURE.md`, `docs/COVERAGE.md`, `docs/ROADMAP.md`, and `CHANGELOG.md`.
+Record exact focused and release-gate counts in the completion note, mark Q27
+`DONE`, and make Q28 next; do not recertify Milestone 1 or release P16. Use a
+whitespace-before-plus GBYTYPE query returning a canonical `Select` in the
+installed-wheel smoke.
+
+**Explicit exclusions.** No new optimizer directive name or placement; no
+directive argument/domain enforcement assigned to Q28; no server optimizer
+effect or catalog feasibility check; no byte-exact preservation of accepted
+hint whitespace; no change to directed-query constant annotation syntax; no
+SQLGlot dependency change or upstream patch; and no release, push, or GitHub
+mutation.
+
+**Primary sources.** [Hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/),
+[GBYTYPE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/gbytype/),
+and the installed SQLGlot 30.13 tokenizer comment scanner, Hint-token parser,
+comment attachment, `exp.Hint`, parser error-level, and generator implementations.
+
+**Implementation pointers (non-normative, verified 2026-08-25).** Both
+`SELECT a FROM t GROUP BY -- GBYTYPE(HASH)\na` and the corresponding non-plus
+block comment currently generate `GROUP BY /*+GBYTYPE(HASH)*/ a` at all four
+levels. `/* + GBYTYPE(HASH) */` instead moves to an ordinary table comment.
+Malformed exact-plus hints at WITH, JOIN, and table sites regenerate without
+the plus delimiter, CTAS malformed/wrong-site hints disappear, and the DML
+validator's unconditional `directive.name` access makes malformed INSERT LABEL
+raise `AttributeError` at every level. These are distinct from Q26's empty
+ordinary-comment inner-parser failure.
+
+### Q28 — optimizer-hint directive contract conformance — `TODO`
+
+**Outcome.** Enforce the source-defined name, placement, arity, value domain,
+and strict-AST contract for every optimizer hint the repository already models.
+Recognized invalid forms must fail closed at all parser error levels and under
+strict direct or nested generation; they must not be accepted, demoted to
+ordinary comments, moved to a different owner, or silently discarded.
+
+**Required work.** Re-open the 26.2 Hints inventory and each subordinate page
+for the currently modeled surface: ALLNODES, ENABLE_WITH_CLAUSE_MATERIALIZATION,
+GBYTYPE, JTYPE, DISTRIB, PROJS, SKIP_PROJS, LABEL, SYNTACTIC_JOIN, and VERBATIM;
+also re-open CREATE TABLE and CREATE TEMPORARY TABLE for the AS-clause LABEL
+placement. Build a source-to-AST table in the tests or task completion record
+before implementation. Audit parser allowlists, `_optimizer_hint_from_comment`,
+all owner-specific extraction helpers, SQLGlot's `exp.Hint` directive shapes,
+the DML validators, `WithHint`/`TableOptimizerHint`/`CtasHintProperty`, and every
+generator path that emits or validates a Hint.
+
+Pin these deterministic, catalog-independent contracts:
+
+- EXPLAIN `ALLNODES`, WITH `ENABLE_WITH_CLAUSE_MATERIALIZATION`, and SELECT
+  `SYN[TACTIC]_JOIN`/`VERBATIM` are argument-free at their documented owners;
+- GROUP BY accepts exactly the existing typed `GBYTYPE(HASH|PIPE)` form;
+- JOIN `JTYPE` has one value in `H`, `M`, or `FM`, and `DISTRIB` has exactly two
+  values drawn from `L`, `R`, `B`, `F`, or `A`; server feasibility, sorting,
+  segmentation, and the runtime effect of missing `SYNTACTIC_JOIN` remain
+  documented server concerns rather than parser rejection;
+- table/alias `PROJS` and `SKIP_PROJS` have at least one nonempty projection
+  name. Pin the canonical AST for quoted and unquoted one-, two-, and three-part
+  projection names without checking catalog existence;
+- LABEL has exactly one label-string at SELECT, COPY, INSERT, UPDATE, DELETE,
+  MERGE, and the documented CTAS AS-clause site. Pin unquoted labels and quoted
+  labels with spaces, enforce the 128-octet UTF-8 ceiling with 127/128/129-byte
+  ASCII and multibyte boundaries, and reject expression-valued, missing, or
+  multi-argument labels and invalid Unicode without a raw encoding exception;
+  and
+- CTAS permits a LABEL immediately after AS and/or in its SELECT. Preserve both
+  AST owners and source order while pinning the documented first-label
+  precedence as a server semantic rather than deleting either directive.
+
+For every recognized directive, test wrong documented owners, extra/missing
+arguments, empty lists, malformed child types, mixed-case canonicalization,
+multiple directives in one legal hint body, repeated/conflicting directives,
+and well-formed neighboring ordinary comments. Where the primary source does
+not define duplicate handling, preserve losslessly and record the boundary
+rather than inventing a server error. Directives from the broader 26.2
+inventory that this repository does not yet model must retain Q27's
+plus-delimited losslessness but must not be advertised as semantic support;
+Q29 owns their inventory classification and schedules any necessary follow-on
+work. Do not expand this task to new hint families.
+
+Add public-parser matrices at `IMMEDIATE`, `RAISE`, `WARN`, and `IGNORE`, plus
+strict programmatic-AST mutation matrices for every owner. Assert no partial
+SQL at `unsupported_level=RAISE`, direct/nested failure consistency, compact and
+pretty round trips for all valid forms, comments and statement boundaries,
+dump/load, copy/transform parent metadata, type inference, scope traversal,
+qualification, optimization, and lineage. Include a realistic query combining
+SELECT, WITH, table, JOIN, and GROUP BY hints, and a CTAS/COPY/DML LABEL corpus.
+Preserve canonical foreign SQLGlot interoperability where the AST is generic;
+custom wrappers must keep their existing atomic foreign-dialect behavior.
+
+Update `ARCHITECTURE.md`, the Comments and optimizer hints coverage row and all
+affected query/DML/CREATE rows in `docs/COVERAGE.md`, `docs/ROADMAP.md`, and
+`CHANGELOG.md`. Record exact focused and release-gate counts, mark Q28 `DONE`,
+and make Q29 next without claiming Milestone 1 certification. Use a boundary
+128-octet LABEL plus valid JTYPE/DISTRIB query for the installed-wheel smoke.
+
+**Explicit exclusions.** No implementation of currently unmodeled 26.2 hint
+families or new statement placements; no catalog lookup for projections; no
+join-plan feasibility, segmentation, label precedence execution, or other
+server optimizer semantics; no change to generic SQLGlot dialects; no SQLGlot
+dependency change; and no release, push, or remote mutation.
+
+**Primary sources.** [Hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/),
+[ALLNODES](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/allnodes/),
+[ENABLE_WITH_CLAUSE_MATERIALIZATION](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/enable-with-clause-materialization/),
+[GBYTYPE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/gbytype/),
+[JTYPE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/jtype/),
+[DISTRIB](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/distrib/),
+[PROJS](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/projs/),
+[SKIP_PROJS](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/skip-projs/),
+[LABEL](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/label/),
+[SYNTACTIC_JOIN](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/syntactic-join/),
+[VERBATIM](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/verbatim/),
+[CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/),
+and [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/).
+
+**Implementation pointers (non-normative, verified 2026-08-25).** Current
+parser/generator probes accept `JTYPE(X)`, bare `JTYPE`, `DISTRIB(L)`,
+`DISTRIB(L,R,B)`, `DISTRIB(X,R)`, `PROJS()`, bare `SKIP_PROJS`, argument-bearing
+WITH/ALLNODES/SYNTACTIC_JOIN/VERBATIM, and zero-/two-argument or expression-
+valued LABEL at every parser error level. LABEL length is not checked, so 129
+ASCII octets survive in SELECT, DML, and CTAS. Join generation validates only
+directive names, table generation only the wrapper type, WithHint generation
+only directive names, and CTAS generation only that the child is `exp.Hint`.
+The DML helper checks LABEL count/arity but not argument type or UTF-8 byte
+length. Existing GBYTYPE algorithm validation is the positive neighboring
+pattern to preserve.
+
+### Q29 — Milestone 1 optimizer-hint recertification gate — `TODO`
+
+**Outcome.** Re-audit and recertify the reopened Milestone 1 only after Q26–Q28
+prove that realistic comments and every currently modeled optimizer-hint
+boundary parse, analyze, regenerate, and fail atomically as documented. This is
+a test/documentation/release gate, not a production-feature task.
+
+**Required work.** Re-read the Q26–Q28 completion records and the complete
+architecture, coverage, roadmap, and changelog contracts. Re-open the 26.2
+Hints inventory and every subordinate hint page. Produce an explicit inventory
+mapping every documented 26.2 directive and placement to `Semantic`, `Generic`,
+`Unsupported`, or deliberately deferred repository coverage; do not infer full
+support merely because SQLGlot can store an opaque `exp.Hint`. Probe every
+unmodeled directive for crash, comment/hint provenance loss, statement
+swallowing, or false promotion. If a gap affects the promised analysis surface,
+schedule a new bounded Q remediation and renumber this gate; do not fix it or
+weaken the coverage claim inside Q29.
+
+Extend the realistic workload gate with the exact issue #2 fixture and a
+composed query/CTAS/DML corpus containing ordinary metadata comments, exact and
+whitespace-before-plus hint delimiters, every modeled valid directive, mixed
+ordinary/genuine comments, nested and compound queries, CTAS AS-clause and
+SELECT labels, and 128-octet boundary labels. Pin compact/pretty generation and
+reparse equality, statement/root classes, dump/load, copy/transform parent
+metadata, comment ownership/order, type inference, public scope traversal,
+qualification, optimization, and lineage. Add an all-four-error-level negative
+script corpus covering empty ordinary comments, malformed genuine hints,
+ordinary allowed-name collisions, wrong owners, invalid arity/domain/UTF-8
+boundaries, and a following valid statement; assert only intentional
+`ParseError`, never warnings, raw exceptions, partial ASTs, lost plus markers,
+or swallowed statements.
+
+Run the focused hint/workload modules, the default suite and coverage gate, all
+seven isolated CPython 3.9–3.15 runtimes (3.15 with deprecations as errors),
+sdist/wheel build, clean-wheel force-install, `pip check`, and a `python -I`
+installed-wheel smoke combining the issue's leading bare comment with a valid
+whitespace-before-plus WITH/JOIN/GROUP BY hint query. Stage only Q29 files and
+run the repository-wide hooks exactly as required by the release protocol.
+
+If every check passes, update the dashboard/current state, coverage, roadmap,
+changelog, and installation-facing milestone statement; record exact test,
+coverage, runtime, build, and smoke evidence; mark Q29 `DONE`; and state that
+Milestone 1 is recertified and P16 is again eligible. If any independent blocker
+appears, leave certification withdrawn, schedule the smallest follow-on Q task,
+and keep Milestone 2 deferred.
+
+**Explicit exclusions.** No production parser/generator change, no new hint
+implementation, no server optimizer-effect testing, no SQLGlot dependency
+change, no weakening of parser/error/analysis assertions to make the gate pass,
+and no release, push, or remote issue mutation.
+
+**Primary sources.** [GitHub issue #2](https://github.com/luisdelatorre012/vertica-sqlglot-dialect/issues/2),
+[Hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/),
+all subordinate OpenText 26.2 hint pages linked from that inventory, the Q26–Q28
+primary sources and completion records, and the installed SQLGlot 30.13
+tokenizer/parser/AST/generator/optimizer implementations.
+
+## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
+
+Q26–Q29 are incomplete, so Milestone 2 is deferred until every Milestone 1 Q
+task is again `DONE`. The detailed P16–P35 specifications — outcome, required work,
+exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
 not part of the mandatory read while Milestone 1 is active. When a P task is
 selected, read its full specification there before implementing and append

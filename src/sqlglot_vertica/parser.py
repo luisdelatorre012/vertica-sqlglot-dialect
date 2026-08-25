@@ -13,7 +13,11 @@ from sqlglot.parsers.postgres import PostgresParser
 
 from sqlglot_vertica import dml as vdml
 from sqlglot_vertica import expressions as vexp
-from sqlglot_vertica.tokens import DirectedPostfixComment, MisplacedDirectedComment
+from sqlglot_vertica.tokens import (
+    DirectedPostfixComment,
+    MisplacedDirectedComment,
+    OptimizerHintComment,
+)
 from sqlglot_vertica.user_limits import (
     USER_INTERVAL_MAX_SECONDS,
     canonical_user_capacity,
@@ -1492,12 +1496,12 @@ class VerticaParser(PostgresParser):
     ) -> exp.Hint | None:
         """Parse a hint comment only when every directive is valid in this position.
 
-        SQLGlot's tokenizer intentionally stores comment bodies without their
-        delimiters. Once ``/*+`` is configured as a comment start, a comment
-        attached to a JOIN, table alias, or WITH token no longer retains the
-        leading ``+``. Restricting the accepted directive names by grammar
-        position prevents ordinary prose comments from becoming optimizer hints.
+        The tokenizer tags bodies scanned from an exact ``/*+`` delimiter so
+        ordinary line and block comments bypass the nested Hint parser entirely.
         """
+
+        if not isinstance(comment, OptimizerHintComment):
+            return None
 
         parsed_hint = exp.maybe_parse(comment.strip(), into=exp.Hint, dialect=self.dialect)
         if (
@@ -7734,6 +7738,8 @@ class VerticaParser(PostgresParser):
         if not query:
             self._raise_create_table_error("CREATE TABLE AS requires a SELECT query")
         assert query is not None
+        if as_token.comments:
+            query.add_comments(as_token.comments, prepend=True)
 
         if self._match_text_seq("ENCODED", "BY"):
             if columns:

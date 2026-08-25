@@ -1,13 +1,89 @@
 """Vertica optimizer-hint placement and AST regressions."""
+# ruff: noqa: E501 -- ISSUE_2_SQL is a verbatim public regression fixture.
 
 from __future__ import annotations
 
 import pytest
-from sqlglot import ErrorLevel, exp, parse_one
+from sqlglot import ErrorLevel, exp, parse, parse_one
+from sqlglot.dialects import Dialect
 from sqlglot.errors import ParseError, UnsupportedError
+from sqlglot.lineage import lineage
+from sqlglot.optimizer import optimize
+from sqlglot.optimizer.qualify import qualify
+from sqlglot.optimizer.scope import traverse_scope
 
 from sqlglot_vertica import expressions as vexp
+from sqlglot_vertica.tokens import OptimizerHintComment
 from tests.helpers import assert_roundtrip
+
+ISSUE_2_SQL = """--dialect: vertica
+--
+-- PATTERN: pattern_a
+-- TYPE: join (multi-entry)
+--
+-- ENTRY_POINTS
+-- - name: entry_a
+--   description: >
+--      Given an upstream col_f set, rank/select one row per col_a using col_e/date tie-breaks.
+--   prerequisite_grain: col_f (import)
+--   prerequisite_columns: [col_f]
+--   output_grain: one row per col_f
+--   output_columns: [col_f, col_c, col_d]
+--   parameters: [tie_break_order (default: col_e desc, date_entry desc, date_import desc)]
+--   notes: >
+--        Tie-break does not have to be fully deterministic; defaults are usually sufficient for most reporting.
+--
+--  - name: entry_b
+--  description: >
+--    Given selected rows joined to updstream col_f rows, roll up max col_g.
+--   prerequisite_grain: col_f
+--   prerequisite_columns: [col_f]
+--   output_grain: one row per col_f
+--   output_columns: [col_f, col_h]
+-- notes: >
+--     Template performs line aggregation after rank-select join; keep aggregation scoped to upstream rows.
+WITH cte_a AS (
+    SELECT
+        t1.col_a,
+        t1.col_b,
+        t1.col_c,
+        t1.col_d,
+        ROW_NUMBER() OVER (PARTITION by t1.col_a ORDER BY t1.col_e DESC) AS rn
+    FROM schema_a.tabe_a AS t1
+)
+
+SELECT
+    t2.col_f,
+    t1.col_c,
+    t1.col_d,
+    MAX(t3.col_g) as col_h
+FROM upstream_cte AS t2
+INNER JOIN cte_a AS t1
+    ON
+        t2.col_f = t1.col_a
+        AND t1.rn = 1
+LEFT JOIN schema_a.table_b AS t3
+    ON t1.col_b = t3.col_b
+GROUP BY
+    t2.col_f,
+    t1.col_c,
+    t1.col_d;
+"""
+
+
+ISSUE_2_SCHEMA = {
+    "schema_a": {
+        "tabe_a": {
+            "col_a": "INT",
+            "col_b": "INT",
+            "col_c": "INT",
+            "col_d": "INT",
+            "col_e": "INT",
+        },
+        "table_b": {"col_b": "INT", "col_g": "INT"},
+    },
+    "public": {"upstream_cte": {"col_f": "INT"}},
+}
 
 
 def test_select_and_join_hints_are_structured_and_placed_exactly() -> None:
@@ -171,6 +247,165 @@ def test_ordinary_comments_are_not_promoted_to_hints(sql: str) -> None:
     assert not list(expression.find_all(exp.Hint))
     assert "/*+" not in expression.sql(dialect="vertica")
     assert any(node.comments for node in expression.walk())
+
+
+@pytest.mark.parametrize(
+    "comment",
+    ["--\n", "--   \n", "/* */", "/*   */", "/* !@#$%^& */"],
+)
+@pytest.mark.parametrize(
+    "sql_template",
+    [
+        "WITH {comment} x AS (SELECT 1) SELECT * FROM x",
+        "SELECT * FROM public.t {comment}",
+        "SELECT * FROM public.t AS t {comment}",
+        "SELECT * FROM x JOIN {comment} y ON x.a = y.a",
+        "CREATE TABLE q26_out AS {comment} SELECT 1 AS id",
+    ],
+)
+def test_empty_and_prose_comments_bypass_shared_hint_extraction(
+    sql_template: str, comment: str
+) -> None:
+    expression = parse_one(sql_template.format(comment=comment), read="vertica")
+    generated = expression.sql(dialect="vertica")
+
+    assert not isinstance(expression, exp.Command)
+    assert not list(expression.find_all(exp.Hint))
+    assert not list(expression.find_all(vexp.WithHint))
+    assert not list(expression.find_all(vexp.CtasHintProperty))
+    assert not list(expression.find_all(vexp.TableOptimizerHint))
+    assert parse_one(generated, read="vertica") is not None
+
+
+@pytest.mark.parametrize(
+    ("sql", "comment_body"),
+    [
+        (
+            "WITH {comment} x AS (SELECT 1) SELECT * FROM x",
+            "ENABLE_WITH_CLAUSE_MATERIALIZATION",
+        ),
+        ("SELECT * FROM public.t {comment}", "PROJS('public.t_p')"),
+        ("SELECT * FROM public.t AS t {comment}", "SKIP_PROJS('public.old')"),
+        ("SELECT * FROM x JOIN {comment} y ON x.a = y.a", "JTYPE(H)"),
+        ("CREATE TABLE q26_out AS {comment} SELECT 1 AS id", "LABEL(ctas_job)"),
+    ],
+)
+@pytest.mark.parametrize("comment_template", ["-- {body}\n", "/* {body} */"])
+def test_allowed_hint_text_in_an_ordinary_comment_stays_inert(
+    sql: str, comment_body: str, comment_template: str
+) -> None:
+    comment = comment_template.format(body=comment_body)
+    expression = parse_one(sql.format(comment=comment), read="vertica")
+    generated = expression.sql(dialect="vertica")
+
+    assert not list(expression.find_all(exp.Hint))
+    assert not list(expression.find_all(vexp.WithHint))
+    assert not list(expression.find_all(vexp.CtasHintProperty))
+    assert not list(expression.find_all(vexp.TableOptimizerHint))
+    assert comment_body in generated
+    assert "/*+" not in generated
+
+
+def test_exact_plus_hint_provenance_is_distinct_from_ordinary_comments() -> None:
+    tokens = (
+        Dialect.get_or_raise("vertica")
+        .tokenizer()
+        .tokenize(
+            "WITH /* ordinary */ /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ "
+            "x AS (SELECT 1) SELECT * FROM x"
+        )
+    )
+    comments = [comment for token in tokens for comment in token.comments]
+
+    assert type(comments[0]) is str
+    assert isinstance(comments[1], OptimizerHintComment)
+
+
+def test_mixed_ordinary_and_genuine_hint_comments_promote_only_the_genuine_hint() -> None:
+    expression = assert_roundtrip(
+        "WITH /* metadata one */ /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ "
+        "/* metadata two */ x AS (SELECT 1) SELECT * FROM x"
+    )
+    with_expression = expression.args["with_"]
+
+    assert isinstance(with_expression, vexp.WithHint)
+    assert isinstance(with_expression.args["hint"], exp.Hint)
+    generated = expression.sql(dialect="vertica")
+    assert generated.count("/*+") == 1
+    assert generated.index("metadata one") < generated.index("metadata two")
+
+
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_issue_2_exact_fixture_parses_at_every_error_level(
+    error_level: ErrorLevel, caplog: pytest.LogCaptureFixture
+) -> None:
+    statements = parse(ISSUE_2_SQL, read="vertica", error_level=error_level)
+
+    assert len(statements) == 1
+    expression = statements[0]
+    assert type(expression) is exp.Select
+    assert type(expression.args["with_"]) is exp.With
+    assert isinstance(expression.args["group"], vexp.VerticaGroup)
+    assert len(expression.args["joins"]) == 2
+    assert {join.side for join in expression.args["joins"]} == {"", "LEFT"}
+    assert expression.find(exp.Window) is not None
+    assert not list(expression.find_all(exp.Hint))
+    assert not caplog.records
+
+
+def test_issue_2_fixture_roundtrips_and_preserves_nonempty_metadata_comments() -> None:
+    expression = parse(ISSUE_2_SQL, read="vertica")[0]
+    assert expression is not None
+    generated = expression.sql(dialect="vertica")
+    reparsed = parse(generated, read="vertica")
+    pretty = expression.sql(dialect="vertica", pretty=True)
+
+    assert reparsed == [expression]
+    assert parse(pretty, read="vertica") == [expression]
+    assert exp.Expr.load(expression.dump()) == expression
+    for metadata in (
+        "dialect: vertica",
+        "PATTERN: pattern_a",
+        "TYPE: join (multi-entry)",
+        "ENTRY_POINTS",
+        "Template performs line aggregation",
+    ):
+        assert metadata in generated
+    assert "/*+" not in generated
+
+
+def test_issue_2_fixture_copy_transform_parents_and_analysis() -> None:
+    expression = parse(ISSUE_2_SQL, read="vertica")[0]
+    assert isinstance(expression, exp.Select)
+    copied = expression.copy()
+    transformed = copied.transform(lambda node: node)
+
+    assert transformed == expression
+    assert all(node is transformed or node.parent is not None for node in transformed.walk())
+    assert list(traverse_scope(expression))
+
+    qualified = qualify(expression.copy(), dialect="vertica", schema=ISSUE_2_SCHEMA)
+    optimized = optimize(expression.copy(), dialect="vertica", schema=ISSUE_2_SCHEMA)
+    for analyzed in (qualified, optimized):
+        assert isinstance(analyzed, exp.Select)
+        assert isinstance(analyzed.args["group"], vexp.VerticaGroup)
+        assert list(traverse_scope(analyzed))
+        assert parse_one(analyzed.sql(dialect="vertica"), read="vertica") == analyzed
+
+    node = lineage("col_h", expression, schema=ISSUE_2_SCHEMA, dialect="vertica")
+    assert any(downstream.name == "t3.col_g" for downstream in node.walk())
+
+
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_blank_comment_reproducer_does_not_swallow_following_statement(
+    error_level: ErrorLevel,
+) -> None:
+    statements = parse(
+        "WITH --\n x AS (SELECT 1 AS a) SELECT a FROM x; SELECT 2;",
+        read="vertica",
+        error_level=error_level,
+    )
+    assert [type(statement) for statement in statements] == [exp.Select, exp.Select]
 
 
 def test_hint_generation_never_inserts_space_between_comment_opener_and_plus() -> None:

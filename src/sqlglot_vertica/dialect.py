@@ -14,7 +14,11 @@ from sqlglot_vertica import expressions as vexp
 from sqlglot_vertica.foreign_properties import patch_foreign_properties_location
 from sqlglot_vertica.generator import VerticaGenerator
 from sqlglot_vertica.parser import VerticaParser
-from sqlglot_vertica.tokens import DirectedPostfixComment, MisplacedDirectedComment
+from sqlglot_vertica.tokens import (
+    DirectedPostfixComment,
+    MisplacedDirectedComment,
+    OptimizerHintComment,
+)
 
 # Foreign dialects must fail atomically on an embedded Vertica-only table
 # property instead of raising a raw KeyError; see foreign_properties.py.
@@ -137,6 +141,8 @@ class _VerticaTokenizerCore(TokenizerCore):
                 self.tokens[-1].comments.append(marked_comment)
             else:
                 stored_comments[-1] = marked_comment
+        elif comment_start == self.hint_start:
+            stored_comments[-1] = OptimizerHintComment(body)
         return matched
 
 

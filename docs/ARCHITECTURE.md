@@ -861,6 +861,19 @@ statement-level marker-count invariant prevents a supported postfix annotation
 from disappearing in a parser path. This internal-core dependency is covered
 by the same minor-version bound and must be re-audited when SQLGlot changes.
 
+The same lexical-provenance rule now protects the shared optimizer-hint
+extractor used by WITH, table/alias, JOIN, and CTAS sites. Exact `/*+`
+comments are tagged as `OptimizerHintComment` while tokenizing; ordinary line
+comments and non-plus block comments retain plain `str` bodies. The extractor
+checks that marker before calling SQLGlot's nested Hint parser, so empty or
+parse-hostile prose and ordinary comments whose text happens to match an
+allowed directive never acquire hint semantics or raise an inner-parser
+exception. Nonempty ordinary CTAS comments are moved from the consumed `AS`
+token to the query so they survive generation. Q26 deliberately recognizes
+only SQLGlot's existing exact `/*+` entrance; whitespace-before-plus delimiter
+support and malformed genuine-hint atomicity remain Q27, and directive
+name/arity/domain enforcement remains Q28.
+
 ## Generator policy
 
 Generated SQL is canonical Vertica syntax, not necessarily character-for-

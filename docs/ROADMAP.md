@@ -215,14 +215,22 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   temporary-table workloads, including public-root qualification,
   optimization, scope traversal, raw-source lineage, all-level negative-script
   atomicity, strict AST validation, and direct/nested foreign failure. The full
-  release gate passed on every supported CPython minor. Milestone 1 is
-  recertified as of 2026-08-22.
+  release gate passed on every supported CPython minor. That 2026-08-22
+  certification remains historical evidence but was superseded on 2026-08-25
+  by GitHub issue #2 and the adjacent optimizer-hint audit. Q26 is complete:
+  exact `/*+` comments now retain internal tokenizer provenance at every
+  shared WITH/table/alias/JOIN/CTAS extraction site, while ordinary line and
+  block comments bypass nested Hint parsing entirely. The verbatim issue
+  fixture now parses at every error level, retains its nonempty metadata
+  comments, and passes round-trip, serialization, scope, qualification,
+  optimization, and lineage checks. Q27–Q29 remain, so Milestone 1 is reopened
+  and Milestone 2 remains deferred; Q27 is next.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — is now eligible after Milestone 1 recertification; P16 is
-  the next task.
+  (tasks P16–P35) — remains deferred until Q27–Q29 complete and Milestone 1 is
+  recertified again.
 
 ## Phase 1 — core analytical SQL and physical design
 

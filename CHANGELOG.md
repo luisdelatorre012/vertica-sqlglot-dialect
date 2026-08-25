@@ -5,6 +5,11 @@
 This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
 plugin interface.
 
+- Fixed GitHub issue #2 by retaining exact `/*+` tokenizer provenance before
+  shared optimizer-hint extraction. Ordinary line/block comments—including
+  empty separators, prose, and allowed-name collisions—now remain inert around
+  WITH, table/alias, JOIN, and CTAS sites; nonempty CTAS comments also survive
+  generation instead of remaining on the consumed `AS` token.
 - Added entry-point discovery and a bounded SQLGlot 30.13.x compatibility
   contract.
 - Added tested CPython 3.14 and 3.15 prerelease compatibility, including
