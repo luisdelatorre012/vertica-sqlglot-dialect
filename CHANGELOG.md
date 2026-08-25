@@ -1,9 +1,9 @@
 # Changelog
 
-## 0.2.1 — 2026-08-25
+## 0.2.2 — 2026-08-25
 
-This release recertifies the analysis parsing surface after the complete
-optimizer-hint audit and the explicit NULL-ordering correction.
+This release recertifies the analysis parsing surface after the explicit
+NULL-ordering correction.
 
 - Recertified Milestone 1 after a composed NULL-ordering workload proved
   ordinary query, analytic-window, WITHIN GROUP, partitioned-LIMIT, set-tail,
@@ -16,6 +16,13 @@ optimizer-hint audit and the explicit NULL-ordering correction.
   projections. Typed provenance preserves FIRST/LAST/AUTO without guessing
   datatype-dependent defaults; wrong-owner AUTO and malformed forms fail
   atomically, and physical storage ordering retains its stricter grammar.
+
+## 0.2.1 — 2026-08-25
+
+This release recertifies the analysis parsing surface after the complete
+optimizer-hint provenance, directive-contract, ownership, and losslessness
+audit.
+
 - Finally recertified Milestone 1 after the complete 18-entry optimizer-hint
   inventory, GitHub issue #2 fixture, composed positive/negative workload,
   analysis, strict-AST, foreign-generation, seven-runtime, package-build, and
