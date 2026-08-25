@@ -175,13 +175,16 @@ HINT_RECERTIFICATION_PIPELINE = f"""
 -- q29 metadata
 CREATE LOCAL TEMPORARY TABLE q29_hint_rollup ON COMMIT PRESERVE ROWS
 AS /*+LABEL(ctas_label)*/
+/* q30 stable metadata */
 WITH /* + ENABLE_WITH_CLAUSE_MATERIALIZATION */ hinted AS (
     SELECT /*+SYNTACTIC_JOIN,VERBATIM*/ t.id, SUM(u.amount) AS total
     FROM source_t AS t /*+PROJS('source_t_p'),SKIP_PROJS('source_t_old')*/
-    JOIN /* + JTYPE(H),DISTRIB(L,R) */ source_u AS u ON t.id = u.id
+    JOIN /* + JFMT(F),JTYPE(H),DISTRIB(L,R) */ source_u AS u ON t.id = u.id
     GROUP BY /* + GBYTYPE(HASH) */ t.id
+    UNION ALL /*+UTYPE(M)*/
+    SELECT id, amount AS total FROM source_u
 )
-SELECT /*+LABEL('query_label')*/ id, total FROM hinted;
+SELECT /*+LABEL(query_label)*/ id, total FROM hinted;
 INSERT /*+LABEL('{Q29_BOUNDARY_LABEL}')*/ INTO q29_hint_archive
 SELECT id, total FROM q29_hint_rollup;
 """.strip()
@@ -219,8 +222,10 @@ def test_q29_issue_and_composed_hint_workloads_roundtrip() -> None:
     generated = "\n".join(statement.sql(dialect="vertica") for statement in statements)
     assert "q29 metadata" in generated
     assert "/*+ ENABLE_WITH_CLAUSE_MATERIALIZATION */" in generated
-    assert "/*+ JTYPE(H), DISTRIB(L, R) */" in generated
+    assert "/*+ JFMT(F), JTYPE(H), DISTRIB(L, R) */" in generated
+    assert "UNION ALL /*+ UTYPE(M) */" in generated
     assert "/*+GBYTYPE(HASH)*/" in generated
+    assert generated.count("q30 stable metadata") == 1
     assert Q29_BOUNDARY_LABEL in generated
 
 

@@ -126,7 +126,8 @@ class VerticaParser(PostgresParser):
     }
 
     TABLE_HINT_NAMES: t.ClassVar = {"PROJS", "SKIP_PROJS"}
-    JOIN_HINT_NAMES: t.ClassVar = {"DISTRIB", "JTYPE"}
+    JOIN_HINT_NAMES: t.ClassVar = {"DISTRIB", "JFMT", "JTYPE"}
+    UNION_HINT_NAMES: t.ClassVar = {"UTYPE"}
     WITH_HINT_NAMES: t.ClassVar = {"ENABLE_WITH_CLAUSE_MATERIALIZATION"}
     CTAS_HINT_NAMES: t.ClassVar = {"LABEL"}
     GROUP_BY_HINT = re.compile(r"^\s*GBYTYPE\s*\(\s*(HASH|PIPE)\s*\)\s*$", re.I | re.ASCII)
@@ -1188,7 +1189,7 @@ class VerticaParser(PostgresParser):
         root: vexp.AtEpochSelect | vexp.AtEpochUnion | vexp.AtEpochIntersect | vexp.AtEpochExcept
         if isinstance(query, exp.Select):
             root = vexp.AtEpochSelect(**root_args)
-        elif type(query) is exp.Union:
+        elif type(query) in {exp.Union, vexp.UnionHint}:
             root = vexp.AtEpochUnion(**root_args)
         elif type(query) is exp.Intersect:
             root = vexp.AtEpochIntersect(**root_args)
@@ -1258,6 +1259,17 @@ class VerticaParser(PostgresParser):
     def parse_set_operation(
         self, this: exp.Expr | None, consume_pipe: bool = False
     ) -> exp.Expr | None:
+        start = self._index
+        hint_comments_by_token: list[tuple[TokenType, list[OptimizerHintComment]]] = []
+        for token in self._tokens[start : start + 4]:
+            if token.token_type == TokenType.SELECT:
+                break
+            optimizer_comments = [
+                comment for comment in token.comments if isinstance(comment, OptimizerHintComment)
+            ]
+            if optimizer_comments:
+                hint_comments_by_token.append((token.token_type, optimizer_comments))
+
         expression = super().parse_set_operation(this, consume_pipe=consume_pipe)
         if not isinstance(expression, exp.SetOperation):
             return expression
@@ -1272,6 +1284,40 @@ class VerticaParser(PostgresParser):
             self._raise_set_operation_error(
                 f"Vertica {operation.key.upper()} does not support name-matching modifiers"
             )
+
+        parsed_hints: list[exp.Hint] = []
+        for token_type, comments in hint_comments_by_token:
+            hints, _ = self._extract_optimizer_hints(comments, self.UNION_HINT_NAMES, "union")
+            if hints and (
+                type(expression) is not exp.Union
+                or expression.args.get("distinct") is not False
+                or token_type != TokenType.ALL
+            ):
+                self._raise_optimizer_hint_error(
+                    "Vertica UTYPE is valid only immediately after UNION ALL"
+                )
+            parsed_hints.extend(hints)
+
+        if parsed_hints:
+            hint = self.expression(
+                exp.Hint(
+                    expressions=[
+                        directive
+                        for optimizer_hint in parsed_hints
+                        for directive in optimizer_hint.expressions
+                    ]
+                )
+            )
+            root = self.expression(
+                vexp.UnionHint(**expression.args, hint=hint),
+                comments=[
+                    comment
+                    for comment in (expression.comments or [])
+                    if not isinstance(comment, OptimizerHintComment)
+                ],
+            )
+            root.meta.update(expression.meta)
+            expression = root
 
         return expression
 
@@ -1746,7 +1792,7 @@ class VerticaParser(PostgresParser):
             return False
         if isinstance(expression, exp.Select):
             return bool(expression.expressions) and expression.args.get("into") is None
-        if type(expression) in {exp.Union, exp.Intersect, exp.Except}:
+        if type(expression) in {exp.Union, vexp.UnionHint, exp.Intersect, exp.Except}:
             assert isinstance(expression, exp.SetOperation)
             return cls._is_valid_cte_query(expression.this) and cls._is_valid_cte_query(
                 expression.expression
@@ -1759,7 +1805,7 @@ class VerticaParser(PostgresParser):
             return cls._is_valid_with_root(expression.this)
         if isinstance(expression, exp.Select):
             return bool(expression.expressions)
-        if type(expression) in {exp.Union, exp.Intersect, exp.Except}:
+        if type(expression) in {exp.Union, vexp.UnionHint, exp.Intersect, exp.Except}:
             assert isinstance(expression, exp.SetOperation)
             return cls._is_valid_with_root(expression.this) and cls._is_valid_with_root(
                 expression.expression
@@ -1817,6 +1863,22 @@ class VerticaParser(PostgresParser):
                 self._raise_select_modifier_error(
                     "Vertica SELECT supports only ALL or DISTINCT as SELECT modifiers"
                 )
+        if isinstance(expression, exp.Expr):
+            for select in expression.find_all(exp.Select):
+                if not any(
+                    isinstance(join, exp.Join)
+                    and isinstance(join.args.get("hint"), exp.Hint)
+                    and any(
+                        directive.name.upper() == "JFMT"
+                        for directive in join.args["hint"].expressions
+                    )
+                    for join in select.args.get("joins") or []
+                ):
+                    continue
+                options = list(select.args.get("options") or [])
+                if not any(isinstance(option, vexp.JfmtQueryMarker) for option in options):
+                    options.append(self.expression(vexp.JfmtQueryMarker()))
+                    select.set("options", options)
         if isinstance(
             expression, (exp.Delete, exp.Insert, exp.Merge, exp.Update)
         ) and expression.args.get("with_"):
@@ -8035,14 +8097,18 @@ class VerticaParser(PostgresParser):
         hints, ordinary_comments = self._extract_optimizer_hints(
             comments, self.CTAS_HINT_NAMES, "ctas"
         )
-        comments[:] = ordinary_comments
         if not hints:
+            comments[:] = ordinary_comments
             return None
 
         hint_expressions = [
             directive for optimizer_hint in hints for directive in optimizer_hint.expressions
         ]
-        return self.expression(vexp.CtasHintProperty(this=exp.Hint(expressions=hint_expressions)))
+        comments.clear()
+        return self.expression(
+            vexp.CtasHintProperty(this=exp.Hint(expressions=hint_expressions)),
+            comments=ordinary_comments,
+        )
 
     def _parse_at_epoch_property(self) -> vexp.AtEpochProperty | None:
         if not self._match_text_seq("AT"):

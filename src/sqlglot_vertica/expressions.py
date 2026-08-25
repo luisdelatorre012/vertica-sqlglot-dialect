@@ -199,6 +199,21 @@ class WithHint(exp.With):
     }
 
 
+class JfmtQueryMarker(exp.QueryOption):
+    """Internal foreign-atomicity marker for a query containing JOIN JFMT."""
+
+    arg_types: t.ClassVar = {}
+
+
+class UnionHint(exp.Union):
+    """A UNION ALL carrying its documented owner-specific UTYPE hint."""
+
+    arg_types: t.ClassVar = {
+        **exp.Union.arg_types,
+        "hint": True,
+    }
+
+
 class MaterializedWithMarker(exp.QueryOption):
     """Internal optimizer barrier for a materialized Vertica WITH clause.
 
@@ -1405,6 +1420,7 @@ class AtEpochUnion(exp.Union):
         **exp.Union.arg_types,
         "at_epoch_kind": True,
         "at_epoch_value": True,
+        "hint": False,
     }
 
 

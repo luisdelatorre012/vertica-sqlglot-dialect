@@ -9,6 +9,7 @@ from sqlglot.dialects import Dialect
 from sqlglot.errors import ParseError, UnsupportedError
 from sqlglot.lineage import lineage
 from sqlglot.optimizer import optimize
+from sqlglot.optimizer.annotate_types import annotate_types
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import traverse_scope
 
@@ -99,14 +100,14 @@ DOCUMENTED_HINT_COVERAGE = {
     "ECSMODE": "Generic",
     "ENABLE_WITH_CLAUSE_MATERIALIZATION": "Semantic",
     "GBYTYPE": "Semantic",
-    "JFMT": "Deferred",
+    "JFMT": "Semantic",
     "JTYPE": "Semantic",
     "LABEL": "Semantic",
     "PROJS": "Semantic",
     "SKIP_PROJS": "Semantic",
     "SKIP_STATISTICS": "Generic",
     "SYNTACTIC_JOIN": "Semantic",
-    "UTYPE": "Deferred",
+    "UTYPE": "Semantic",
     "VERBATIM": "Semantic",
 }
 
@@ -414,7 +415,7 @@ def test_ordinary_comment_with_unrelated_plus_stays_inert() -> None:
     [
         "WITH /* + EARLY_MATERIALIZATION */ x AS (SELECT 1) SELECT * FROM x",
         "SELECT * FROM t /* + UNKNOWN_HINT(x) */",
-        "SELECT a FROM t GROUP BY /* + UTYPE(B) */ a",
+        "SELECT a FROM t GROUP BY /* + UNKNOWN_GROUP_HINT(B) */ a",
     ],
 )
 def test_well_formed_unmodeled_hint_retains_plus_identity(sql: str) -> None:
@@ -449,7 +450,7 @@ def test_documented_optimizer_hint_inventory_is_complete() -> None:
         "UTYPE",
         "VERBATIM",
     }
-    assert set(DOCUMENTED_HINT_COVERAGE.values()) == {"Semantic", "Generic", "Deferred"}
+    assert set(DOCUMENTED_HINT_COVERAGE.values()) == {"Semantic", "Generic"}
 
 
 @pytest.mark.parametrize(
@@ -479,53 +480,174 @@ def test_generic_documented_hints_retain_identity_and_statement_boundaries(
 
 
 @pytest.mark.parametrize("error_level", list(ErrorLevel))
-def test_jfmt_owner_relocation_is_a_documented_q29_residual(
+def test_jfmt_retains_join_ownership_at_every_error_level(
     error_level: ErrorLevel,
 ) -> None:
-    sql = "SELECT * FROM t JOIN /*+JFMT(F)*/ u ON t.a = u.a"
+    sql = "SELECT * FROM t JOIN /*+JFMT(F),JTYPE(H),DISTRIB(L,R)*/ u ON t.a = u.a"
     expression = parse_one(sql, read="vertica", error_level=error_level)
     generated = expression.sql(dialect="vertica")
 
-    assert generated == "SELECT * FROM t /*+ JFMT(F) */ JOIN u ON t.a = u.a"
+    assert type(expression) is exp.Select
+    assert len(list(expression.find_all(vexp.JfmtQueryMarker))) == 1
+    assert generated == (
+        "SELECT * FROM t JOIN /*+ JFMT(F), JTYPE(H), DISTRIB(L, R) */ u ON t.a = u.a"
+    )
     assert parse_one(generated, read="vertica", error_level=error_level) == expression
 
 
 @pytest.mark.parametrize("error_level", list(ErrorLevel))
-def test_utype_loss_is_a_documented_q29_residual(error_level: ErrorLevel) -> None:
-    sql = "SELECT 1 UNION ALL /*+UTYPE(M)*/ SELECT 2"
+@pytest.mark.parametrize("value", ["U", "M", "u", "m"])
+def test_utype_retains_union_all_ownership_at_every_error_level(
+    error_level: ErrorLevel, value: str
+) -> None:
+    sql = f"SELECT 1 UNION ALL /*+UTYPE({value})*/ SELECT 2"
     expression = parse_one(sql, read="vertica", error_level=error_level)
     generated = expression.sql(dialect="vertica")
 
-    assert isinstance(expression, exp.Union)
-    assert generated == "SELECT 1 UNION ALL SELECT 2"
-    assert "UTYPE" not in generated
+    assert isinstance(expression, vexp.UnionHint)
+    assert generated == f"SELECT 1 UNION ALL /*+ UTYPE({value.upper()}) */ SELECT 2"
+    assert parse_one(generated, read="vertica", error_level=error_level) == expression
 
 
-def test_ctas_with_mixed_comment_is_a_documented_q29_residual() -> None:
+def test_jfmt_and_utype_survive_analysis_serialization_and_set_composition() -> None:
+    jfmt = assert_roundtrip(
+        "SELECT t.a FROM t JOIN /*+JFMT(V)*/ u ON t.a=u.a",
+        "SELECT t.a FROM t JOIN /*+ JFMT(V) */ u ON t.a = u.a",
+    )
+    union = assert_roundtrip(
+        "WITH c AS (SELECT a FROM t) SELECT a FROM c "
+        "UNION ALL /*+UTYPE(M)*/ (SELECT a FROM u ORDER BY a LIMIT 1) "
+        "UNION ALL SELECT a FROM v",
+        "WITH c AS (SELECT a FROM t) SELECT a FROM c "
+        "UNION ALL /*+ UTYPE(M) */ (SELECT a FROM u ORDER BY a LIMIT 1) "
+        "UNION ALL SELECT a FROM v",
+    )
+    historical = assert_roundtrip(
+        "AT EPOCH LATEST SELECT a FROM t UNION ALL /*+UTYPE(U)*/ SELECT a FROM u",
+        "AT EPOCH LATEST SELECT a FROM t UNION ALL /*+ UTYPE(U) */ SELECT a FROM u",
+    )
+    assert isinstance(historical, vexp.AtEpochUnion)
+    schema = {name: {"a": "INT"} for name in ("t", "u", "v")}
+    for expression in (jfmt, union, historical):
+        assert exp.Expr.load(expression.dump()) == expression
+        transformed = expression.copy().transform(lambda node: node)
+        assert transformed == expression
+        assert all(node is transformed or node.parent is not None for node in transformed.walk())
+        for analyzed in (
+            qualify(expression.copy(), dialect="vertica", schema=schema),
+            optimize(expression.copy(), dialect="vertica", schema=schema),
+            annotate_types(expression.copy(), dialect="vertica", schema=schema),
+        ):
+            assert type(analyzed) is type(expression)
+            assert parse_one(analyzed.sql(dialect="vertica"), read="vertica") == analyzed
+            assert list(traverse_scope(analyzed))
+    assert list(lineage("a", jfmt, schema=schema, dialect="vertica").walk())
+    assert list(lineage("a", union, schema=schema, dialect="vertica").walk())
+    assert list(lineage("a", historical, schema=schema, dialect="vertica").walk())
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT * FROM t JOIN /*+JFMT*/ u ON true",
+        "SELECT * FROM t JOIN /*+JFMT(X)*/ u ON true",
+        "SELECT * FROM t JOIN /*+JFMT(F,V)*/ u ON true",
+        "SELECT 1 UNION /*+UTYPE(M)*/ ALL SELECT 2",
+        "SELECT 1 UNION /*+UTYPE(M)*/ SELECT 2",
+        "SELECT 1 UNION ALL /*+UTYPE(X)*/ SELECT 2",
+        "SELECT 1 UNION ALL /*+UTYPE(U,M)*/ SELECT 2",
+        "SELECT 1 INTERSECT /*+UTYPE(M)*/ SELECT 2",
+    ],
+)
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_jfmt_and_utype_invalid_contracts_fail_closed(sql: str, error_level: ErrorLevel) -> None:
+    with pytest.raises(ParseError, match="Vertica"):
+        parse(f"{sql}; SELECT 30", read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize("dialect", ["postgres", "duckdb", "mysql", "sqlite"])
+@pytest.mark.parametrize(
+    "unsupported_level", [ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE]
+)
+def test_jfmt_and_utype_fail_atomically_in_foreign_dialects(
+    dialect: str, unsupported_level: ErrorLevel
+) -> None:
+    direct = [
+        parse_one("SELECT * FROM t JOIN /*+JFMT(F)*/ u ON true", read="vertica"),
+        parse_one("SELECT 1 UNION ALL /*+UTYPE(M)*/ SELECT 2", read="vertica"),
+    ]
+    nested = [exp.select("*").from_(expression.subquery("q")) for expression in direct]
+    for expression in [*direct, *nested]:
+        with pytest.raises(ValueError, match="Unsupported expression type"):
+            expression.sql(dialect=dialect, unsupported_level=unsupported_level)
+
+
+def test_jfmt_and_utype_programmatic_mutations_fail_atomically() -> None:
+    jfmt = parse_one("SELECT * FROM t JOIN /*+JFMT(F)*/ u ON true", read="vertica")
+    union = parse_one("SELECT 1 UNION ALL /*+UTYPE(M)*/ SELECT 2", read="vertica")
+    assert type(jfmt) is exp.Select
+    assert len(list(jfmt.find_all(vexp.JfmtQueryMarker))) == 1
+    assert isinstance(union, vexp.UnionHint)
+
+    malformed_jfmt = jfmt.copy()
+    malformed_jfmt.args["joins"][0].set(
+        "hint", exp.Hint(expressions=[exp.Anonymous(this="JFMT", expressions=[exp.var("X")])])
+    )
+    malformed_utype = union.copy()
+    malformed_utype.set(
+        "hint", exp.Hint(expressions=[exp.Anonymous(this="UTYPE", expressions=[exp.var("X")])])
+    )
+    distinct_utype = union.copy()
+    distinct_utype.set("distinct", True)
+    canonical_args = jfmt.copy().args
+    canonical_args.pop("options", None)
+    canonical_jfmt = exp.Select(**canonical_args)
+
+    for expression in (malformed_jfmt, malformed_utype, distinct_utype, canonical_jfmt):
+        with pytest.raises(UnsupportedError):
+            expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+
+
+def test_ctas_with_mixed_comment_has_one_stable_typed_owner() -> None:
     sql = (
         "CREATE TABLE q29_comment AS /*+LABEL(ctas_label)*/ "
         "/* ordinary metadata */ WITH /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ "
         "c AS (SELECT 1 AS id) SELECT /*+LABEL(query_label)*/ id FROM c"
     )
     expression = parse_one(sql, read="vertica")
-    first = expression.sql(dialect="vertica")
-    second = parse_one(first, read="vertica").sql(dialect="vertica")
+    property_ = expression.find(vexp.CtasHintProperty)
+    assert property_ is not None
+    assert property_.comments == [" ordinary metadata "]
+    assert not expression.expression.comments
+    for pretty in (False, True):
+        first = expression.sql(dialect="vertica", pretty=pretty)
+        second = parse_one(first, read="vertica").sql(dialect="vertica", pretty=pretty)
+        assert first.count("ordinary metadata") == 1
+        assert second == first
 
-    assert first.count("ordinary metadata") == 2
-    assert second.count("ordinary metadata") == 3
 
-
-def test_unquoted_label_analysis_loss_is_a_documented_q29_residual(
+def test_label_scalar_identity_survives_analysis(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    expression = parse_one("SELECT /*+LABEL(query_label)*/ a FROM t", read="vertica")
-    qualified = qualify(expression.copy(), dialect="vertica", schema={"t": {"a": "INT"}})
-    generated = qualified.sql(dialect="vertica")
-
-    assert "LABEL" not in generated
-    assert any(
-        "LABEL requires one valid label string" in record.message for record in caplog.records
-    )
+    schema = {"t": {"a": "INT"}}
+    for sql in (
+        "SELECT /*+LABEL(query_label)*/ a FROM t",
+        "SELECT /*+LABEL('daily report')*/ a FROM t",
+    ):
+        expression = parse_one(sql, read="vertica")
+        original_value = expression.args["hint"].expressions[0].expressions[0]
+        for analyzed in (
+            qualify(expression.copy(), dialect="vertica", schema=schema),
+            optimize(expression.copy(), dialect="vertica", schema=schema),
+            annotate_types(expression.copy(), dialect="vertica", schema=schema),
+        ):
+            value = analyzed.args["hint"].expressions[0].expressions[0]
+            assert type(value) is type(original_value)
+            assert value.name == original_value.name
+            generated = analyzed.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+            assert "LABEL" in generated
+            assert parse_one(generated, read="vertica") == analyzed
+    assert not caplog.records
 
 
 def test_mixed_ordinary_and_genuine_hint_comments_promote_only_the_genuine_hint() -> None:

@@ -330,6 +330,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.AtEpochUnion: lambda self, expression: self.atepochquery_sql(expression),
         vexp.AtEpochIntersect: lambda self, expression: self.atepochquery_sql(expression),
         vexp.AtEpochExcept: lambda self, expression: self.atepochquery_sql(expression),
+        vexp.JfmtQueryMarker: lambda *_: "",
         vexp.AuthenticationGrant: lambda self, expression: self.authenticationgrant_sql(expression),
         vexp.AuthenticationRevoke: lambda self, expression: self.authenticationrevoke_sql(
             expression
@@ -573,6 +574,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.VerticaToChar: lambda self, expression: self.verticatochar_sql(expression),
         vexp.VerticaWindow: lambda self, expression: self.verticawindow_sql(expression),
         vexp.WithHint: lambda self, expression: self.withhint_sql(expression),
+        vexp.UnionHint: lambda self, expression: self.set_operations(expression),
     }
 
     @staticmethod
@@ -613,6 +615,8 @@ class VerticaGenerator(PostgresGenerator):
             owner = "with"
         elif isinstance(parent, exp.Join):
             owner = "join"
+        elif isinstance(parent, (vexp.UnionHint, vexp.AtEpochUnion)):
+            owner = "union"
         elif isinstance(parent, vexp.CtasHintProperty):
             owner = "ctas"
         elif isinstance(parent, (exp.Insert, exp.Update, exp.Delete, exp.Merge)):
@@ -686,7 +690,9 @@ class VerticaGenerator(PostgresGenerator):
             or not self._valid_optimizer_hint_structure(hint)
             or not self._validate_optimizer_hint_contract(hint, "join", require_modeled_only=True)
         ):
-            self.unsupported("Vertica JOIN hints require structured JTYPE or DISTRIB directives")
+            self.unsupported(
+                "Vertica JOIN hints require structured JFMT, JTYPE, or DISTRIB directives"
+            )
 
         method = expression.method
         side = expression.side
@@ -1016,6 +1022,8 @@ class VerticaGenerator(PostgresGenerator):
                 "at_epoch_kind",
                 "at_epoch_value",
             }
+            if isinstance(expression, (vexp.UnionHint, vexp.AtEpochUnion)):
+                allowed.add("hint")
             if any(
                 key not in allowed and value is not None for key, value in expression.args.items()
             ) or self._has_user_extras(expression, allowed):
@@ -1128,6 +1136,20 @@ class VerticaGenerator(PostgresGenerator):
 
     def _select_transform_sql(self, expression: exp.Select) -> str:
         if not self._validate_query_field_closure(expression):
+            return ""
+        has_jfmt = any(
+            isinstance(join, exp.Join)
+            and isinstance(join.args.get("hint"), exp.Hint)
+            and any(directive.name.upper() == "JFMT" for directive in join.args["hint"].expressions)
+            for join in expression.args.get("joins") or []
+        )
+        markers = [
+            option
+            for option in expression.args.get("options") or []
+            if isinstance(option, vexp.JfmtQueryMarker)
+        ]
+        if has_jfmt != (len(markers) == 1) or any(marker.args for marker in markers):
+            self.unsupported("Vertica JFMT requires one optimizer-safety marker on its SELECT")
             return ""
         for join in expression.args.get("joins") or []:
             if isinstance(join, exp.Join):
@@ -1252,6 +1274,7 @@ class VerticaGenerator(PostgresGenerator):
             vexp.AtEpochUnion: ("UNION", exp.Union),
             vexp.AtEpochIntersect: ("INTERSECT", exp.Intersect),
             vexp.AtEpochExcept: ("EXCEPT", exp.Except),
+            vexp.UnionHint: ("UNION", exp.Union),
         }
         operation_contract = operation_contracts.get(operation)
         if operation_contract is None:
@@ -1279,13 +1302,26 @@ class VerticaGenerator(PostgresGenerator):
             self.unsupported(f"Vertica {operation_name} does not support name-matching modifiers")
             return ""
 
+        hint = expression.args.get("hint")
+        if hint is not None and (
+            operation_name != "UNION"
+            or distinct is not False
+            or not isinstance(hint, exp.Hint)
+            or not self._valid_optimizer_hint_structure(hint)
+            or not self._validate_optimizer_hint_contract(hint, "union", require_modeled_only=True)
+        ):
+            self.unsupported("Vertica UTYPE requires a typed UNION ALL hint")
+            return ""
+
         if operation is canonical_type:
             return super().set_operation(expression)
 
         canonical_args = expression.copy().args
         canonical_args.pop("at_epoch_kind", None)
         canonical_args.pop("at_epoch_value", None)
-        return super().set_operation(canonical_type(**canonical_args))
+        canonical_args.pop("hint", None)
+        sql = super().set_operation(canonical_type(**canonical_args))
+        return f"{sql}{self.sql(hint)}" if hint is not None else sql
 
     def _vertica_with_sql(self, expression: exp.With, hint: str) -> str:
         self._validate_with(expression)
@@ -1343,7 +1379,7 @@ class VerticaGenerator(PostgresGenerator):
             return False
         if isinstance(expression, exp.Select):
             return bool(expression.expressions) and expression.args.get("into") is None
-        if type(expression) in {exp.Union, exp.Intersect, exp.Except}:
+        if type(expression) in {exp.Union, vexp.UnionHint, exp.Intersect, exp.Except}:
             assert isinstance(expression, exp.SetOperation)
             return cls._valid_cte_query(expression.this) and cls._valid_cte_query(
                 expression.expression

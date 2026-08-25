@@ -236,12 +236,14 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   complete 18-entry hint-inventory audit is complete but did not certify the
   milestone. It classified DEPOT_FETCH, ECSMODE, SKIP_STATISTICS, and
   EARLY_MATERIALIZATION as protected Generic opaque hints and found four
-  losslessness blockers: JOIN JFMT relocates to the left table, UNION ALL
-  UTYPE disappears, CTAS-hint/ordinary-comment/hinted-WITH composition
-  multiplies the ordinary comment across regeneration, and unquoted LABEL is
-  lost after qualification/optimization. Q30 owns that bounded remediation;
-  Q31 is the replacement final gate. Milestone 1 remains reopened and
-  Milestone 2 deferred; Q30 is next.
+  losslessness blockers. Q30 is complete: JOIN-owned JFMT(F|V) and UNION-ALL-
+  owned UTYPE(U|M) now have typed, finite-domain, analyzer-stable owners with
+  strict generation and foreign-atomicity guards; CTAS LABEL/prose/hinted-WITH
+  composition emits the prose once from one property owner; and unquoted or
+  quoted LABEL scalar identity survives qualification, optimization, and type
+  annotation. The four protected Generic directives remain unchanged. Q31 is
+  the replacement final gate, so Milestone 1 remains reopened and Milestone 2
+  deferred; Q31 is next.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

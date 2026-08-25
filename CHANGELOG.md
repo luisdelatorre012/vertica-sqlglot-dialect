@@ -5,6 +5,11 @@
 This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
 plugin interface.
 
+- Preserved optimizer-hint ownership and analysis losslessly: JOIN JFMT and
+  UNION ALL UTYPE now retain typed finite-domain owners across regeneration,
+  analysis, serialization, set composition, and foreign generation; mixed
+  CTAS LABEL/prose/hinted-WITH comments no longer multiply; and LABEL scalar
+  values survive qualification, optimization, and type annotation.
 - Added a complete 26.2 optimizer-hint inventory and recertification audit.
   Directed `:c`/`:v` annotations and the ten modeled directives are Semantic;
   DEPOT_FETCH, ECSMODE, SKIP_STATISTICS, and EARLY_MATERIALIZATION have a

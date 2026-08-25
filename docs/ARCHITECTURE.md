@@ -914,15 +914,29 @@ opaque-hint contract at their documented owner: SELECT-owned `DEPOT_FETCH`,
 `ECSMODE`, and `SKIP_STATISTICS`, plus table-owned
 `EARLY_MATERIALIZATION`. They preserve their plus delimiter, statement
 boundary, serialization, and canonical regeneration but do not validate
-their directive-specific value domains. `JFMT` and `UTYPE` remain deferred:
-the parser currently relocates JOIN-owned `JFMT` onto the left table and
-drops UNION-ALL-owned `UTYPE` during generation. The same audit found two
-modeled-boundary composition defects: a CTAS AS-clause hint followed by an
-ordinary comment and a hinted WITH duplicates the ordinary comment on each
-generation cycle, and qualification/optimization changes an unquoted LABEL
-value into a quoted identifier that strict generation rejects and drops with
-a warning. Q30 owns these four ownership/analysis-losslessness defects; Q31
-is the replacement certification gate.
+their directive-specific value domains.
+
+Q30 closes the four losslessness defects found by that audit. JOIN-owned
+`JFMT(F|V)` shares the canonical `Join.hint` child with JTYPE/DISTRIB and
+renders immediately after JOIN. A private `JfmtQueryMarker` query option is
+stored on the owning SELECT as an analyzer-preserved foreign-atomicity guard;
+Vertica generation suppresses it, while an unaware foreign generator fails on
+the marker before silently discarding JFMT. UNION-ALL-owned `UTYPE(U|M)` uses
+the analyzer-visible `UnionHint` canonical subclass and a typed Hint child, so
+the directive remains attached to the exact owning operation through set
+chains, parentheses, CTEs, historical roots, analysis, and regeneration.
+Malformed values, wrong owners, and invalid programmatic shapes fail at the
+same parser/generator boundaries as the other modeled directives; runtime
+feasibility and SYNTACTIC_JOIN prerequisites remain server concerns.
+
+An ordinary comment between a CTAS AS-clause LABEL and a materialization-
+hinted WITH now belongs only to `CtasHintProperty`, rather than being copied
+onto both the property and query. Compact and pretty generation therefore
+emit it once and remain text-stable. Finally, unquoted LABEL values canonicalize
+from SQLGlot's column-shaped hint argument to scalar `Var` children; quoted
+labels remain string literals. Qualification, optimization, and type
+annotation no longer reinterpret either form as a query column. Q31 remains
+the replacement certification gate.
 
 ## Generator policy
 

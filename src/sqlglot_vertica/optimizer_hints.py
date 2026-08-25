@@ -6,12 +6,13 @@ import typing as t
 
 from sqlglot import exp
 
-HintOwner = t.Literal["select", "explain", "with", "table", "join", "ctas", "dml", "copy"]
+HintOwner = t.Literal["select", "explain", "with", "table", "join", "union", "ctas", "dml", "copy"]
 
 MODELED_HINT_NAMES = {
     "ALLNODES",
     "DISTRIB",
     "ENABLE_WITH_CLAUSE_MATERIALIZATION",
+    "JFMT",
     "JTYPE",
     "LABEL",
     "PROJS",
@@ -19,6 +20,7 @@ MODELED_HINT_NAMES = {
     "SYN_JOIN",
     "SYNTACTIC_JOIN",
     "VERBATIM",
+    "UTYPE",
 }
 
 OWNER_HINT_NAMES: dict[HintOwner, set[str]] = {
@@ -26,7 +28,8 @@ OWNER_HINT_NAMES: dict[HintOwner, set[str]] = {
     "explain": {"ALLNODES"},
     "with": {"ENABLE_WITH_CLAUSE_MATERIALIZATION"},
     "table": {"PROJS", "SKIP_PROJS"},
-    "join": {"DISTRIB", "JTYPE"},
+    "join": {"DISTRIB", "JFMT", "JTYPE"},
+    "union": {"UTYPE"},
     "ctas": {"LABEL"},
     "dml": {"LABEL"},
     "copy": {"LABEL"},
@@ -120,6 +123,10 @@ def _directive_error(directive: exp.Expr, owner: HintOwner) -> str | None:
         values = [_simple_value(argument) for argument in arguments]
         if len(values) != 1 or values[0] is None or values[0].upper() not in {"H", "M", "FM"}:
             return "Vertica JTYPE requires exactly one of H, M, or FM"
+    elif name == "JFMT":
+        values = [_simple_value(argument) for argument in arguments]
+        if len(values) != 1 or values[0] is None or values[0].upper() not in {"F", "V"}:
+            return "Vertica JFMT requires exactly one of F or V"
     elif name == "DISTRIB":
         values = [_simple_value(argument) for argument in arguments]
         if (
@@ -134,6 +141,10 @@ def _directive_error(directive: exp.Expr, owner: HintOwner) -> str | None:
     elif name == "LABEL":
         if len(arguments) != 1 or not _label_value(arguments[0]):
             return "Vertica LABEL requires one valid label string of at most 128 UTF-8 octets"
+    elif name == "UTYPE":
+        values = [_simple_value(argument) for argument in arguments]
+        if len(values) != 1 or values[0] is None or values[0].upper() not in {"U", "M"}:
+            return "Vertica UTYPE requires exactly one of U or M"
     return None
 
 
@@ -170,7 +181,18 @@ def canonicalize_optimizer_hint(hint: exp.Hint) -> None:
             continue
         name = directive.name.upper()
         directive.set("this", "SYNTACTIC_JOIN" if name == "SYN_JOIN" else name)
-        if name not in {"DISTRIB", "JTYPE"}:
+        if name == "LABEL" and isinstance(directive, exp.Anonymous):
+            arguments = directive.args.get("expressions")
+            if isinstance(arguments, list) and len(arguments) == 1:
+                argument = arguments[0]
+                if isinstance(argument, exp.Column) and not any(
+                    argument.args.get(part) for part in ("catalog", "db", "table")
+                ):
+                    identifier = argument.this
+                    if isinstance(identifier, exp.Identifier) and not identifier.args.get("quoted"):
+                        directive.set("expressions", [exp.var(identifier.name)])
+            continue
+        if name not in {"DISTRIB", "JFMT", "JTYPE", "UTYPE"}:
             continue
         values = []
         for argument in directive.expressions:
