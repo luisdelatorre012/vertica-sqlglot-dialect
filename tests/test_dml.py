@@ -247,12 +247,7 @@ def test_update_default_relation_is_not_catalog_lineage_and_keeps_parents() -> N
         ),
         (
             "MERGE /*+JTYPE(H)*/ INTO target USING source ON true WHEN MATCHED THEN UPDATE SET a=1",
-            "only LABEL",
-        ),
-        (
-            "MERGE /*+LABEL(a),LABEL(b)*/ INTO target USING source ON true "
-            "WHEN MATCHED THEN UPDATE SET a=1",
-            "exactly one LABEL",
+            "not valid at the DML owner",
         ),
     ],
 )
@@ -291,8 +286,7 @@ def test_merge_rejects_non_vertica_grammar(sql: str, message: str) -> None:
         ("INSERT INTO target VALUES 1", "rows require parentheses"),
         ("INSERT INTO target DEFAULT VALUES VALUES (1)", "exactly one source form"),
         ("INSERT INTO target VALUES (1) SELECT 2", "Unexpected Vertica INSERT clause"),
-        ("INSERT /*+JTYPE(H)*/ INTO target VALUES (1)", "only LABEL"),
-        ("INSERT /*+LABEL(a),LABEL(b)*/ INTO target VALUES (1)", "exactly one LABEL"),
+        ("INSERT /*+JTYPE(H)*/ INTO target VALUES (1)", "not valid at the DML owner"),
     ],
 )
 @pytest.mark.parametrize("error_level", list(ErrorLevel))
@@ -374,12 +368,12 @@ def test_insert_validator_covers_every_structural_error() -> None:
     )
 
     structural_cases: list[tuple[exp.Insert, str]] = [
-        (_valid_insert(hint=exp.var("LABEL")), "exactly one LABEL hint"),
+        (_valid_insert(hint=exp.var("LABEL")), "requires a typed Hint"),
         (
             _valid_insert(
                 hint=exp.Hint(expressions=[exp.Anonymous(this="JTYPE", expressions=[exp.var("H")])])
             ),
-            "supports only LABEL with one argument",
+            "not valid at the DML owner",
         ),
         (exp.Insert(expression=exp.select("a")), "requires a table target"),
         (_valid_insert(this=exp.to_table("t").as_("target")), "do not support aliases"),
@@ -496,7 +490,7 @@ def test_update_rejects_non_vertica_grammar(sql: str, message: str) -> None:
         ("DELETE FROM target ORDER BY id", "does not support ORDER BY"),
         ("DELETE FROM target LIMIT 1", "does not support LIMIT"),
         ("DELETE t1 FROM t1 JOIN t2 ON t1.id=t2.id", "requires FROM"),
-        ("DELETE /*+JTYPE(H)*/ FROM target", "only LABEL"),
+        ("DELETE /*+JTYPE(H)*/ FROM target", "not valid at the DML owner"),
     ],
 )
 def test_delete_rejects_non_vertica_grammar(sql: str, message: str) -> None:
@@ -628,7 +622,7 @@ def test_strict_generation_validates_programmatic_dml_shape_variants() -> None:
                 expression=exp.Values(expressions=[exp.Tuple(expressions=[exp.Literal.number(1)])]),
                 hint=exp.var("LABEL"),
             ),
-            "exactly one LABEL hint",
+            "requires a typed Hint",
         ),
         (
             exp.Merge(

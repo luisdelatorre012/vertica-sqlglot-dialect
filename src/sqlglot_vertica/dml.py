@@ -5,23 +5,15 @@ from __future__ import annotations
 from sqlglot import exp
 
 from sqlglot_vertica import expressions as vexp
+from sqlglot_vertica.optimizer_hints import optimizer_hint_error
 
 
 def _hint_errors(expression: exp.Expr, statement: str) -> list[str]:
     hint = expression.args.get("hint")
     if hint is None:
         return []
-    if not isinstance(hint, exp.Hint) or len(hint.expressions) != 1:
-        return [f"Vertica {statement} supports exactly one LABEL hint"]
-
-    directive = hint.expressions[0]
-    if (
-        not isinstance(directive, (exp.Var, exp.Anonymous))
-        or directive.name.upper() != "LABEL"
-        or len(directive.expressions) != 1
-    ):
-        return [f"Vertica {statement} supports only LABEL with one argument"]
-    return []
+    error = optimizer_hint_error(hint if isinstance(hint, exp.Hint) else None, "dml")
+    return [f"Vertica {statement}: {error}"] if error else []
 
 
 def _alias_has_columns(expression: exp.Expr) -> bool:

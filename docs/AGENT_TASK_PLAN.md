@@ -162,8 +162,9 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 - Q25 remains `DONE` as historical gate evidence, but Milestone 1 is reopened
   until Q26–Q29 are all `DONE`. Completed **Q26 — optimizer-hint comment
   provenance and issue #2 regression** and **Q27 — optimizer-hint delimiter
-  and parsing atomicity**. Q28 is the lowest-numbered eligible task; P16 and
-  all Milestone 2 work are deferred meanwhile.
+  and parsing atomicity** and **Q28 — optimizer-hint directive contract
+  conformance**. Q29 is the lowest-numbered eligible task; P16 and all
+  Milestone 2 work are deferred meanwhile.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -318,12 +319,12 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q25 | DONE   | Milestone 1 recertification gate              | Q23–Q24             | `test: recertify milestone one analysis surface`         |
 | Q26 | DONE   | Optimizer-hint comment provenance and issue #2 regression | Q25       | `fix: preserve ordinary comments around optimizer hints` |
 | Q27 | DONE   | Optimizer-hint delimiter and parsing atomicity | Q26                | `fix: make optimizer hint parsing atomic`                 |
-| Q28 | TODO   | Optimizer-hint directive contract conformance | Q27                 | `fix: enforce optimizer hint directive contracts`        |
+| Q28 | DONE   | Optimizer-hint directive contract conformance | Q27                 | `fix: enforce optimizer hint directive contracts`        |
 | Q29 | TODO   | Milestone 1 optimizer-hint recertification gate | Q26–Q28           | `test: recertify milestone one hint boundaries`          |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred while Q28–Q29 are incomplete. Milestone 2 becomes eligible again only
+Deferred while Q29 is incomplete. Milestone 2 becomes eligible again only
 after every Milestone 1 Q task is `DONE`. Its numbering, dependencies, and
 specifications are intentionally unchanged from the prior plan revision.
 
@@ -3417,7 +3418,7 @@ clean force-install, `pip check`, and installed-wheel `python -I` smoke (a
 whitespace-before-plus GBYTYPE query returning canonical `Select`) passed.
 Milestone 1 remains reopened; Q28 is next and P16 remains deferred.
 
-### Q28 — optimizer-hint directive contract conformance — `TODO`
+### Q28 — optimizer-hint directive contract conformance — `DONE`
 
 **Outcome.** Enforce the source-defined name, placement, arity, value domain,
 and strict-AST contract for every optimizer hint the repository already models.
@@ -3515,6 +3516,57 @@ only directive names, and CTAS generation only that the child is `exp.Hint`.
 The DML helper checks LABEL count/arity but not argument type or UTF-8 byte
 length. Existing GBYTYPE algorithm validation is the positive neighboring
 pattern to preserve.
+
+**Completion record.** Re-opened the 26.2 Hints inventory and all ten modeled
+directive pages (ALLNODES, ENABLE_WITH_CLAUSE_MATERIALIZATION, GBYTYPE, JTYPE,
+DISTRIB, PROJS, SKIP_PROJS, LABEL, SYNTACTIC_JOIN, and VERBATIM), plus CREATE
+TABLE and CREATE TEMPORARY TABLE for the AS-clause LABEL site. Audited the
+installed SQLGlot 30.13 Hint parser/fallback, canonical `exp.Hint`/
+`Var`/`Anonymous` shapes, generic generator, and every plugin owner. No new
+material source contradiction was found. The generic Hints page's compact
+delimiter display versus whitespace allowance remains Q27's recorded lexical
+choice. The source-to-AST contract pinned before implementation is:
+argument-free `Var` directives at EXPLAIN/WITH/SELECT; typed `Anonymous`
+JTYPE/DISTRIB directives with finite scalar values at JOIN; typed nonempty
+PROJS/SKIP_PROJS projection lists at table/alias owners; the existing typed
+GBYTYPE algorithm on `VerticaGroup`; and one scalar label child per LABEL at
+SELECT, COPY, DML, or the CTAS AS-clause owner.
+
+Added `src/sqlglot_vertica/optimizer_hints.py` as the shared source-defined
+semantic boundary. Parser and generator now enforce owner placement and exact
+arity/child/domain contracts for every modeled directive. ALLNODES,
+ENABLE_WITH_CLAUSE_MATERIALIZATION, SYN_JOIN/SYNTACTIC_JOIN, and VERBATIM take
+no arguments; SYN_JOIN canonicalizes to SYNTACTIC_JOIN. JTYPE takes exactly
+one H/M/FM value and DISTRIB exactly two L/R/B/F/A values, canonicalized to
+uppercase, while feasibility, input sorting/segmentation, and the
+SYNTACTIC_JOIN prerequisite remain server concerns. PROJS/SKIP_PROJS require
+at least one nonempty one-, two-, or three-part quoted or unquoted projection
+name without catalog lookup. Every LABEL directive takes exactly one unquoted
+or quoted scalar label with valid UTF-8 encoding and at most 128 octets;
+127/128/129-byte ASCII and multibyte boundaries plus an unpaired-surrogate AST
+are pinned. CTAS preserves both AS-clause and SELECT labels in source order,
+with documented first-label precedence left server-side. Repeated directives
+remain lossless because the sources define no duplicate error; broader
+unmodeled directives retain Q27's plus-delimited opaque contract for Q29.
+
+Recognized wrong owners, missing/extra/expression-valued arguments, invalid
+finite values, empty/four-part projection lists, oversized/invalid-Unicode
+labels, and malformed direct/nested programmatic trees now raise `ParseError`
+at IMMEDIATE, RAISE, WARN, and IGNORE or `UnsupportedError` under strict
+generation, without demotion, relocation, or partial output. Updated DML's
+former single-LABEL-wrapper restriction to the source-backed per-directive
+contract so repeated LABEL directives round-trip losslessly. Architecture,
+coverage (comments/hints plus affected query/DML/CTAS/COPY rows), roadmap,
+source inventory, and changelog documentation were updated. The focused
+`test_hints.py` module passed 434 tests; the hint/GROUP BY/DML/CTAS neighborhood
+passed 1,138 tests. The default CPython 3.12.6 gate passed 8,411 tests at
+92.22% branch coverage with Ruff lint/formatting, strict mypy, and diff checks
+clean. Isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1 each passed 8,411 tests, with 3.15 treating deprecations as
+errors. The sdist/wheel build, clean force-install, `pip check`, and installed-
+wheel `python -I` smoke (a 128-octet LABEL plus valid JTYPE/DISTRIB query,
+returning canonical `Select`) passed. Milestone 1 remains reopened; Q29 alone
+owns recertification and P16 remains deferred.
 
 ### Q29 — Milestone 1 optimizer-hint recertification gate — `TODO`
 

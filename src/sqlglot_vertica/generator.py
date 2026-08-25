@@ -13,6 +13,7 @@ from sqlglot.helper import csv
 
 from sqlglot_vertica import dml as vdml
 from sqlglot_vertica import expressions as vexp
+from sqlglot_vertica.optimizer_hints import HintOwner, optimizer_hint_error
 from sqlglot_vertica.tokens import OptimizerHintComment
 from sqlglot_vertica.user_limits import (
     USER_INTERVAL_MAX_SECONDS,
@@ -602,11 +603,46 @@ class VerticaGenerator(PostgresGenerator):
         if not self._valid_optimizer_hint_structure(expression):
             self.unsupported("Vertica optimizer hints require structured directives")
             return ""
+        parent = expression.parent
+        owner: HintOwner | None = None
+        if isinstance(parent, exp.Select):
+            owner = "select"
+        elif isinstance(parent, vexp.Explain):
+            owner = "explain"
+        elif isinstance(parent, vexp.WithHint):
+            owner = "with"
+        elif isinstance(parent, exp.Join):
+            owner = "join"
+        elif isinstance(parent, vexp.CtasHintProperty):
+            owner = "ctas"
+        elif isinstance(parent, (exp.Insert, exp.Update, exp.Delete, exp.Merge)):
+            owner = "dml"
+        elif isinstance(parent, vexp.VerticaCopy):
+            owner = "copy"
+        if owner and not self._validate_optimizer_hint_contract(expression, owner):
+            return ""
         return super().hint_sql(expression)
+
+    def _validate_optimizer_hint_contract(
+        self,
+        expression: exp.Hint,
+        owner: HintOwner,
+        *,
+        require_modeled_only: bool = False,
+    ) -> bool:
+        error = optimizer_hint_error(expression, owner, require_modeled_only=require_modeled_only)
+        if error:
+            self.unsupported(error)
+            return False
+        return True
 
     def tableoptimizerhint_sql(self, expression: vexp.TableOptimizerHint) -> str:
         if not self._valid_optimizer_hint_structure(expression):
             self.unsupported("Vertica table optimizer hints require structured directives")
+            return ""
+        if not self._validate_optimizer_hint_contract(
+            expression, "table", require_modeled_only=True
+        ):
             return ""
         return f"/*+ {self.expressions(expression, sep=self.QUERY_HINT_SEP).strip()} */"
 
@@ -647,13 +683,8 @@ class VerticaGenerator(PostgresGenerator):
         hint = expression.args.get("hint")
         if hint is not None and (
             not isinstance(hint, exp.Hint)
-            or not hint.expressions
-            or set(hint.args) != {"expressions"}
-            or any(
-                not isinstance(directive, (exp.Var, exp.Anonymous))
-                or directive.name.upper() not in {"DISTRIB", "JTYPE"}
-                for directive in hint.expressions
-            )
+            or not self._valid_optimizer_hint_structure(hint)
+            or not self._validate_optimizer_hint_contract(hint, "join", require_modeled_only=True)
         ):
             self.unsupported("Vertica JOIN hints require structured JTYPE or DISTRIB directives")
 
@@ -1273,11 +1304,7 @@ class VerticaGenerator(PostgresGenerator):
         if (
             not isinstance(hint, exp.Hint)
             or not self._valid_optimizer_hint_structure(hint)
-            or not hint.expressions
-            or any(
-                directive.name.upper() != "ENABLE_WITH_CLAUSE_MATERIALIZATION"
-                for directive in hint.expressions
-            )
+            or not self._validate_optimizer_hint_contract(hint, "with", require_modeled_only=True)
         ):
             self.unsupported(
                 "Vertica WITH materialization hints require ENABLE_WITH_CLAUSE_MATERIALIZATION"
@@ -1581,6 +1608,13 @@ class VerticaGenerator(PostgresGenerator):
         return self.sep().join(clauses)
 
     def explain_sql(self, expression: vexp.Explain) -> str:
+        hint_expression = expression.args.get("hint")
+        if hint_expression is not None:
+            if not isinstance(hint_expression, exp.Hint):
+                self.unsupported("Vertica EXPLAIN optimizer hint requires a typed Hint")
+                return ""
+            if not self._validate_optimizer_hint_contract(hint_expression, "explain"):
+                return ""
         hint = self.sql(expression, "hint")
         options = self.expressions(expression, key="options", flat=True, sep=" ")
         options = f" {options}" if options else ""
@@ -2215,7 +2249,15 @@ class VerticaGenerator(PostgresGenerator):
             return True
 
         if prop_type is vexp.CtasHintProperty:
-            if set(prop.args) != {"this"} or not isinstance(prop.args.get("this"), exp.Hint):
+            hint = prop.args.get("this")
+            if (
+                set(prop.args) != {"this"}
+                or not isinstance(hint, exp.Hint)
+                or not self._valid_optimizer_hint_structure(hint)
+                or not self._validate_optimizer_hint_contract(
+                    hint, "ctas", require_modeled_only=True
+                )
+            ):
                 self.unsupported("CTAS optimizer hints require a typed Hint child")
                 return False
             return True
@@ -6261,6 +6303,13 @@ class VerticaGenerator(PostgresGenerator):
         return f"DROP PROCEDURE{exists} {self.sql(signature)}"
 
     def verticacopy_sql(self, expression: vexp.VerticaCopy) -> str:
+        hint_expression = expression.args.get("hint")
+        if hint_expression is not None:
+            if not isinstance(hint_expression, exp.Hint):
+                self.unsupported("Vertica COPY optimizer hint requires a typed Hint")
+                return ""
+            if not self._validate_optimizer_hint_contract(hint_expression, "copy"):
+                return ""
         hint = self.sql(expression, "hint")
         target = self.sql(expression, "this")
         if not target:

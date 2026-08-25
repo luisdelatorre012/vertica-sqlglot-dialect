@@ -228,14 +228,17 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   entrance; ordinary GBYTYPE and allowed-name comment collisions remain inert;
   malformed genuine bodies fail through one guaranteed-raise boundary at all
   parser levels; strict generation rejects malformed direct/nested Hint trees;
-  and well-formed unmodeled directives retain their plus identity. Q28–Q29
-  remain, so Milestone 1 is reopened and Milestone 2 remains deferred; Q28 is
-  next.
+  and well-formed unmodeled directives retain their plus identity. Q28 is
+  complete: every modeled directive now has source-defined owner, arity, child,
+  finite-domain, projection-name, and 128-octet LABEL validation in parsing and
+  strict generation; mixed-case enums canonicalize, CTAS AS/query labels retain
+  both owners, and unspecified repeated directives remain lossless. Q29 remains,
+  so Milestone 1 is reopened and Milestone 2 remains deferred; Q29 is next.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — remains deferred until Q28–Q29 complete and Milestone 1 is
+  (tasks P16–P35) — remains deferred until Q29 completes and Milestone 1 is
   recertified again.
 
 ## Phase 1 — core analytical SQL and physical design

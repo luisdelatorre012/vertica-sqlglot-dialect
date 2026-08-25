@@ -624,3 +624,207 @@ def test_programmatic_hint_on_comma_join_is_reported_as_unsupported() -> None:
     )
     with pytest.raises(UnsupportedError, match="require an explicit JOIN"):
         join.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+
+
+def test_modeled_hint_directives_have_source_defined_canonical_shapes() -> None:
+    expression = assert_roundtrip(
+        "SELECT /*+syn_join,verbatim,label('daily report')*/ * "
+        "FROM db.s.t /*+projs(p,s.p,db.s.p,'p','s.p','db.s.p'),skip_projs('db.s.old')*/ "
+        "JOIN /*+jtype('fm'),distrib(l,'r')*/ u ON t.id=u.id",
+        "SELECT /*+ SYNTACTIC_JOIN, VERBATIM, LABEL('daily report') */ * "
+        "FROM db.s.t /*+ PROJS(p, s.p, db.s.p, 'p', 's.p', 'db.s.p'), "
+        "SKIP_PROJS('db.s.old') */ "
+        "JOIN /*+ JTYPE(FM), DISTRIB(L, R) */ u ON t.id = u.id",
+    )
+    join_hint = expression.args["joins"][0].args["hint"]
+    assert [directive.name for directive in join_hint.expressions] == ["JTYPE", "DISTRIB"]
+    assert [
+        [value.name for value in directive.expressions] for directive in join_hint.expressions
+    ] == [
+        ["FM"],
+        ["L", "R"],
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("EXPLAIN /*+allnodes*/ SELECT 1", "EXPLAIN /*+ ALLNODES */ SELECT 1"),
+        (
+            "WITH /*+enable_with_clause_materialization*/ c AS (SELECT 1) SELECT * FROM c",
+            "WITH /*+ ENABLE_WITH_CLAUSE_MATERIALIZATION */ c AS (SELECT 1) SELECT * FROM c",
+        ),
+        (
+            "SELECT a FROM t GROUP BY /*+gbytype(pipe)*/ a",
+            "SELECT a FROM t GROUP BY /*+GBYTYPE(PIPE)*/ a",
+        ),
+    ],
+)
+def test_argument_free_and_group_hint_canonicalization(sql: str, expected: str) -> None:
+    assert_roundtrip(sql, expected)
+
+
+INVALID_DIRECTIVE_SQL = [
+    "SELECT /*+SYNTACTIC_JOIN(x)*/ 1",
+    "SELECT /*+VERBATIM(x)*/ 1",
+    "EXPLAIN /*+ALLNODES(x)*/ SELECT 1",
+    "WITH /*+ENABLE_WITH_CLAUSE_MATERIALIZATION(x)*/ c AS (SELECT 1) SELECT * FROM c",
+    "SELECT * FROM t JOIN /*+JTYPE*/ u ON true",
+    "SELECT * FROM t JOIN /*+JTYPE(X)*/ u ON true",
+    "SELECT * FROM t JOIN /*+JTYPE(H,M)*/ u ON true",
+    "SELECT * FROM t JOIN /*+DISTRIB(L)*/ u ON true",
+    "SELECT * FROM t JOIN /*+DISTRIB(L,R,B)*/ u ON true",
+    "SELECT * FROM t JOIN /*+DISTRIB(X,R)*/ u ON true",
+    "SELECT * FROM t /*+PROJS()*/",
+    "SELECT * FROM t /*+SKIP_PROJS*/",
+    "SELECT * FROM t /*+PROJS(a.b.c.d)*/",
+    "SELECT * FROM t /*+PROJS(a + b)*/",
+    "SELECT /*+LABEL*/ 1",
+    "SELECT /*+LABEL()*/ 1",
+    "SELECT /*+LABEL(a,b)*/ 1",
+    "SELECT /*+LABEL(a + b)*/ 1",
+]
+
+
+@pytest.mark.parametrize("sql", INVALID_DIRECTIVE_SQL)
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_invalid_modeled_directive_contracts_fail_at_every_error_level(
+    sql: str, error_level: ErrorLevel, caplog: pytest.LogCaptureFixture
+) -> None:
+    with pytest.raises(ParseError, match="Vertica"):
+        parse_one(sql, read="vertica", error_level=error_level)
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT /*+ALLNODES*/ 1",
+        "EXPLAIN /*+LABEL(x)*/ SELECT 1",
+        "WITH /*+JTYPE(H)*/ c AS (SELECT 1) SELECT * FROM c",
+        "SELECT * FROM t /*+DISTRIB(L,R)*/",
+        "SELECT * FROM t JOIN /*+PROJS(p)*/ u ON true",
+        "CREATE TABLE x AS /*+VERBATIM*/ SELECT 1",
+        "INSERT /*+JTYPE(H)*/ INTO t VALUES (1)",
+        "COPY /*+SYNTACTIC_JOIN*/ t FROM STDIN",
+    ],
+)
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_modeled_directives_fail_closed_at_wrong_owners(sql: str, error_level: ErrorLevel) -> None:
+    with pytest.raises(ParseError, match="not valid"):
+        parse_one(sql, read="vertica", error_level=error_level)
+
+
+LABEL_SITE_TEMPLATES = [
+    "SELECT /*+LABEL('{label}')*/ 1",
+    "CREATE TABLE q28_labels AS /*+LABEL('{label}')*/ SELECT 1",
+    "INSERT /*+LABEL('{label}')*/ INTO t VALUES (1)",
+    "UPDATE /*+LABEL('{label}')*/ t SET a = 1",
+    "DELETE /*+LABEL('{label}')*/ FROM t",
+    "MERGE /*+LABEL('{label}')*/ INTO t USING s ON t.id=s.id WHEN MATCHED THEN UPDATE SET a=s.a",
+    "COPY /*+LABEL('{label}')*/ t FROM STDIN",
+]
+
+
+@pytest.mark.parametrize("sql_template", LABEL_SITE_TEMPLATES)
+@pytest.mark.parametrize("label", ["a" * 127, "a" * 128, "é" * 63 + "a", "é" * 64])
+def test_label_utf8_boundaries_are_accepted(sql_template: str, label: str) -> None:
+    expression = assert_roundtrip(sql_template.format(label=label))
+    assert isinstance(expression, exp.Expr)
+
+
+@pytest.mark.parametrize("sql_template", LABEL_SITE_TEMPLATES)
+@pytest.mark.parametrize("label", ["a" * 129, "é" * 64 + "a"])
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_label_over_128_utf8_octets_fails_closed(
+    sql_template: str, label: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError, match="128 UTF-8 octets"):
+        parse_one(sql_template.format(label=label), read="vertica", error_level=error_level)
+
+
+def test_repeated_directives_and_ctas_dual_label_owners_are_lossless() -> None:
+    assert_roundtrip("SELECT /*+LABEL(first),LABEL(second),VERBATIM,VERBATIM*/ 1")
+    assert_roundtrip("INSERT /*+LABEL(first),LABEL(second)*/ INTO t VALUES (1)")
+    assert_roundtrip(
+        "SELECT * FROM t JOIN /*+JTYPE(H),JTYPE(M),DISTRIB(L,R),DISTRIB(B,A)*/ u ON true"
+    )
+    expression = assert_roundtrip(
+        "CREATE TABLE q28_dual AS /*+LABEL(ctas_label)*/ SELECT /*+LABEL(query_label)*/ 1"
+    )
+    labels = [directive for hint in expression.find_all(exp.Hint) for directive in hint.expressions]
+    assert {directive.expressions[0].name for directive in labels} == {
+        "ctas_label",
+        "query_label",
+    }
+    sql = expression.sql(dialect="vertica")
+    assert sql.index("LABEL(ctas_label)") < sql.index("LABEL(query_label)")
+
+
+def test_programmatic_modeled_hint_contract_mutations_fail_atomically() -> None:
+    cases = [
+        exp.Select(
+            expressions=[exp.Literal.number(1)],
+            hint=exp.Hint(
+                expressions=[
+                    exp.Anonymous(
+                        this="LABEL",
+                        expressions=[exp.Add(this=exp.column("a"), expression=exp.column("b"))],
+                    )
+                ]
+            ),
+        ),
+        exp.Select(
+            expressions=[exp.Literal.number(1)],
+            hint=exp.Hint(
+                expressions=[
+                    exp.Anonymous(this="LABEL", expressions=[exp.Literal.string("\ud800")])
+                ]
+            ),
+        ),
+        parse_one("EXPLAIN /*+ALLNODES*/ SELECT 1", read="vertica"),
+        parse_one(
+            "WITH /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ c AS (SELECT 1) SELECT * FROM c",
+            read="vertica",
+        ),
+        parse_one("SELECT * FROM t /*+PROJS(p)*/", read="vertica"),
+        parse_one("SELECT * FROM t JOIN /*+JTYPE(H),DISTRIB(L,R)*/ u ON true", read="vertica"),
+        parse_one("CREATE TABLE q28_mutation AS /*+LABEL(x)*/ SELECT 1", read="vertica"),
+        parse_one("INSERT /*+LABEL(x)*/ INTO t VALUES (1)", read="vertica"),
+        parse_one("COPY /*+LABEL(x)*/ t FROM STDIN", read="vertica"),
+    ]
+    cases[2].args["hint"].replace(
+        exp.Hint(expressions=[exp.Anonymous(this="ALLNODES", expressions=[exp.var("x")])])
+    )
+    cases[3].args["with_"].args["hint"].replace(
+        exp.Hint(
+            expressions=[
+                exp.Anonymous(this="ENABLE_WITH_CLAUSE_MATERIALIZATION", expressions=[exp.var("x")])
+            ]
+        )
+    )
+    table_hint = cases[4].find(vexp.TableOptimizerHint)
+    assert table_hint is not None
+    table_hint.set("expressions", [exp.Anonymous(this="PROJS", expressions=[])])
+    cases[5].args["joins"][0].set(
+        "hint", exp.Hint(expressions=[exp.Anonymous(this="JTYPE", expressions=[exp.var("X")])])
+    )
+    ctas_hint = cases[6].find(vexp.CtasHintProperty)
+    assert ctas_hint is not None
+    ctas_hint.set(
+        "this",
+        exp.Hint(
+            expressions=[exp.Anonymous(this="LABEL", expressions=[exp.var("x"), exp.var("y")])]
+        ),
+    )
+    cases[7].set(
+        "hint",
+        exp.Hint(
+            expressions=[exp.Anonymous(this="LABEL", expressions=[exp.var("x"), exp.var("y")])]
+        ),
+    )
+    cases[8].set("hint", exp.Hint(expressions=[exp.Anonymous(this="LABEL", expressions=[])]))
+
+    for expression in cases:
+        with pytest.raises(UnsupportedError):
+            expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)

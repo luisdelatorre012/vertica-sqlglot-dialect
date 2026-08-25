@@ -883,9 +883,29 @@ The same structural preflight runs for direct and nested Vertica generation,
 including custom WITH/table/CTAS wrappers, before any hint prefix is emitted.
 Well-formed directives outside the currently modeled owner allowlists remain
 plus-delimited comments through generation, dump/load, copy, and transform so
-Q28 can decide their semantic contract without provenance loss. Successful
+Q29 can classify their repository coverage without provenance loss. Successful
 whitespace-plus hints canonicalize to the existing `/*+ ... */` spelling.
-Directive name, placement, arity, and value-domain enforcement remains Q28.
+
+The modeled directives have one shared source-defined contract in
+`optimizer_hints.py`, applied after the structural boundary in parsing and
+again before strict generation. `ALLNODES`,
+`ENABLE_WITH_CLAUSE_MATERIALIZATION`, `SYN[TACTIC]_JOIN`, and `VERBATIM` are
+argument-free at their EXPLAIN, WITH, and SELECT owners; the short SYN_JOIN
+spelling canonicalizes to SYNTACTIC_JOIN. JOIN-owned `JTYPE` takes exactly one
+of H/M/FM and `DISTRIB` exactly two values from L/R/B/F/A, canonicalized to
+uppercase; feasibility and the SYNTACTIC_JOIN prerequisite remain server
+concerns. Table/alias `PROJS` and `SKIP_PROJS` take a nonempty list of one- to
+three-part projection names without catalog lookup. Each SELECT, CTAS,
+COPY, INSERT, UPDATE, DELETE, or MERGE `LABEL` directive takes exactly one
+unquoted or quoted label value whose valid UTF-8 representation is at most 128
+octets. CTAS preserves both its AS-clause label and a SELECT-owned label in
+source order; first-label precedence is server semantics. Repeated directives
+remain lossless where the source does not define duplicate handling. A modeled
+directive at the wrong owner, with the wrong arity or child type, outside its
+finite domain, or beyond the LABEL byte boundary raises `ParseError` at all
+four parser levels and `UnsupportedError` under strict direct/nested
+generation. Opaque, well-formed directives outside this modeled set retain the
+Q27 plus-delimited boundary and are not thereby advertised as semantic.
 
 ## Generator policy
 

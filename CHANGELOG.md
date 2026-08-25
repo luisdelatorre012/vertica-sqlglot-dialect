@@ -5,6 +5,12 @@
 This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
 plugin interface.
 
+- Enforced the source-defined contract for every modeled optimizer directive:
+  owner placement, argument-free hints, JTYPE/DISTRIB arity and finite values,
+  nonempty qualified PROJS/SKIP_PROJS lists, and one valid UTF-8 LABEL value of
+  at most 128 octets per directive now fail closed in parsing and strict
+  generation while mixed case canonicalizes and unspecified duplicates remain
+  lossless.
 - Added optimizer-hint delimiter and structural atomicity: exact and
   whitespace-before-plus comment openers now share provenance across every
   modeled hint site, ordinary GBYTYPE collisions stay inert, malformed genuine

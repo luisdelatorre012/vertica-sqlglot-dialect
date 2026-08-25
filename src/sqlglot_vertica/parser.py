@@ -13,6 +13,11 @@ from sqlglot.parsers.postgres import PostgresParser
 
 from sqlglot_vertica import dml as vdml
 from sqlglot_vertica import expressions as vexp
+from sqlglot_vertica.optimizer_hints import (
+    HintOwner,
+    canonicalize_optimizer_hint,
+    optimizer_hint_error,
+)
 from sqlglot_vertica.tokens import (
     DirectedPostfixComment,
     MisplacedDirectedComment,
@@ -1522,6 +1527,20 @@ class VerticaParser(PostgresParser):
             self.check_errors()
         raise ParseError(message)
 
+    def _validate_optimizer_hint_contract(
+        self,
+        hint: exp.Hint | None,
+        owner: HintOwner,
+        *,
+        require_modeled_only: bool = False,
+    ) -> None:
+        if hint is None:
+            return
+        error = optimizer_hint_error(hint, owner, require_modeled_only=require_modeled_only)
+        if error:
+            self._raise_optimizer_hint_error(error)
+        canonicalize_optimizer_hint(hint)
+
     @staticmethod
     def _valid_optimizer_hint_structure(hint: exp.Hint | None) -> bool:
         if not isinstance(hint, exp.Hint) or set(hint.args) != {"expressions"}:
@@ -1590,7 +1609,7 @@ class VerticaParser(PostgresParser):
         return parsed_hint
 
     def _optimizer_hint_from_comment(
-        self, comment: str, allowed_names: t.Collection[str]
+        self, comment: str, allowed_names: t.Collection[str], owner: HintOwner
     ) -> exp.Hint | None:
         """Parse a hint comment only when every directive is valid in this position.
 
@@ -1603,6 +1622,11 @@ class VerticaParser(PostgresParser):
 
         parsed_hint = self._parse_optimizer_hint_comment(comment)
 
+        error = optimizer_hint_error(parsed_hint, owner)
+        if error:
+            self._raise_optimizer_hint_error(error)
+        canonicalize_optimizer_hint(parsed_hint)
+
         names = {
             expression.name.upper()
             for expression in parsed_hint.expressions
@@ -1611,12 +1635,15 @@ class VerticaParser(PostgresParser):
         return parsed_hint if names.issubset(allowed_names) else None
 
     def _extract_optimizer_hints(
-        self, comments: t.Sequence[str] | None, allowed_names: t.Collection[str]
+        self,
+        comments: t.Sequence[str] | None,
+        allowed_names: t.Collection[str],
+        owner: HintOwner,
     ) -> tuple[list[exp.Hint], list[str]]:
         hints: list[exp.Hint] = []
         ordinary_comments: list[str] = []
         for comment in comments or ():
-            hint = self._optimizer_hint_from_comment(comment, allowed_names)
+            hint = self._optimizer_hint_from_comment(comment, allowed_names, owner)
             if hint:
                 hints.append(hint)
             else:
@@ -1638,7 +1665,7 @@ class VerticaParser(PostgresParser):
             self._raise_cte_error("Vertica WITH does not support SEARCH or CYCLE clauses")
 
         hints, ordinary_comments = self._extract_optimizer_hints(
-            with_expression.comments, self.WITH_HINT_NAMES
+            with_expression.comments, self.WITH_HINT_NAMES, "with"
         )
         if not hints:
             return with_expression
@@ -1780,6 +1807,7 @@ class VerticaParser(PostgresParser):
         ):
             self._raise_at_epoch_query_error("AT epoch must precede a WITH clause")
         if isinstance(expression, exp.Select):
+            self._validate_optimizer_hint_contract(expression.args.get("hint"), "select")
             distinct = expression.args.get("distinct")
             if isinstance(distinct, exp.Distinct) and distinct.args.get("on") is not None:
                 self._raise_select_modifier_error("Vertica SELECT does not support DISTINCT ON")
@@ -2043,7 +2071,7 @@ class VerticaParser(PostgresParser):
 
         parsed_hints: list[exp.Hint] = []
         parsed, ordinary_comments = self._extract_optimizer_hints(
-            table.comments, self.TABLE_HINT_NAMES
+            table.comments, self.TABLE_HINT_NAMES, "table"
         )
         parsed_hints.extend(parsed)
         table.comments = ordinary_comments
@@ -2051,7 +2079,7 @@ class VerticaParser(PostgresParser):
         alias = table.args.get("alias")
         if isinstance(alias, exp.TableAlias):
             parsed, ordinary_comments = self._extract_optimizer_hints(
-                alias.comments, self.TABLE_HINT_NAMES
+                alias.comments, self.TABLE_HINT_NAMES, "table"
             )
             parsed_hints.extend(parsed)
             alias.comments = ordinary_comments
@@ -2079,7 +2107,7 @@ class VerticaParser(PostgresParser):
             return None
 
         hints, ordinary_comments = self._extract_optimizer_hints(
-            join.comments, self.JOIN_HINT_NAMES
+            join.comments, self.JOIN_HINT_NAMES, "join"
         )
         join.comments = ordinary_comments
         if hints:
@@ -2176,6 +2204,7 @@ class VerticaParser(PostgresParser):
             return super()._parse_describe()
 
         hint = self._parse_hint()
+        self._validate_optimizer_hint_contract(hint, "explain")
         options = []
         for option in ("LOCAL", "VERBOSE", "JSON", "ANNOTATED"):
             if self._match_text_seq(option):
@@ -2243,6 +2272,7 @@ class VerticaParser(PostgresParser):
         if not isinstance(insert, exp.Insert):
             self._raise_insert_error("Vertica INSERT does not support multi-table forms")
 
+        self._validate_optimizer_hint_contract(insert.args.get("hint"), "dml")
         self._validate_insert_list_tokens(index, insert)
         errors = vdml.insert_errors(insert)
         if errors:
@@ -2259,6 +2289,7 @@ class VerticaParser(PostgresParser):
 
     def _parse_merge(self) -> exp.Merge:
         hint = self._parse_hint()
+        self._validate_optimizer_hint_contract(hint, "dml")
         if not self._match(TokenType.INTO):
             self.raise_error("Vertica MERGE requires INTO")
 
@@ -2354,6 +2385,7 @@ class VerticaParser(PostgresParser):
         if not self._curr or self._match(TokenType.SET, advance=False):
             self.raise_error("Vertica UPDATE requires a table target")
         update = super()._parse_update()
+        self._validate_optimizer_hint_contract(update.args.get("hint"), "dml")
         from_ = update.args.get("from_")
         if isinstance(from_, exp.From) and isinstance(from_.this, exp.Table):
             table = from_.this
@@ -2384,6 +2416,7 @@ class VerticaParser(PostgresParser):
             self.raise_error("Vertica DELETE requires FROM")
 
         delete = super()._parse_delete()
+        self._validate_optimizer_hint_contract(delete.args.get("hint"), "dml")
         self._raise_dml_errors(vdml.delete_errors(delete))
         return delete
 
@@ -3373,6 +3406,7 @@ class VerticaParser(PostgresParser):
         """Parse COPY without degrading recognized Vertica syntax to Command."""
 
         hint = self._parse_hint()
+        self._validate_optimizer_hint_contract(hint, "copy")
 
         target = self._parse_table_parts(schema=True)
         if not target:
@@ -7998,7 +8032,9 @@ class VerticaParser(PostgresParser):
         return self.expression(exp.OnCommitProperty(delete=delete))
 
     def _parse_ctas_hint(self, comments: list[str]) -> vexp.CtasHintProperty | None:
-        hints, ordinary_comments = self._extract_optimizer_hints(comments, self.CTAS_HINT_NAMES)
+        hints, ordinary_comments = self._extract_optimizer_hints(
+            comments, self.CTAS_HINT_NAMES, "ctas"
+        )
         comments[:] = ordinary_comments
         if not hints:
             return None
