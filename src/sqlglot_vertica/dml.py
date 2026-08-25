@@ -15,7 +15,11 @@ def _hint_errors(expression: exp.Expr, statement: str) -> list[str]:
         return [f"Vertica {statement} supports exactly one LABEL hint"]
 
     directive = hint.expressions[0]
-    if directive.name.upper() != "LABEL" or len(directive.expressions) != 1:
+    if (
+        not isinstance(directive, (exp.Var, exp.Anonymous))
+        or directive.name.upper() != "LABEL"
+        or len(directive.expressions) != 1
+    ):
         return [f"Vertica {statement} supports only LABEL with one argument"]
     return []
 

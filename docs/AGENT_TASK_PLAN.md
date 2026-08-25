@@ -161,8 +161,9 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   is the replacement recertification gate and full 26.2 hint-inventory audit.
 - Q25 remains `DONE` as historical gate evidence, but Milestone 1 is reopened
   until Q26–Q29 are all `DONE`. Completed **Q26 — optimizer-hint comment
-  provenance and issue #2 regression**. Q27 is the lowest-numbered eligible
-  task; P16 and all Milestone 2 work are deferred meanwhile.
+  provenance and issue #2 regression** and **Q27 — optimizer-hint delimiter
+  and parsing atomicity**. Q28 is the lowest-numbered eligible task; P16 and
+  all Milestone 2 work are deferred meanwhile.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -316,13 +317,13 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q24 | DONE   | AT epoch WITH compound-query composition      | Q23                 | `fix: compose historical ctes and set branches`          |
 | Q25 | DONE   | Milestone 1 recertification gate              | Q23–Q24             | `test: recertify milestone one analysis surface`         |
 | Q26 | DONE   | Optimizer-hint comment provenance and issue #2 regression | Q25       | `fix: preserve ordinary comments around optimizer hints` |
-| Q27 | TODO   | Optimizer-hint delimiter and parsing atomicity | Q26                | `fix: make optimizer hint parsing atomic`                 |
+| Q27 | DONE   | Optimizer-hint delimiter and parsing atomicity | Q26                | `fix: make optimizer hint parsing atomic`                 |
 | Q28 | TODO   | Optimizer-hint directive contract conformance | Q27                 | `fix: enforce optimizer hint directive contracts`        |
 | Q29 | TODO   | Milestone 1 optimizer-hint recertification gate | Q26–Q28           | `test: recertify milestone one hint boundaries`          |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred while Q26–Q29 are incomplete. Milestone 2 becomes eligible again only
+Deferred while Q28–Q29 are incomplete. Milestone 2 becomes eligible again only
 after every Milestone 1 Q task is `DONE`. Its numbering, dependencies, and
 specifications are intentionally unchanged from the prior plan revision.
 
@@ -3278,7 +3279,7 @@ sdist/wheel build, clean force-install, `pip check`, and installed-wheel
 `python -I` smoke (a blank-comment WITH query returning canonical `Select`)
 passed. Milestone 1 remains reopened; Q27 is next and P16 remains deferred.
 
-### Q27 — optimizer-hint delimiter and parsing atomicity — `TODO`
+### Q27 — optimizer-hint delimiter and parsing atomicity — `DONE`
 
 **Outcome.** Close the independent lexical and structural boundary exposed by
 the issue #2 provenance audit. An ordinary comment must never acquire optimizer
@@ -3369,6 +3370,52 @@ the plus delimiter, CTAS malformed/wrong-site hints disappear, and the DML
 validator's unconditional `directive.name` access makes malformed INSERT LABEL
 raise `AttributeError` at every level. These are distinct from Q26's empty
 ordinary-comment inner-parser failure.
+
+**Completion record.** Re-opened the exact 26.2 Hints and GBYTYPE pages and
+audited installed SQLGlot 30.13's tokenizer core, HINT-token creation,
+comment attachment, Hint-body fallback, parser error levels, `exp.Hint`,
+serialization, and generation. The Hints formal syntax shows compact `/*+`,
+while its restriction text explicitly allows spaces before and after the plus;
+this is not a material contradiction, and both forms now enter the same typed
+contract. The GBYTYPE page continues to document exactly
+`GROUP BY /*+GBYTYPE(HASH|PIPE)*/`; no source contradiction was found.
+
+Extended `_VerticaTokenizerCore` so a block comment whose first non-space
+character is plus becomes `OptimizerHintComment`, while only comments whose
+plus is in that delimiter position acquire provenance. At direct SELECT,
+EXPLAIN, INSERT/UPDATE/DELETE/MERGE, and COPY sites the whitespace-plus form is
+promoted to SQLGlot's ordinary HINT token shape; WITH, table/alias, JOIN,
+GROUP BY, and CTAS consume the same marker through their comment paths.
+Successful output canonicalizes to the existing `/*+ ... */` spelling.
+Ordinary line and block `GBYTYPE(HASH|PIPE)` collisions no longer become a
+typed group algorithm, and unrelated plus signs remain prose. Well-formed
+unmodeled directives stay plus-delimited through compact/pretty generation,
+dump/load, copy, and transform rather than losing their identity before Q28's
+semantic inventory.
+
+Added one `_raise_optimizer_hint_error` guaranteed-raise boundary and a shared
+structural parser check for nonempty directive lists, balanced parentheses,
+nonempty comma positions, typed `Var`/`Anonymous` directives, and expression
+arguments. Empty bodies, unmatched/truncated calls, trailing or empty comma
+positions, tokenizer failures, and SQLGlot recovery strings now raise
+`ParseError` at IMMEDIATE, RAISE, WARN, and IGNORE at every audited owner,
+without warning logs or statement swallowing. The former malformed INSERT
+`LABEL(` reproducer can no longer reach raw `AttributeError`; DML validation
+also checks directive type before reading its name. Vertica generation applies
+the same structural preflight to direct `exp.Hint` and custom table/WITH/CTAS,
+JOIN, query, and DML owners, so malformed programmatic trees fail atomically
+with `UnsupportedError` before output. Directive name, placement, arity, and
+domain validation remains exclusively Q28.
+
+`tests/test_hints.py` passed 240 tests and `tests/test_group_by.py` passed 140;
+the focused hint/GROUP BY/DML/CTAS neighborhood passed 949 tests. The final
+default CPython 3.12.6 gate passed 8,222 tests at 92.23% branch coverage with
+Ruff lint/formatting, strict mypy, and diff checks clean. Isolated CPython
+3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed
+8,222 tests, with 3.15 treating deprecations as errors. The sdist/wheel build,
+clean force-install, `pip check`, and installed-wheel `python -I` smoke (a
+whitespace-before-plus GBYTYPE query returning canonical `Select`) passed.
+Milestone 1 remains reopened; Q28 is next and P16 remains deferred.
 
 ### Q28 — optimizer-hint directive contract conformance — `TODO`
 
@@ -3528,7 +3575,7 @@ tokenizer/parser/AST/generator/optimizer implementations.
 
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 
-Q26–Q29 are incomplete, so Milestone 2 is deferred until every Milestone 1 Q
+Q28–Q29 are incomplete, so Milestone 2 is deferred until every Milestone 1 Q
 task is again `DONE`. The detailed P16–P35 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

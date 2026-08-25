@@ -12,4 +12,4 @@ class MisplacedDirectedComment(str):
 
 
 class OptimizerHintComment(str):
-    """A comment scanned from the exact ``/*+`` optimizer-hint delimiter."""
+    """A comment scanned from a genuine ``/* [space] +`` optimizer-hint delimiter."""

@@ -861,18 +861,31 @@ statement-level marker-count invariant prevents a supported postfix annotation
 from disappearing in a parser path. This internal-core dependency is covered
 by the same minor-version bound and must be re-audited when SQLGlot changes.
 
-The same lexical-provenance rule now protects the shared optimizer-hint
-extractor used by WITH, table/alias, JOIN, and CTAS sites. Exact `/*+`
-comments are tagged as `OptimizerHintComment` while tokenizing; ordinary line
-comments and non-plus block comments retain plain `str` bodies. The extractor
-checks that marker before calling SQLGlot's nested Hint parser, so empty or
-parse-hostile prose and ordinary comments whose text happens to match an
-allowed directive never acquire hint semantics or raise an inner-parser
-exception. Nonempty ordinary CTAS comments are moved from the consumed `AS`
-token to the query so they survive generation. Q26 deliberately recognizes
-only SQLGlot's existing exact `/*+` entrance; whitespace-before-plus delimiter
-support and malformed genuine-hint atomicity remain Q27, and directive
-name/arity/domain enforcement remains Q28.
+The same lexical-provenance rule protects every optimizer-hint entrance.
+Exact `/*+` and the documented whitespace-before-plus `/* +` form are tagged
+as `OptimizerHintComment`; ordinary line comments and non-plus block comments
+retain plain `str` bodies. For SELECT, EXPLAIN, INSERT/UPDATE/DELETE/MERGE, and
+COPY, the tokenizer gives either genuine delimiter the same `HINT` token shape.
+WITH, table/alias, JOIN, GROUP BY, and CTAS consume the tagged comment through
+their position-specific extractors. An unrelated plus later in ordinary prose
+does not create provenance, and ordinary comments whose text happens to match
+an allowed directive remain inert. Nonempty ordinary CTAS comments are moved
+from the consumed `AS` token to the query so they survive generation.
+
+All genuine hint bodies pass through one structural boundary before owner-
+specific name checks. It requires a nonempty directive list, balanced
+parentheses, nonempty comma-separated positions, and typed `Var` or
+`Anonymous` directive children with expression arguments. Empty bodies,
+unmatched parentheses, trailing commas, SQLGlot string-recovery children, and
+tokenization failures raise `ParseError` at IMMEDIATE, RAISE, WARN, and IGNORE;
+the malformed INSERT LABEL path therefore cannot reach a raw `AttributeError`.
+The same structural preflight runs for direct and nested Vertica generation,
+including custom WITH/table/CTAS wrappers, before any hint prefix is emitted.
+Well-formed directives outside the currently modeled owner allowlists remain
+plus-delimited comments through generation, dump/load, copy, and transform so
+Q28 can decide their semantic contract without provenance loss. Successful
+whitespace-plus hints canonicalize to the existing `/*+ ... */` spelling.
+Directive name, placement, arity, and value-domain enforcement remains Q28.
 
 ## Generator policy
 

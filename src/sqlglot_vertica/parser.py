@@ -7,7 +7,7 @@ import typing as t
 
 from sqlglot import ErrorLevel, Token, TokenType, exp
 from sqlglot.dialects.dialect import Dialect, map_date_part
-from sqlglot.errors import ParseError
+from sqlglot.errors import ParseError, TokenError
 from sqlglot.helper import seq_get
 from sqlglot.parsers.postgres import PostgresParser
 
@@ -1367,6 +1367,11 @@ class VerticaParser(PostgresParser):
         algorithm: exp.Var | None = None
         ordinary_comments: list[str] = []
         for comment in comments or ():
+            if not isinstance(comment, OptimizerHintComment):
+                ordinary_comments.append(comment)
+                continue
+
+            self._parse_optimizer_hint_comment(comment)
             match = self.GROUP_BY_HINT.fullmatch(comment)
             if match:
                 if algorithm is not None:
@@ -1480,6 +1485,18 @@ class VerticaParser(PostgresParser):
         )
 
     def _parse_hint(self) -> exp.Hint | None:
+        hint_comment = (
+            next(
+                (
+                    comment
+                    for comment in self._curr.comments
+                    if isinstance(comment, OptimizerHintComment)
+                ),
+                None,
+            )
+            if self._curr.token_type == TokenType.HINT
+            else None
+        )
         if self._curr.token_type == TokenType.HINT:
             for comment in self._curr.comments:
                 if not isinstance(comment, (DirectedPostfixComment, MisplacedDirectedComment)):
@@ -1489,7 +1506,88 @@ class VerticaParser(PostgresParser):
                     self.raise_error(
                         "A directed-query constant annotation must follow its expression"
                     )
-        return super()._parse_hint()
+        try:
+            parsed_hint = super()._parse_hint()
+        except (ParseError, TokenError):
+            if hint_comment is not None:
+                self._raise_optimizer_hint_error("Malformed Vertica optimizer hint")
+            raise
+        if hint_comment is not None:
+            return self._parse_optimizer_hint_comment(hint_comment, parsed_hint=parsed_hint)
+        return parsed_hint
+
+    def _raise_optimizer_hint_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
+    @staticmethod
+    def _valid_optimizer_hint_structure(hint: exp.Hint | None) -> bool:
+        if not isinstance(hint, exp.Hint) or set(hint.args) != {"expressions"}:
+            return False
+
+        directives = hint.args.get("expressions")
+        if not isinstance(directives, list) or not directives:
+            return False
+        for directive in directives:
+            if isinstance(directive, exp.Var):
+                if set(directive.args) != {"this"} or not directive.name:
+                    return False
+            elif isinstance(directive, exp.Anonymous):
+                arguments = directive.args.get("expressions")
+                if (
+                    set(directive.args) != {"this", "expressions"}
+                    or not directive.name
+                    or not isinstance(arguments, list)
+                    or any(not isinstance(argument, exp.Expr) for argument in arguments)
+                ):
+                    return False
+            else:
+                return False
+        return True
+
+    def _parse_optimizer_hint_comment(
+        self, comment: OptimizerHintComment, *, parsed_hint: exp.Hint | None = None
+    ) -> exp.Hint:
+        body = comment.strip()
+        if not body:
+            self._raise_optimizer_hint_error("Vertica optimizer hints require a directive")
+
+        try:
+            tokens = self.dialect.tokenizer().tokenize(body)
+        except TokenError:
+            self._raise_optimizer_hint_error("Malformed Vertica optimizer hint")
+
+        depth = 0
+        for index, token in enumerate(tokens):
+            if token.token_type == TokenType.L_PAREN:
+                depth += 1
+            elif token.token_type == TokenType.R_PAREN:
+                depth -= 1
+                if depth < 0:
+                    self._raise_optimizer_hint_error("Malformed Vertica optimizer hint")
+            elif token.token_type == TokenType.COMMA:
+                previous = tokens[index - 1].token_type if index else None
+                following = tokens[index + 1].token_type if index + 1 < len(tokens) else None
+                if previous in {None, TokenType.COMMA, TokenType.L_PAREN} or following in {
+                    None,
+                    TokenType.COMMA,
+                    TokenType.R_PAREN,
+                }:
+                    self._raise_optimizer_hint_error("Malformed Vertica optimizer hint")
+        if depth:
+            self._raise_optimizer_hint_error("Malformed Vertica optimizer hint")
+
+        if parsed_hint is None:
+            try:
+                parsed_hint = exp.maybe_parse(body, into=exp.Hint, dialect=self.dialect)
+            except (ParseError, TokenError):
+                self._raise_optimizer_hint_error("Malformed Vertica optimizer hint")
+        if not self._valid_optimizer_hint_structure(parsed_hint):
+            self._raise_optimizer_hint_error("Malformed Vertica optimizer hint")
+        assert isinstance(parsed_hint, exp.Hint)
+        return parsed_hint
 
     def _optimizer_hint_from_comment(
         self, comment: str, allowed_names: t.Collection[str]
@@ -1503,13 +1601,7 @@ class VerticaParser(PostgresParser):
         if not isinstance(comment, OptimizerHintComment):
             return None
 
-        parsed_hint = exp.maybe_parse(comment.strip(), into=exp.Hint, dialect=self.dialect)
-        if (
-            not isinstance(parsed_hint, exp.Hint)
-            or not parsed_hint.expressions
-            or not all(isinstance(expression, exp.Expr) for expression in parsed_hint.expressions)
-        ):
-            return None
+        parsed_hint = self._parse_optimizer_hint_comment(comment)
 
         names = {
             expression.name.upper()

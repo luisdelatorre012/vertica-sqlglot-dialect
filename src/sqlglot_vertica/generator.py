@@ -13,6 +13,7 @@ from sqlglot.helper import csv
 
 from sqlglot_vertica import dml as vdml
 from sqlglot_vertica import expressions as vexp
+from sqlglot_vertica.tokens import OptimizerHintComment
 from sqlglot_vertica.user_limits import (
     USER_INTERVAL_MAX_SECONDS,
     canonical_user_capacity,
@@ -535,9 +536,7 @@ class VerticaGenerator(PostgresGenerator):
         vexp.ShowWorkload: lambda self, expression: self.showworkload_sql(expression),
         vexp.StatementTimestamp: lambda self, expression: "GETDATE()",
         vexp.StringUnit: lambda self, expression: self.stringunit_sql(expression),
-        vexp.TableOptimizerHint: lambda self, expression: (
-            f"/*+ {self.expressions(expression, sep=self.QUERY_HINT_SEP).strip()} */"
-        ),
+        vexp.TableOptimizerHint: lambda self, expression: self.tableoptimizerhint_sql(expression),
         vexp.TablePartitionProperty: lambda self, expression: self.tablepartitionproperty_sql(
             expression
         ),
@@ -574,6 +573,46 @@ class VerticaGenerator(PostgresGenerator):
         vexp.VerticaWindow: lambda self, expression: self.verticawindow_sql(expression),
         vexp.WithHint: lambda self, expression: self.withhint_sql(expression),
     }
+
+    @staticmethod
+    def _valid_optimizer_hint_structure(expression: exp.Hint) -> bool:
+        if set(expression.args) != {"expressions"}:
+            return False
+        directives = expression.args.get("expressions")
+        if not isinstance(directives, list) or not directives:
+            return False
+        for directive in directives:
+            if isinstance(directive, exp.Var):
+                if set(directive.args) != {"this"} or not directive.name:
+                    return False
+            elif isinstance(directive, exp.Anonymous):
+                arguments = directive.args.get("expressions")
+                if (
+                    set(directive.args) != {"this", "expressions"}
+                    or not directive.name
+                    or not isinstance(arguments, list)
+                    or any(not isinstance(argument, exp.Expr) for argument in arguments)
+                ):
+                    return False
+            else:
+                return False
+        return True
+
+    def hint_sql(self, expression: exp.Hint) -> str:
+        if not self._valid_optimizer_hint_structure(expression):
+            self.unsupported("Vertica optimizer hints require structured directives")
+            return ""
+        return super().hint_sql(expression)
+
+    def tableoptimizerhint_sql(self, expression: vexp.TableOptimizerHint) -> str:
+        if not self._valid_optimizer_hint_structure(expression):
+            self.unsupported("Vertica table optimizer hints require structured directives")
+            return ""
+        return f"/*+ {self.expressions(expression, sep=self.QUERY_HINT_SEP).strip()} */"
+
+    def sanitize_comment(self, comment: str) -> str:
+        sanitized = super().sanitize_comment(comment)
+        return f"+{sanitized}" if isinstance(comment, OptimizerHintComment) else sanitized
 
     def _validate_join(self, expression: exp.Join, *, allow_semi_anti: bool) -> None:
         allowed_args = {
@@ -1233,6 +1272,7 @@ class VerticaGenerator(PostgresGenerator):
         hint = expression.args.get("hint")
         if (
             not isinstance(hint, exp.Hint)
+            or not self._valid_optimizer_hint_structure(hint)
             or not hint.expressions
             or any(
                 directive.name.upper() != "ENABLE_WITH_CLAUSE_MATERIALIZATION"

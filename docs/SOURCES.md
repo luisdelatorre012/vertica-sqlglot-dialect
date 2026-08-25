@@ -12,6 +12,7 @@ called out in code review.
 - [Identifiers](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/identifiers/)
 - [Mathematical operators](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/operators/mathematical-operators/)
 - [Optimizer hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/)
+- [GBYTYPE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/gbytype/)
 - [GitHub issue #2 optimizer-hint comment regression](https://github.com/luisdelatorre012/vertica-sqlglot-dialect/issues/2)
 - [ARRAY](https://docs.vertica.com/26.2.x/en/sql-reference/data-types/complex-types/array/)
 - [SET](https://docs.vertica.com/26.2.x/en/sql-reference/data-types/complex-types/set/)

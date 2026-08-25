@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlglot import ErrorLevel, exp, parse, parse_one
+from sqlglot import ErrorLevel, TokenType, exp, parse, parse_one
 from sqlglot.dialects import Dialect
 from sqlglot.errors import ParseError, UnsupportedError
 from sqlglot.lineage import lineage
@@ -321,6 +321,88 @@ def test_exact_plus_hint_provenance_is_distinct_from_ordinary_comments() -> None
     assert isinstance(comments[1], OptimizerHintComment)
 
 
+def test_whitespace_before_plus_retains_optimizer_hint_provenance() -> None:
+    tokens = (
+        Dialect.get_or_raise("vertica").tokenizer().tokenize("SELECT /* + LABEL(query_job) */ 1")
+    )
+
+    assert [token.token_type for token in tokens] == [
+        TokenType.SELECT,
+        TokenType.HINT,
+        TokenType.NUMBER,
+    ]
+    assert isinstance(tokens[1].comments[0], OptimizerHintComment)
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT /* + LABEL(query_job) */ 1", "SELECT /*+ LABEL(query_job) */ 1"),
+        (
+            "EXPLAIN /* + ALLNODES */ SELECT 1",
+            "EXPLAIN /*+ ALLNODES */ SELECT 1",
+        ),
+        (
+            "WITH /* + ENABLE_WITH_CLAUSE_MATERIALIZATION */ x AS (SELECT 1) SELECT * FROM x",
+            "WITH /*+ ENABLE_WITH_CLAUSE_MATERIALIZATION */ x AS (SELECT 1) SELECT * FROM x",
+        ),
+        (
+            "SELECT * FROM t /* + PROJS('t_p') */",
+            "SELECT * FROM t /*+ PROJS('t_p') */",
+        ),
+        (
+            "SELECT * FROM t AS x /* + SKIP_PROJS('t_old') */",
+            "SELECT * FROM t AS x /*+ SKIP_PROJS('t_old') */",
+        ),
+        (
+            "SELECT * FROM t JOIN /* + JTYPE(H), DISTRIB(L,R) */ u ON t.a=u.a",
+            "SELECT * FROM t JOIN /*+ JTYPE(H), DISTRIB(L, R) */ u ON t.a = u.a",
+        ),
+        (
+            "CREATE TABLE q27_out AS /* + LABEL(ctas_job) */ SELECT 1",
+            "CREATE TABLE q27_out AS /*+ LABEL(ctas_job) */ SELECT 1",
+        ),
+        (
+            "INSERT /* + LABEL(insert_job) */ INTO t VALUES (1)",
+            "INSERT /*+ LABEL(insert_job) */ INTO t VALUES (1)",
+        ),
+        (
+            "COPY /* + LABEL(copy_job) */ t FROM STDIN",
+            "COPY /*+ LABEL(copy_job) */ t FROM STDIN",
+        ),
+    ],
+)
+def test_whitespace_before_plus_hints_canonicalize_to_compact_opener(
+    sql: str, expected: str
+) -> None:
+    assert_roundtrip(sql, expected)
+
+
+def test_ordinary_comment_with_unrelated_plus_stays_inert() -> None:
+    expression = assert_roundtrip("SELECT * FROM t /* metadata + arithmetic */")
+    assert not list(expression.find_all(exp.Hint))
+    assert "/*+" not in expression.sql(dialect="vertica")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH /* + EARLY_MATERIALIZATION */ x AS (SELECT 1) SELECT * FROM x",
+        "SELECT * FROM t /* + UNKNOWN_HINT(x) */",
+        "SELECT a FROM t GROUP BY /* + UTYPE(B) */ a",
+    ],
+)
+def test_well_formed_unmodeled_hint_retains_plus_identity(sql: str) -> None:
+    expression = parse_one(sql, read="vertica")
+    restored = exp.Expr.load(expression.dump())
+    copied = expression.copy().transform(lambda node: node)
+
+    for candidate in (expression, restored, copied):
+        generated = candidate.sql(dialect="vertica")
+        assert "/*+" in generated
+        assert parse_one(generated, read="vertica") is not None
+
+
 def test_mixed_ordinary_and_genuine_hint_comments_promote_only_the_genuine_hint() -> None:
     expression = assert_roundtrip(
         "WITH /* metadata one */ /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ "
@@ -415,6 +497,120 @@ def test_hint_generation_never_inserts_space_between_comment_opener_and_plus() -
         "JOIN /*+JTYPE(H)*/ y ON x.a = y.a"
     )
     assert "/* +" not in expression.sql(dialect="vertica")
+
+
+MALFORMED_HINT_SITES = [
+    "SELECT {hint} 1",
+    "EXPLAIN {hint} SELECT 1",
+    "WITH {hint} x AS (SELECT 1) SELECT * FROM x",
+    "SELECT * FROM t {hint}",
+    "SELECT * FROM t AS x {hint}",
+    "SELECT * FROM t JOIN {hint} u ON t.a = u.a",
+    "SELECT a FROM t GROUP BY {hint} a",
+    "CREATE TABLE q27_out AS {hint} SELECT 1",
+    "INSERT {hint} INTO t VALUES (1)",
+    "UPDATE {hint} t SET a = 1",
+    "DELETE {hint} FROM t",
+    "MERGE {hint} INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET a = s.a",
+    "COPY {hint} t FROM STDIN",
+]
+
+
+@pytest.mark.parametrize("sql_template", MALFORMED_HINT_SITES)
+@pytest.mark.parametrize("hint", ["/*+LABEL(*/", "/* + LABEL( */"])
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_malformed_hint_fails_closed_at_every_owner_and_error_level(
+    sql_template: str,
+    hint: str,
+    error_level: ErrorLevel,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with pytest.raises(ParseError, match="Malformed Vertica optimizer hint"):
+        parse_one(sql_template.format(hint=hint), read="vertica", error_level=error_level)
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["", "   ", "LABEL(", "LABEL(x,)", "LABEL(x),", "LABEL(,x)"],
+)
+@pytest.mark.parametrize("spaced", [False, True])
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_structurally_malformed_hint_bodies_fail_closed(
+    body: str, spaced: bool, error_level: ErrorLevel
+) -> None:
+    hint = f"/* + {body} */" if spaced else f"/*+{body}*/"
+    with pytest.raises(ParseError):
+        parse_one(f"SELECT {hint} 1", read="vertica", error_level=error_level)
+
+
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_malformed_hint_does_not_swallow_following_statement(error_level: ErrorLevel) -> None:
+    with pytest.raises(ParseError, match="Malformed Vertica optimizer hint"):
+        parse(
+            "INSERT /*+LABEL(*/ INTO t VALUES (1); SELECT 2;",
+            read="vertica",
+            error_level=error_level,
+        )
+
+
+def test_mixed_whitespace_hint_query_preserves_analysis_and_parents() -> None:
+    sql = (
+        "WITH /* + ENABLE_WITH_CLAUSE_MATERIALIZATION */ q AS ("
+        "SELECT t.a, SUM(u.v) AS total FROM t /* + PROJS('t_p') */ "
+        "JOIN /* + JTYPE(H), DISTRIB(L,R) */ u ON t.a = u.a "
+        "GROUP BY /* + GBYTYPE(HASH) */ t.a) "
+        "SELECT /* + LABEL(report_job) */ a, total FROM q"
+    )
+    schema = {"t": {"a": "INT"}, "u": {"a": "INT", "v": "INT"}}
+    expression = assert_roundtrip(sql)
+    restored = exp.Expr.load(expression.dump())
+    transformed = expression.copy().transform(lambda node: node)
+
+    assert restored == expression
+    assert transformed == expression
+    assert all(node is transformed or node.parent is not None for node in transformed.walk())
+    assert list(traverse_scope(expression))
+
+    for analyzed in (
+        qualify(expression.copy(), dialect="vertica", schema=schema),
+        optimize(expression.copy(), dialect="vertica", schema=schema),
+    ):
+        assert list(traverse_scope(analyzed))
+        generated = analyzed.sql(dialect="vertica")
+        assert parse_one(generated, read="vertica").sql(dialect="vertica") == generated
+
+    node = lineage("total", expression, dialect="vertica", schema=schema)
+    assert any(downstream.name == "u.v" for downstream in node.walk())
+
+
+def test_malformed_programmatic_hint_trees_fail_before_generation() -> None:
+    cases: list[exp.Expr] = [
+        exp.Hint(expressions=["LABEL("]),
+        exp.Select(expressions=[exp.Literal.number(1)], hint=exp.Hint(expressions=[None])),
+        parse_one(
+            "WITH /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ x AS (SELECT 1) SELECT * FROM x",
+            read="vertica",
+        ),
+        parse_one("SELECT * FROM t /*+PROJS('t_p')*/", read="vertica"),
+        parse_one("SELECT * FROM t JOIN /*+JTYPE(H)*/ u ON t.a=u.a", read="vertica"),
+        parse_one("CREATE TABLE q27_out AS /*+LABEL(job)*/ SELECT 1", read="vertica"),
+        parse_one("INSERT /*+LABEL(job)*/ INTO t VALUES (1)", read="vertica"),
+    ]
+    malformed = exp.Hint(expressions=[exp.Anonymous(this="LABEL", expressions=["bad"])])
+    cases[2].args["with_"].set("hint", malformed.copy())
+    table_hint = cases[3].find(vexp.TableOptimizerHint)
+    assert table_hint is not None
+    table_hint.set("expressions", ["PROJS("])
+    cases[4].args["joins"][0].set("hint", malformed.copy())
+    ctas_hint = cases[5].find(vexp.CtasHintProperty)
+    assert ctas_hint is not None
+    ctas_hint.set("this", malformed.copy())
+    cases[6].set("hint", malformed.copy())
+
+    for expression in cases:
+        with pytest.raises(UnsupportedError):
+            expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
 
 
 def test_hint_table_override_preserves_non_table_from_expressions() -> None:

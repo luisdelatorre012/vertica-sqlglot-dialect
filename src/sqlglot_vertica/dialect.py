@@ -126,11 +126,13 @@ class _VerticaTokenizerCore(TokenizerCore):
             return matched
 
         body = stored_comments[-1]
+        optimizer_hint = comment_start == self.hint_start
         if comment_start == "/*":
             plus = re.match(r"^\s*\+\s*(.*)$", body, re.DOTALL)
             if not plus:
                 return matched
             body = plus.group(1)
+            optimizer_hint = True
 
         candidate = body.strip()
         if self._DIRECTED_PREFIX.match(candidate):
@@ -141,8 +143,22 @@ class _VerticaTokenizerCore(TokenizerCore):
                 self.tokens[-1].comments.append(marked_comment)
             else:
                 stored_comments[-1] = marked_comment
-        elif comment_start == self.hint_start:
-            stored_comments[-1] = OptimizerHintComment(body)
+        elif optimizer_hint:
+            optimizer_comment = OptimizerHintComment(body)
+            stored_comments[-1] = optimizer_comment
+
+            # SQLGlot creates a HINT token only for its exact ``/*+`` opener.
+            # Reproduce that token shape for Vertica's documented
+            # whitespace-before-plus form after the generic scanner has
+            # attached the ordinary block comment to the preceding token.
+            if (
+                comment_start == "/*"
+                and self.tokens
+                and self.tokens[-1].token_type in self.tokens_preceding_hint
+            ):
+                stored_comments.pop()
+                self._comments.append(optimizer_comment)
+                self._add(TokenType.HINT)
         return matched
 
 

@@ -155,6 +155,27 @@ def test_comments_and_group_hint_keep_their_boundaries() -> None:
     assert "item" in generated
 
 
+@pytest.mark.parametrize(
+    "comment",
+    ["-- GBYTYPE(HASH)\n", "/* GBYTYPE(HASH) */", "-- GBYTYPE(PIPE)\n", "/* GBYTYPE(PIPE) */"],
+)
+def test_ordinary_group_by_hint_collision_stays_inert(comment: str) -> None:
+    expression = assert_roundtrip(f"SELECT a, SUM(v) FROM t GROUP BY {comment} a")
+    group = expression.args["group"]
+    assert isinstance(group, vexp.VerticaGroup)
+    assert group.args.get("algorithm") is None
+    assert "/*+GBYTYPE" not in expression.sql(dialect="vertica")
+
+
+@pytest.mark.parametrize("algorithm", ["HASH", "PIPE"])
+def test_whitespace_before_plus_group_by_hint_is_semantic(algorithm: str) -> None:
+    expression = assert_roundtrip(
+        f"SELECT a, SUM(v) FROM t GROUP BY /* + GBYTYPE({algorithm}) */ a",
+        f"SELECT a, SUM(v) FROM t GROUP BY /*+GBYTYPE({algorithm})*/ a",
+    )
+    assert expression.args["group"].args["algorithm"].name == algorithm
+
+
 def test_copy_and_transform_preserve_order_and_parents() -> None:
     expression = parse_one(
         "SELECT a, b, SUM(v) FROM t GROUP BY CUBE(a), b, ROLLUP(a)", read="vertica"

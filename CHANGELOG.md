@@ -5,6 +5,11 @@
 This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
 plugin interface.
 
+- Added optimizer-hint delimiter and structural atomicity: exact and
+  whitespace-before-plus comment openers now share provenance across every
+  modeled hint site, ordinary GBYTYPE collisions stay inert, malformed genuine
+  bodies raise `ParseError` at every parser level, and strict generation
+  rejects malformed Hint trees before output.
 - Fixed GitHub issue #2 by retaining exact `/*+` tokenizer provenance before
   shared optimizer-hint extraction. Ordinary line/block comments—including
   empty separators, prose, and allowed-name collisions—now remain inert around
