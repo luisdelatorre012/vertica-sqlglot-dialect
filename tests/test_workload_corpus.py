@@ -19,11 +19,13 @@ from sqlglot import ErrorLevel, exp, parse, parse_one
 from sqlglot.errors import ParseError, UnsupportedError
 from sqlglot.lineage import lineage
 from sqlglot.optimizer import optimize
+from sqlglot.optimizer.annotate_types import annotate_types
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import traverse_scope
 
 from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_script_roundtrip
+from tests.test_hints import ISSUE_2_SCHEMA, ISSUE_2_SQL
 
 # A staging -> aggregate -> promote -> cleanup pipeline: a definition-form
 # temporary table populated by INSERT ... SELECT, a scoped (LOCAL) temporary
@@ -168,6 +170,23 @@ RECERTIFICATION_PIPELINE_TYPES: list[type[exp.Expr]] = [
     vexp.DropTables,
 ]
 
+Q29_BOUNDARY_LABEL = "x" * 128
+HINT_RECERTIFICATION_PIPELINE = f"""
+-- q29 metadata
+CREATE LOCAL TEMPORARY TABLE q29_hint_rollup ON COMMIT PRESERVE ROWS
+AS /*+LABEL(ctas_label)*/
+WITH /* + ENABLE_WITH_CLAUSE_MATERIALIZATION */ hinted AS (
+    SELECT /*+SYNTACTIC_JOIN,VERBATIM*/ t.id, SUM(u.amount) AS total
+    FROM source_t AS t /*+PROJS('source_t_p'),SKIP_PROJS('source_t_old')*/
+    JOIN /* + JTYPE(H),DISTRIB(L,R) */ source_u AS u ON t.id = u.id
+    GROUP BY /* + GBYTYPE(HASH) */ t.id
+)
+SELECT /*+LABEL('query_label')*/ id, total FROM hinted;
+INSERT /*+LABEL('{Q29_BOUNDARY_LABEL}')*/ INTO q29_hint_archive
+SELECT id, total FROM q29_hint_rollup;
+""".strip()
+HINT_RECERTIFICATION_PIPELINE_TYPES: list[type[exp.Expr]] = [exp.Create, exp.Insert]
+
 ALL_PARSE_LEVELS = tuple(ErrorLevel)
 FOREIGN_DIALECTS = ("postgres", "duckdb", "mysql", "sqlite")
 ALL_UNSUPPORTED_LEVELS = (ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE)
@@ -186,6 +205,86 @@ def test_recertification_pipeline_parses_generates_and_reparses() -> None:
     generated = "\n".join(statement.sql(dialect="vertica") for statement in statements)
     assert "historical projection" in generated
     assert "recertification cleanup" in generated
+
+
+def test_q29_issue_and_composed_hint_workloads_roundtrip() -> None:
+    issue_statements = parse(ISSUE_2_SQL, read="vertica")
+    assert [type(statement) for statement in issue_statements] == [exp.Select]
+    issue_generated = issue_statements[0].sql(dialect="vertica")
+    assert parse(issue_generated, read="vertica") == issue_statements
+
+    statements = assert_script_roundtrip(
+        HINT_RECERTIFICATION_PIPELINE, HINT_RECERTIFICATION_PIPELINE_TYPES
+    )
+    generated = "\n".join(statement.sql(dialect="vertica") for statement in statements)
+    assert "q29 metadata" in generated
+    assert "/*+ ENABLE_WITH_CLAUSE_MATERIALIZATION */" in generated
+    assert "/*+ JTYPE(H), DISTRIB(L, R) */" in generated
+    assert "/*+GBYTYPE(HASH)*/" in generated
+    assert Q29_BOUNDARY_LABEL in generated
+
+
+def test_q29_hint_workloads_preserve_analysis_and_type_metadata() -> None:
+    issue = parse(ISSUE_2_SQL, read="vertica")[0]
+    create, insert = parse(HINT_RECERTIFICATION_PIPELINE, read="vertica")
+    assert isinstance(issue, exp.Select)
+    assert isinstance(create, exp.Create)
+    assert isinstance(insert, exp.Insert)
+    assert isinstance(create.expression, exp.Select)
+
+    issue_qualified = qualify(issue.copy(), dialect="vertica", schema=ISSUE_2_SCHEMA)
+    issue_optimized = optimize(issue.copy(), dialect="vertica", schema=ISSUE_2_SCHEMA)
+    assert list(traverse_scope(issue_qualified))
+    assert list(traverse_scope(issue_optimized))
+    assert any(
+        node.name == "t3.col_g"
+        for node in lineage("col_h", issue, schema=ISSUE_2_SCHEMA, dialect="vertica").walk()
+    )
+
+    schema = {"source_t": {"id": "INT"}, "source_u": {"id": "INT", "amount": "INT"}}
+    for analyzed in (
+        qualify(create.expression.copy(), dialect="vertica", schema=schema),
+        optimize(create.expression.copy(), dialect="vertica", schema=schema),
+    ):
+        assert list(traverse_scope(analyzed))
+        generated = analyzed.sql(dialect="vertica")
+        assert parse_one(generated, read="vertica").sql(dialect="vertica") == generated
+
+    annotated = annotate_types(create.expression.copy(), dialect="vertica", schema=schema)
+    total = annotated.find(exp.Sum)
+    assert total is not None
+    assert total.type != exp.DataType.Type.UNKNOWN
+
+    assert any(
+        node.name == "u.amount"
+        for node in lineage("total", create.expression, schema=schema, dialect="vertica").walk()
+    )
+
+
+@pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
+def test_q29_hint_negative_scripts_fail_without_swallowing_suffix(
+    error_level: ErrorLevel,
+) -> None:
+    malformed_cases = [
+        "SELECT /*+LABEL(*/ 1",
+        "SELECT /*+ALLNODES*/ 1",
+        "SELECT /*+LABEL(a,b)*/ 1",
+        f"SELECT /*+LABEL('{'x' * 129}')*/ 1",
+    ]
+    for malformed in malformed_cases:
+        with pytest.raises(ParseError):
+            parse(
+                f"{malformed}; SELECT 29 AS following_statement",
+                read="vertica",
+                error_level=error_level,
+            )
+
+    statements = parse(
+        "WITH --\n c AS (SELECT 1) SELECT * FROM c; SELECT 29 AS following_statement",
+        read="vertica",
+        error_level=error_level,
+    )
+    assert [type(statement) for statement in statements] == [exp.Select, exp.Select]
 
 
 def test_recertification_pipeline_statement_shapes() -> None:

@@ -232,13 +232,21 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   complete: every modeled directive now has source-defined owner, arity, child,
   finite-domain, projection-name, and 128-octet LABEL validation in parsing and
   strict generation; mixed-case enums canonicalize, CTAS AS/query labels retain
-  both owners, and unspecified repeated directives remain lossless. Q29 remains,
-  so Milestone 1 is reopened and Milestone 2 remains deferred; Q29 is next.
+  both owners, and unspecified repeated directives remain lossless. Q29's
+  complete 18-entry hint-inventory audit is complete but did not certify the
+  milestone. It classified DEPOT_FETCH, ECSMODE, SKIP_STATISTICS, and
+  EARLY_MATERIALIZATION as protected Generic opaque hints and found four
+  losslessness blockers: JOIN JFMT relocates to the left table, UNION ALL
+  UTYPE disappears, CTAS-hint/ordinary-comment/hinted-WITH composition
+  multiplies the ordinary comment across regeneration, and unquoted LABEL is
+  lost after qualification/optimization. Q30 owns that bounded remediation;
+  Q31 is the replacement final gate. Milestone 1 remains reopened and
+  Milestone 2 deferred; Q30 is next.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — remains deferred until Q29 completes and Milestone 1 is
+  (tasks P16–P35) — remains deferred until Q31 completes and Milestone 1 is
   recertified again.
 
 ## Phase 1 — core analytical SQL and physical design

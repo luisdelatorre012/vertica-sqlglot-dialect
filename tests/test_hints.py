@@ -86,6 +86,31 @@ ISSUE_2_SCHEMA = {
 }
 
 
+# Q29's source-backed inventory covers every page linked from the 26.2 Hints
+# index. "Generic" means the directive is deliberately retained as an opaque
+# exp.Hint rather than advertised as source-validated semantic support.
+DOCUMENTED_HINT_COVERAGE = {
+    ":c": "Semantic",
+    ":v": "Semantic",
+    "ALLNODES": "Semantic",
+    "DEPOT_FETCH": "Generic",
+    "DISTRIB": "Semantic",
+    "EARLY_MATERIALIZATION": "Generic",
+    "ECSMODE": "Generic",
+    "ENABLE_WITH_CLAUSE_MATERIALIZATION": "Semantic",
+    "GBYTYPE": "Semantic",
+    "JFMT": "Deferred",
+    "JTYPE": "Semantic",
+    "LABEL": "Semantic",
+    "PROJS": "Semantic",
+    "SKIP_PROJS": "Semantic",
+    "SKIP_STATISTICS": "Generic",
+    "SYNTACTIC_JOIN": "Semantic",
+    "UTYPE": "Deferred",
+    "VERBATIM": "Semantic",
+}
+
+
 def test_select_and_join_hints_are_structured_and_placed_exactly() -> None:
     expression = assert_roundtrip(
         "SELECT /*+SYNTACTIC_JOIN,VERBATIM*/ * FROM x "
@@ -401,6 +426,106 @@ def test_well_formed_unmodeled_hint_retains_plus_identity(sql: str) -> None:
         generated = candidate.sql(dialect="vertica")
         assert "/*+" in generated
         assert parse_one(generated, read="vertica") is not None
+
+
+def test_documented_optimizer_hint_inventory_is_complete() -> None:
+    assert set(DOCUMENTED_HINT_COVERAGE) == {
+        ":c",
+        ":v",
+        "ALLNODES",
+        "DEPOT_FETCH",
+        "DISTRIB",
+        "EARLY_MATERIALIZATION",
+        "ECSMODE",
+        "ENABLE_WITH_CLAUSE_MATERIALIZATION",
+        "GBYTYPE",
+        "JFMT",
+        "JTYPE",
+        "LABEL",
+        "PROJS",
+        "SKIP_PROJS",
+        "SKIP_STATISTICS",
+        "SYNTACTIC_JOIN",
+        "UTYPE",
+        "VERBATIM",
+    }
+    assert set(DOCUMENTED_HINT_COVERAGE.values()) == {"Semantic", "Generic", "Deferred"}
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("SELECT /*+DEPOT_FETCH(NONE)*/ 1", "SELECT /*+ DEPOT_FETCH(NONE) */ 1"),
+        (
+            "SELECT * FROM t /*+EARLY_MATERIALIZATION*/",
+            "SELECT * FROM t /*+ EARLY_MATERIALIZATION */",
+        ),
+        ("SELECT /*+ECSMODE(AUTO)*/ 1", "SELECT /*+ ECSMODE(AUTO) */ 1"),
+        ("SELECT /*+SKIP_STATISTICS*/ 1", "SELECT /*+ SKIP_STATISTICS */ 1"),
+    ],
+)
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_generic_documented_hints_retain_identity_and_statement_boundaries(
+    sql: str,
+    expected: str,
+    error_level: ErrorLevel,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    statements = parse(f"{sql}; SELECT 29", read="vertica", error_level=error_level)
+    assert [type(statement) for statement in statements] == [exp.Select, exp.Select]
+    assert statements[0].sql(dialect="vertica") == expected
+    assert parse_one(expected, read="vertica", error_level=error_level) == statements[0]
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_jfmt_owner_relocation_is_a_documented_q29_residual(
+    error_level: ErrorLevel,
+) -> None:
+    sql = "SELECT * FROM t JOIN /*+JFMT(F)*/ u ON t.a = u.a"
+    expression = parse_one(sql, read="vertica", error_level=error_level)
+    generated = expression.sql(dialect="vertica")
+
+    assert generated == "SELECT * FROM t /*+ JFMT(F) */ JOIN u ON t.a = u.a"
+    assert parse_one(generated, read="vertica", error_level=error_level) == expression
+
+
+@pytest.mark.parametrize("error_level", list(ErrorLevel))
+def test_utype_loss_is_a_documented_q29_residual(error_level: ErrorLevel) -> None:
+    sql = "SELECT 1 UNION ALL /*+UTYPE(M)*/ SELECT 2"
+    expression = parse_one(sql, read="vertica", error_level=error_level)
+    generated = expression.sql(dialect="vertica")
+
+    assert isinstance(expression, exp.Union)
+    assert generated == "SELECT 1 UNION ALL SELECT 2"
+    assert "UTYPE" not in generated
+
+
+def test_ctas_with_mixed_comment_is_a_documented_q29_residual() -> None:
+    sql = (
+        "CREATE TABLE q29_comment AS /*+LABEL(ctas_label)*/ "
+        "/* ordinary metadata */ WITH /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ "
+        "c AS (SELECT 1 AS id) SELECT /*+LABEL(query_label)*/ id FROM c"
+    )
+    expression = parse_one(sql, read="vertica")
+    first = expression.sql(dialect="vertica")
+    second = parse_one(first, read="vertica").sql(dialect="vertica")
+
+    assert first.count("ordinary metadata") == 2
+    assert second.count("ordinary metadata") == 3
+
+
+def test_unquoted_label_analysis_loss_is_a_documented_q29_residual(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    expression = parse_one("SELECT /*+LABEL(query_label)*/ a FROM t", read="vertica")
+    qualified = qualify(expression.copy(), dialect="vertica", schema={"t": {"a": "INT"}})
+    generated = qualified.sql(dialect="vertica")
+
+    assert "LABEL" not in generated
+    assert any(
+        "LABEL requires one valid label string" in record.message for record in caplog.records
+    )
 
 
 def test_mixed_ordinary_and_genuine_hint_comments_promote_only_the_genuine_hint() -> None:

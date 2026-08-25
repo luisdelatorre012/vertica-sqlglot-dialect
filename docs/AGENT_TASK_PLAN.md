@@ -159,12 +159,14 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   empty projection lists, zero- or multi-argument LABEL, expression-valued
   LABEL, and 129-octet labels. Q27 and Q28 own those bounded remediations; Q29
   is the replacement recertification gate and full 26.2 hint-inventory audit.
-- Q25 remains `DONE` as historical gate evidence, but Milestone 1 is reopened
-  until Q26–Q29 are all `DONE`. Completed **Q26 — optimizer-hint comment
+- Q25 remains `DONE` as historical gate evidence, but Milestone 1 is reopened.
+  Completed **Q26 — optimizer-hint comment
   provenance and issue #2 regression** and **Q27 — optimizer-hint delimiter
   and parsing atomicity** and **Q28 — optimizer-hint directive contract
-  conformance**. Q29 is the lowest-numbered eligible task; P16 and all
-  Milestone 2 work are deferred meanwhile.
+  conformance** and **Q29 — optimizer-hint recertification audit**. Q29's
+  complete inventory found four losslessness blockers and scheduled Q30;
+  Q31 is the replacement final gate. Q30 is the lowest-numbered eligible task,
+  and P16 plus all Milestone 2 work remain deferred.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -320,11 +322,13 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q26 | DONE   | Optimizer-hint comment provenance and issue #2 regression | Q25       | `fix: preserve ordinary comments around optimizer hints` |
 | Q27 | DONE   | Optimizer-hint delimiter and parsing atomicity | Q26                | `fix: make optimizer hint parsing atomic`                 |
 | Q28 | DONE   | Optimizer-hint directive contract conformance | Q27                 | `fix: enforce optimizer hint directive contracts`        |
-| Q29 | TODO   | Milestone 1 optimizer-hint recertification gate | Q26–Q28           | `test: recertify milestone one hint boundaries`          |
+| Q29 | DONE   | Milestone 1 optimizer-hint recertification audit | Q26–Q28       | `test: recertify milestone one hint boundaries`          |
+| Q30 | TODO   | Optimizer-hint ownership and analysis losslessness | Q29           | `fix: preserve optimizer hint ownership`                 |
+| Q31 | TODO   | Milestone 1 optimizer-hint final recertification gate | Q30       | `test: finally recertify milestone one hint boundaries`  |
 
 ### Milestone 2 — administration and remaining DDL (deferred)
 
-Deferred while Q29 is incomplete. Milestone 2 becomes eligible again only
+Deferred while Q30–Q31 are incomplete. Milestone 2 becomes eligible again only
 after every Milestone 1 Q task is `DONE`. Its numbering, dependencies, and
 specifications are intentionally unchanged from the prior plan revision.
 
@@ -3568,7 +3572,7 @@ wheel `python -I` smoke (a 128-octet LABEL plus valid JTYPE/DISTRIB query,
 returning canonical `Select`) passed. Milestone 1 remains reopened; Q29 alone
 owns recertification and P16 remains deferred.
 
-### Q29 — Milestone 1 optimizer-hint recertification gate — `TODO`
+### Q29 — Milestone 1 optimizer-hint recertification audit — `DONE`
 
 **Outcome.** Re-audit and recertify the reopened Milestone 1 only after Q26–Q28
 prove that realistic comments and every currently modeled optimizer-hint
@@ -3625,9 +3629,111 @@ all subordinate OpenText 26.2 hint pages linked from that inventory, the Q26–Q
 primary sources and completion records, and the installed SQLGlot 30.13
 tokenizer/parser/AST/generator/optimizer implementations.
 
+**Completion record.** Re-read the Q26–Q28 completion records and the complete
+architecture, coverage, roadmap, and changelog contracts. Re-opened GitHub
+issue #2 through the public API and every page linked from the 26.2 Hints
+inventory: `:c`, `:v`, ALLNODES, DEPOT_FETCH, DISTRIB,
+EARLY_MATERIALIZATION, ECSMODE, ENABLE_WITH_CLAUSE_MATERIALIZATION, GBYTYPE,
+JFMT, JTYPE, LABEL, PROJS, SKIP_PROJS, SKIP_STATISTICS, SYNTACTIC_JOIN,
+UTYPE, and VERBATIM. The inventory contains 18 entries. Directed `:c`/`:v`
+annotations and the ten Q28-modeled directives are Semantic. Four additional
+directives have a protected Generic opaque-hint contract at their documented
+owners: SELECT-owned DEPOT_FETCH, ECSMODE, and SKIP_STATISTICS, plus
+table-owned EARLY_MATERIALIZATION. All four retain plus provenance, statement
+boundaries, canonical regeneration, and reparsing at IMMEDIATE, RAISE, WARN,
+and IGNORE without warnings; their directive-specific domains remain
+deliberately unmodeled.
+
+The audit did not certify Milestone 1. It found four independent, reproducible
+losslessness defects and made no production change. A documented
+`JOIN /*+JFMT(F)*/` hint reparses but regenerates on the left table before the
+JOIN. A documented `UNION ALL /*+UTYPE(M)*/` hint disappears completely during
+generation. A CTAS AS-clause LABEL followed by an ordinary comment and a
+materialization-hinted WITH duplicates the ordinary comment on the first
+generation and adds another copy on every generate/reparse cycle. Finally,
+`qualify` and `optimize` change an unquoted, source-valid LABEL value from a
+`Var` into a quoted `Identifier`; strict generation then rejects and drops the
+LABEL with a warning. Durable regressions pin all four findings without
+weakening the required contract. Q30 owns their bounded remediation and Q31
+is the replacement final gate.
+
+Added a complete frozen inventory plus all-level opaque-hint probes to
+`tests/test_hints.py`, and extended `tests/test_workload_corpus.py` with the
+verbatim issue #2 fixture, a composed CTAS/WITH/SELECT/INSERT hint workload,
+128-octet LABEL coverage, public scope/qualification/optimization/type/lineage
+checks, and all-level negative multi-statement atomicity. The focused hint and
+workload modules passed 535 tests. The common release gate passed 8,444 tests on
+the default Python 3.12.6 environment with 92.22% branch coverage, Ruff format
+and lint checks, and mypy. The isolated runtime matrix passed all 8,444 tests on
+Python 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1; the
+3.15 run treated deprecation warnings as errors. The sdist and wheel built, the
+wheel installed with no broken requirements in a clean environment, and the
+hinted WITH/JOIN/GROUP BY smoke query parsed as `Select`. The staged
+repository-wide pre-commit suite was also clean.
+
+### Q30 — optimizer-hint ownership and analysis losslessness — `TODO`
+
+**Outcome.** Close the four Q29 audit blockers so every documented or modeled
+hint retains its exact semantic owner and survives ordinary analysis and
+generate/reparse cycles without loss, relocation, duplication, or warnings.
+
+**Required work.** Re-open Hints, JFMT, UTYPE, LABEL, CREATE TABLE, and WITH,
+then inspect installed SQLGlot's set-operation comment attachment, JOIN/table
+hint preprocessing, comment ownership, and qualification/optimization
+identifier rewrites. Model JOIN-owned `JFMT(F|V)` and UNION-ALL-owned
+`UTYPE(U|M)` with typed owner-specific contracts, exact source placement,
+finite value validation, all-level guaranteed raises, strict programmatic AST
+validation, serialization, optimizer stability, and direct/nested foreign
+atomicity. UTYPE must be accepted only on UNION ALL and must remain attached
+to the owning Union across parentheses, CTEs, set chains, branch/compound
+tails, copy, and transform. JFMT must remain immediately after JOIN and must
+compose with JTYPE/DISTRIB.
+
+Give the ordinary comment in `CREATE TABLE ... AS /*+LABEL*/ /* prose */ WITH
+/*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ ...` one stable typed owner so compact
+and pretty generation never duplicates or moves it. Preserve unquoted and
+quoted LABEL scalar identity through `qualify`, `optimize`, and type annotation
+without turning an unquoted label into a column-like identifier or weakening
+Q28's UTF-8, arity, owner, and strict-generation validation. Replace Q29's four
+residual pins with positive compact/pretty, dump/load, copy/transform, parent,
+analysis, lineage, multi-statement, all-error-level, strict-AST, and foreign
+tests. Retain the four Generic opaque directives unchanged.
+
+**Explicit exclusions.** Server feasibility and runtime optimizer effects,
+semantic modeling of DEPOT_FETCH/ECSMODE/SKIP_STATISTICS/
+EARLY_MATERIALIZATION, new hint names or placements, SQLGlot dependency
+changes, upstream patches, release, push, and remote issue mutation.
+
+**Primary sources.** [Hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/),
+[JFMT](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/jfmt/),
+[UTYPE](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/utype/),
+[LABEL](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/label/),
+[CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/),
+and [WITH](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/).
+
+### Q31 — Milestone 1 optimizer-hint final recertification gate — `TODO`
+
+**Outcome.** Re-run Q29's complete source inventory, issue fixture, composed
+positive/negative workload, analysis, strict-AST, foreign, and release gates
+after Q30, and recertify Milestone 1 only if every hint boundary is lossless
+and atomic.
+
+**Required work.** Introduce no new grammar. Convert every Q29 residual into a
+positive assertion, re-probe all 18 inventory entries at their documented
+owners, and run the complete focused/default/seven-runtime/build/clean-wheel/
+hook protocol. Update coverage, roadmap, changelog, installation-facing
+milestone claims, and this plan with exact evidence. If another product gap is
+found, schedule the smallest bounded Q task and keep certification withdrawn.
+
+**Explicit exclusions.** Production changes, server optimizer-effect testing,
+dependency changes, assertion weakening, release, push, and remote mutation.
+
+**Primary sources.** Q29–Q30's sources and completion records, GitHub issue #2,
+the complete 26.2 Hints subtree, and installed SQLGlot 30.13 sources.
+
 ## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
 
-Q28–Q29 are incomplete, so Milestone 2 is deferred until every Milestone 1 Q
+Q30–Q31 are incomplete, so Milestone 2 is deferred until every Milestone 1 Q
 task is again `DONE`. The detailed P16–P35 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

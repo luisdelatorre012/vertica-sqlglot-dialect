@@ -907,6 +907,23 @@ four parser levels and `UnsupportedError` under strict direct/nested
 generation. Opaque, well-formed directives outside this modeled set retain the
 Q27 plus-delimited boundary and are not thereby advertised as semantic.
 
+Q29 audited every directive linked from the 26.2 Hints inventory. Directed
+constant annotations `:c`/`:v` and the ten modeled directives above are
+Semantic. Four additional directives currently have a protected Generic
+opaque-hint contract at their documented owner: SELECT-owned `DEPOT_FETCH`,
+`ECSMODE`, and `SKIP_STATISTICS`, plus table-owned
+`EARLY_MATERIALIZATION`. They preserve their plus delimiter, statement
+boundary, serialization, and canonical regeneration but do not validate
+their directive-specific value domains. `JFMT` and `UTYPE` remain deferred:
+the parser currently relocates JOIN-owned `JFMT` onto the left table and
+drops UNION-ALL-owned `UTYPE` during generation. The same audit found two
+modeled-boundary composition defects: a CTAS AS-clause hint followed by an
+ordinary comment and a hinted WITH duplicates the ordinary comment on each
+generation cycle, and qualification/optimization changes an unquoted LABEL
+value into a quoted identifier that strict generation rejects and drops with
+a warning. Q30 owns these four ownership/analysis-losslessness defects; Q31
+is the replacement certification gate.
+
 ## Generator policy
 
 Generated SQL is canonical Vertica syntax, not necessarily character-for-

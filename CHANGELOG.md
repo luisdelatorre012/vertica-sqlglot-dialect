@@ -5,6 +5,13 @@
 This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
 plugin interface.
 
+- Added a complete 26.2 optimizer-hint inventory and recertification audit.
+  Directed `:c`/`:v` annotations and the ten modeled directives are Semantic;
+  DEPOT_FETCH, ECSMODE, SKIP_STATISTICS, and EARLY_MATERIALIZATION have a
+  protected Generic opaque-hint contract. The audit keeps Milestone 1
+  certification withdrawn after pinning four follow-on defects: JFMT owner
+  relocation, UTYPE loss, CTAS/WITH mixed-comment multiplication, and
+  unquoted-LABEL loss during qualification/optimization.
 - Enforced the source-defined contract for every modeled optimizer directive:
   owner placement, argument-free hints, JTYPE/DISTRIB arity and finite values,
   nonempty qualified PROJS/SKIP_PROJS lists, and one valid UTF-8 LABEL value of
