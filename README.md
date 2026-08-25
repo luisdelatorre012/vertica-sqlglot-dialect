@@ -24,9 +24,9 @@ The current development baseline is:
 Python 3.15 support is tested against the latest available prerelease until
 CPython 3.15 reaches general availability.
 
-Milestone 1's prior certification remains reopened while Q33 recertifies Q32's
-completed explicit `NULLS FIRST`/`NULLS LAST` ordering correction. Milestone 2
-remains deferred until that gate passes.
+Milestone 1's analysis parsing surface is recertified after Q33 verified Q32's
+explicit `NULLS FIRST`/`NULLS LAST` ordering correction across every affected
+owner. Milestone 2 is now eligible, beginning with P16.
 
 The SQLGlot dependency is intentionally bounded to one minor line because
 dialect parser/generator subclass APIs can change between minor releases. The

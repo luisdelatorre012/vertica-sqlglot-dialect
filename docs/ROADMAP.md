@@ -250,14 +250,15 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   `NULLS LAST`, including documented analytic-window, partitioned-LIMIT,
   ordered-aggregate, and Top-K projection forms. Q32 is complete with typed,
   context-sensitive explicit NULL-ordering provenance and all-level/strict
-  owner validation; Q33 is now the replacement recertification gate.
-  Milestone 1 remains reopened and P16 is deferred until Q33 passes.
+  owner validation. Q33 is complete: its composed workload, analysis,
+  all-level negative, strict-AST, foreign-generation, seven-runtime, build,
+  and clean-wheel gates passed. Milestone 1 is recertified and P16 is eligible.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — is deferred while Q33 recertifies Q32's Milestone 1
-  correction; P16 remains first once Q33 passes.
+  (tasks P16–P35) — is now eligible after Q33 recertified Q32's Milestone 1
+  correction; P16 is the first remaining task.
 
 ## Phase 1 — core analytical SQL and physical design
 
@@ -369,7 +370,7 @@ Implemented catalog P0:
   temporary-table/single-SELECT restrictions, with CHECK expression content
   left as a named server-side residual.
 
-Remaining (all Milestone 2; deferred pending Q33 recertification):
+Remaining (all Milestone 2; P16 is next):
 
 - partition move/swap/archive operations and mixed comma-separated ALTER action
   lists (top-level maintenance SELECT functions are already canonical);

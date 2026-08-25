@@ -190,6 +190,53 @@ SELECT id, total FROM q29_hint_rollup;
 """.strip()
 HINT_RECERTIFICATION_PIPELINE_TYPES: list[type[exp.Expr]] = [exp.Create, exp.Insert]
 
+# Q33 composes every Q32 ordering owner that belongs to the analysis surface.
+# Explicit and omitted placement are deliberately mixed in the same ordering
+# lists so the gate detects either qualifier loss or fabricated defaults.
+NULL_ORDER_RECERTIFICATION_WORKLOAD = """
+AT EPOCH LATEST
+WITH ranked AS (
+    SELECT sale_id, customer_id, amount,
+        ROW_NUMBER() OVER (
+            PARTITION BY customer_id
+            ORDER BY amount DESC NULLS LAST, sale_id
+        ) AS rn
+    FROM raw_sales
+)
+SELECT sale_id, customer_id, amount
+FROM ranked
+WHERE rn <= 3
+UNION ALL
+(SELECT sale_id, customer_id, amount
+ FROM raw_sales
+ ORDER BY amount NULLS FIRST, sale_id DESC
+ LIMIT 1)
+ORDER BY amount DESC NULLS LAST, customer_id;
+SELECT customer_id,
+    LISTAGG(sale_id) WITHIN GROUP (
+        ORDER BY amount NULLS AUTO, sale_id DESC
+    ) AS sale_ids
+FROM raw_sales
+GROUP BY customer_id
+LIMIT 2 OVER (
+    PARTITION BY customer_id
+    ORDER BY amount DESC NULLS FIRST, sale_id
+);
+CREATE PROJECTION q33_top_sales AS
+SELECT customer_id, amount, sale_id
+FROM raw_sales
+LIMIT 2 OVER (
+    PARTITION BY customer_id
+    ORDER BY amount DESC NULLS LAST, sale_id
+);
+""".strip()
+
+NULL_ORDER_RECERTIFICATION_WORKLOAD_TYPES: list[type[exp.Expr]] = [
+    vexp.AtEpochUnion,
+    exp.Select,
+    vexp.CreateProjection,
+]
+
 ALL_PARSE_LEVELS = tuple(ErrorLevel)
 FOREIGN_DIALECTS = ("postgres", "duckdb", "mysql", "sqlite")
 ALL_UNSUPPORTED_LEVELS = (ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE)
@@ -227,6 +274,165 @@ def test_q29_issue_and_composed_hint_workloads_roundtrip() -> None:
     assert "/*+GBYTYPE(HASH)*/" in generated
     assert generated.count("q30 stable metadata") == 1
     assert Q29_BOUNDARY_LABEL in generated
+
+
+def test_q33_null_ordering_workload_roundtrips_without_inventing_defaults() -> None:
+    statements = assert_script_roundtrip(
+        NULL_ORDER_RECERTIFICATION_WORKLOAD,
+        NULL_ORDER_RECERTIFICATION_WORKLOAD_TYPES,
+    )
+    explicit = [
+        item for statement in statements for item in statement.find_all(vexp.VerticaOrdered)
+    ]
+    omitted = [
+        item
+        for statement in statements
+        for item in statement.find_all(exp.Ordered)
+        if type(item) is exp.Ordered
+    ]
+
+    assert sorted(item.args["nulls"].name for item in explicit) == [
+        "AUTO",
+        "FIRST",
+        "FIRST",
+        "LAST",
+        "LAST",
+        "LAST",
+    ]
+    assert len(omitted) == 6
+    generated = "\n".join(statement.sql(dialect="vertica") for statement in statements)
+    assert generated.count("NULLS FIRST") == 2
+    assert generated.count("NULLS LAST") == 3
+    assert generated.count("NULLS AUTO") == 1
+
+
+def test_q33_null_ordering_workload_shapes_and_owners() -> None:
+    historical, aggregate, projection = parse(NULL_ORDER_RECERTIFICATION_WORKLOAD, read="vertica")
+
+    assert isinstance(historical, vexp.AtEpochUnion)
+    assert isinstance(historical.args.get("with_"), exp.With)
+    assert isinstance(historical.expression, exp.Subquery)
+    assert len(list(historical.find_all(vexp.VerticaOrdered))) == 3
+    assert any(item.find_ancestor(exp.Window) for item in historical.find_all(vexp.VerticaOrdered))
+
+    assert isinstance(aggregate, exp.Select)
+    within_group = aggregate.find(exp.WithinGroup)
+    assert within_group is not None
+    within_ordered = within_group.find(vexp.VerticaOrdered)
+    assert within_ordered is not None and within_ordered.args["nulls"].name == "AUTO"
+    assert isinstance(aggregate.args.get("limit"), vexp.PartitionedLimit)
+    limit_ordered = aggregate.args["limit"].find(vexp.VerticaOrdered)
+    assert limit_ordered is not None and limit_ordered.args["nulls"].name == "FIRST"
+
+    assert isinstance(projection, vexp.CreateProjection)
+    projection_limit = projection.find(vexp.PartitionedLimit)
+    assert projection_limit is not None
+    projection_ordered = projection_limit.find(vexp.VerticaOrdered)
+    assert projection_ordered is not None and projection_ordered.args["nulls"].name == "LAST"
+
+
+def test_q33_null_ordering_workload_survives_analysis_and_tree_operations() -> None:
+    historical, aggregate, projection = parse(NULL_ORDER_RECERTIFICATION_WORKLOAD, read="vertica")
+    schema = {
+        "raw_sales": {
+            "sale_id": "BIGINT",
+            "customer_id": "BIGINT",
+            "amount": "DECIMAL",
+        }
+    }
+
+    for expression in (historical, aggregate):
+        assert isinstance(expression, exp.Query)
+        assert list(traverse_scope(expression))
+        for analyzed in (
+            qualify(expression.copy(), dialect="vertica", schema=schema),
+            optimize(expression.copy(), dialect="vertica", schema=schema),
+            annotate_types(expression.copy(), dialect="vertica", schema=schema),
+        ):
+            placements = [
+                ordered.args["nulls"].name for ordered in analyzed.find_all(vexp.VerticaOrdered)
+            ]
+            assert placements
+            generated = analyzed.sql(dialect="vertica")
+            assert parse_one(generated, read="vertica") == analyzed
+
+    assert any(
+        node.name == "raw_sales.amount"
+        for node in lineage("amount", historical, schema=schema, dialect="vertica").walk()
+    )
+
+    for tree in (
+        exp.Expr.load(projection.dump()),
+        projection.copy(),
+        projection.transform(lambda node: node),
+    ):
+        ordered = tree.find(vexp.VerticaOrdered)
+        assert ordered is not None
+        assert ordered.parent is not None
+        assert ordered.arg_key == "expressions"
+        assert tree.sql(dialect="vertica").count("NULLS LAST") == 1
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "SELECT amount FROM raw_sales ORDER BY amount NULLS",
+        "SELECT amount FROM raw_sales ORDER BY amount NULLS FIRST NULLS LAST",
+        "SELECT amount FROM raw_sales ORDER BY amount NULLS AUTO",
+        (
+            "SELECT amount FROM raw_sales LIMIT 1 OVER "
+            "(PARTITION BY customer_id ORDER BY amount NULLS AUTO)"
+        ),
+        "CREATE PROJECTION p AS SELECT amount FROM raw_sales ORDER BY amount NULLS FIRST",
+    ],
+)
+@pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
+def test_q33_null_ordering_negative_scripts_fail_without_swallowing_suffix(
+    malformed: str, error_level: ErrorLevel
+) -> None:
+    with pytest.raises(ParseError):
+        parse(
+            f"{malformed}; SELECT 33 AS following_statement",
+            read="vertica",
+            error_level=error_level,
+        )
+
+
+def test_q33_null_ordering_strict_ast_mutations_fail_atomically() -> None:
+    historical, _, projection = parse(NULL_ORDER_RECERTIFICATION_WORKLOAD, read="vertica")
+    malformed_nested = historical.copy()
+    malformed_nested.find(vexp.VerticaOrdered).set("nulls", exp.var("MIDDLE"))
+    malformed_top_k = projection.copy()
+    malformed_top_k.find(vexp.VerticaOrdered).set("nulls", exp.var("AUTO"))
+    malformed_direct = vexp.VerticaOrdered(
+        this=exp.column("amount"),
+        desc=None,
+        nulls_first=False,
+        nulls=exp.var("AUTO"),
+    )
+
+    for malformed in (malformed_nested, malformed_top_k, malformed_direct):
+        with pytest.raises(UnsupportedError):
+            malformed.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+
+
+@pytest.mark.parametrize("dialect", FOREIGN_DIALECTS)
+@pytest.mark.parametrize("unsupported_level", ALL_UNSUPPORTED_LEVELS)
+@pytest.mark.parametrize("nested", (False, True))
+def test_q33_explicit_null_ordering_fails_atomically_in_foreign_dialects(
+    dialect: str, unsupported_level: ErrorLevel, nested: bool
+) -> None:
+    ordered = vexp.VerticaOrdered(
+        this=exp.column("amount"),
+        desc=True,
+        nulls_first=False,
+        nulls=exp.var("LAST"),
+    )
+    expression: exp.Expr = (
+        exp.select("amount").from_("raw_sales").order_by(ordered, copy=False) if nested else ordered
+    )
+    with pytest.raises((UnsupportedError, ValueError)):
+        expression.sql(dialect=dialect, unsupported_level=unsupported_level)
 
 
 def test_q29_hint_workloads_preserve_analysis_and_type_metadata() -> None:

@@ -3,8 +3,13 @@
 ## 0.2.1 — 2026-08-25
 
 This release recertifies the analysis parsing surface after the complete
-optimizer-hint provenance, directive-contract, ownership, and losslessness
-audit.
+optimizer-hint audit and the explicit NULL-ordering correction.
+
+- Recertified Milestone 1 after a composed NULL-ordering workload proved
+  ordinary query, analytic-window, WITHIN GROUP, partitioned-LIMIT, set-tail,
+  historical CTE, and Top-K projection ownership through round trips, analysis,
+  all-level negative scripts, strict AST checks, foreign generation, all seven
+  Python runtimes, package build, and clean-wheel smoke.
 
 - Added lossless explicit NULL placement across ordinary query ordering,
   analytic windows, WITHIN GROUP aggregates, partitioned LIMIT, and Top-K

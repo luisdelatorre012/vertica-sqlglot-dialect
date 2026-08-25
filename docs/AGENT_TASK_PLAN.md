@@ -182,6 +182,10 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   `DONE` as historical evidence, but **Milestone 1 is reopened** and P16 is
   deferred. Completed **Q32 — explicit NULL-ordering conformance**; Q33 is the
   lowest-numbered remaining task and alone owns recertification.
+- Completed **Q33 — Milestone 1 NULL-ordering recertification gate** on
+  2026-08-25. The composed ordering workload and complete release gate passed
+  without another product gap. **Milestone 1 is recertified**, every Q task is
+  `DONE`, and P16 is now the lowest-numbered eligible task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -341,14 +345,13 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q30 | DONE   | Optimizer-hint ownership and analysis losslessness | Q29           | `fix: preserve optimizer hint ownership`                 |
 | Q31 | DONE   | Milestone 1 optimizer-hint final recertification gate | Q30       | `test: finally recertify milestone one hint boundaries`  |
 | Q32 | DONE   | Explicit NULL-ordering conformance             | Q31                | `fix: support explicit null ordering`                     |
-| Q33 | TODO   | Milestone 1 NULL-ordering recertification gate | Q32                | `test: recertify milestone one null ordering`             |
+| Q33 | DONE   | Milestone 1 NULL-ordering recertification gate | Q32                | `test: recertify milestone one null ordering`             |
 
-### Milestone 2 — administration and remaining DDL (deferred)
+### Milestone 2 — administration and remaining DDL (eligible)
 
-Q33 is not `DONE`, so milestone precedence defers every Milestone 2 task. P16
-remains the lowest-numbered Milestone 2 task and becomes eligible only after
-Q33 is `DONE`. P16–P35 numbering, dependencies, and
-specifications are intentionally unchanged from the prior plan revision.
+Every Q task is `DONE`, so Milestone 2 is eligible. P16 is the lowest-numbered
+eligible task. P16–P35 numbering, dependencies, and specifications are
+intentionally unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -3964,7 +3967,7 @@ force-installed with no broken requirements in a clean environment, and the
 installed-wheel ordinary `NULLS LAST` smoke returned `Select`. Milestone 1
 remains reopened; Q33 alone owns recertification and P16 remains deferred.
 
-### Q33 — Milestone 1 NULL-ordering recertification gate — `TODO`
+### Q33 — Milestone 1 NULL-ordering recertification gate — `DONE`
 
 **Outcome.** Re-certify the analysis parsing surface only after Q32 proves
 explicit NULL placement is lossless, analyzer-stable, context-correct, and
@@ -4003,11 +4006,51 @@ and remote mutation.
 field closure record, the Q31 final recertification record, and installed
 SQLGlot 30.13 ordering/analysis implementations.
 
-## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
+**Completion record.** Re-read the complete active plan plus Q21, Q31, and
+Q32's completion records, `ARCHITECTURE.md`, and the relevant coverage,
+roadmap, changelog, README, and source-inventory contracts. Re-opened the exact
+26.2 ORDER BY, window order, LIMIT, WITHIN GROUP ORDER BY, NULL sort order, and
+Top-K projection sources and audited installed SQLGlot 30.13's ordered parser,
+canonical `Order`/`Ordered` fields, dialect NULL default, generator, scope,
+qualification, optimization, type-annotation, and lineage paths. No new
+material source contradiction appeared: ordinary ORDER BY still omits explicit
+placement and documents datatype-dependent defaults, while window and WITHIN
+GROUP explicitly admit FIRST/LAST/AUTO, partitioned LIMIT and Top-K admit
+FIRST/LAST, and the Q32-authorized user-reported ordinary-query acceptance
+remains the operational-evidence exception because no live Vertica connection
+is configured.
 
-Q33 is not `DONE`, so Milestone 2 remains deferred. P16 becomes next only after
-Q33 completes and expressly recertifies Milestone 1. The
-detailed P16–P35 specifications — outcome, required work,
+Extended `tests/test_workload_corpus.py` with a three-statement Q33 workload.
+Its analyzer-visible AT-prefixed CTE/set root combines an analytic window,
+ordinary FIRST/LAST ordering, a parenthesized UNION ALL branch, and a
+whole-compound tail; a grouped query combines WITHIN GROUP AUTO with a
+partitioned LIMIT FIRST; and a Top-K projection carries partitioned-LIMIT LAST.
+Every list mixes explicit and omitted items, proving generation neither loses
+a qualifier nor invents Vertica's datatype-dependent default. Compact/pretty
+generation and reparse, statement/root shapes, dump/load, copy/identity
+transform parents, type annotation, public scope traversal, qualification,
+optimization, and raw-source lineage all pass. Five malformed or wrong-owner
+scripts fail atomically at IMMEDIATE, RAISE, WARN, and IGNORE without swallowing
+the following statement. Direct and nested malformed ASTs fail strict Vertica
+generation, and explicit ordered nodes fail atomically, direct and nested, in
+PostgreSQL, DuckDB, MySQL, and SQLite at RAISE, WARN, and IGNORE. The Top-K
+control also proves physical projection ORDER BY retains its separate rejection.
+
+The focused NULL-ordering/workload run passed 204 tests; the complete focused
+ordering/query neighborhood passed 1,615. The default Python 3.12.6 release
+gate passed 8,627 tests at 92.24% branch coverage with Ruff formatting/lint,
+strict mypy, and diff checks clean. Isolated Python 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed all 8,627 tests; 3.15
+treated deprecation warnings as errors. The sdist and wheel built, the exact
+wheel force-installed with no broken requirements in a clean environment, and
+the installed-wheel ordinary `NULLS LAST` smoke returned `Select`. The staged
+repository-wide pre-commit suite was clean. **Milestone 1 — the analysis
+parsing surface — is recertified.** P16 is eligible; no Milestone 2 work began.
+
+## Detailed tasks — Milestone 2: administration and remaining DDL (eligible)
+
+Every Q task is `DONE`, so P16 is now the next eligible task. The detailed
+P16–P35 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
 not part of the mandatory read while Milestone 1 is active. When a P task is
