@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.2.0 — 2026-08-22
+## 0.2.1 — 2026-08-25
 
-This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
-plugin interface.
+This release recertifies the analysis parsing surface after the complete
+optimizer-hint provenance, directive-contract, ownership, and losslessness
+audit.
 
 - Finally recertified Milestone 1 after the complete 18-entry optimizer-hint
   inventory, GitHub issue #2 fixture, composed positive/negative workload,
@@ -37,6 +38,12 @@ plugin interface.
   empty separators, prose, and allowed-name collisions—now remain inert around
   WITH, table/alias, JOIN, and CTAS sites; nonempty CTAS comments also survive
   generation instead of remaining on the consumed `AS` token.
+
+## 0.2.0 — 2026-08-22
+
+This is a from-scratch rewrite of the 0.1.x package around SQLGlot's dialect
+plugin interface.
+
 - Added entry-point discovery and a bounded SQLGlot 30.13.x compatibility
   contract.
 - Added tested CPython 3.14 and 3.15 prerelease compatibility, including
