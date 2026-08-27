@@ -14,17 +14,21 @@ through the public analysis APIs.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from sqlglot import ErrorLevel, exp, parse, parse_one
 from sqlglot.errors import ParseError, UnsupportedError
 from sqlglot.lineage import lineage
 from sqlglot.optimizer import optimize
 from sqlglot.optimizer.annotate_types import annotate_types
+from sqlglot.optimizer.eliminate_subqueries import eliminate_subqueries
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import traverse_scope
 
 from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_script_roundtrip
+from tests.test_cte import USER_REPORTED_OPTIMIZER_CTE_SQL
 from tests.test_hints import ISSUE_2_SCHEMA, ISSUE_2_SQL
 
 # A staging -> aggregate -> promote -> cleanup pipeline: a definition-form
@@ -237,6 +241,53 @@ NULL_ORDER_RECERTIFICATION_WORKLOAD_TYPES: list[type[exp.Expr]] = [
     vexp.CreateProjection,
 ]
 
+# Q35 composes the exact optimizer-CTE regression with the already-certified
+# CTE and temporary-table analysis surface. The first statement comes from the
+# repository-owned Q34 fixture; the remainder covers ordinary, subordinate,
+# hinted, recursive, explicitly ordered, and lifecycle-owned WITH trees.
+OPTIMIZER_CTE_RECERTIFICATION_WORKLOAD = f"""
+{USER_REPORTED_OPTIMIZER_CTE_SQL};
+WITH /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ outer_cte AS (
+    WITH nested_cte AS (
+        SELECT customer_id, amount FROM q35_stage
+    )
+    SELECT customer_id, amount FROM nested_cte
+)
+SELECT customer_id, amount
+FROM outer_cte
+ORDER BY amount DESC NULLS LAST;
+WITH RECURSIVE levels (n) AS (
+    SELECT 1
+    UNION ALL
+    SELECT n + 1 FROM levels WHERE n < 2
+)
+SELECT n FROM levels;
+CREATE LOCAL TEMPORARY TABLE q35_stage
+    (customer_id BIGINT, amount DECIMAL(10, 2))
+    ON COMMIT PRESERVE ROWS;
+INSERT INTO q35_stage (customer_id, amount)
+SELECT customer_id, amount FROM raw_sales;
+CREATE TEMPORARY TABLE q35_helper ON COMMIT PRESERVE ROWS AS
+SELECT derived.customer_id, derived.amount
+FROM (SELECT customer_id, amount FROM q35_stage) AS derived;
+SELECT customer_id, amount
+INTO LOCAL TEMP TABLE q35_promoted ON COMMIT PRESERVE ROWS
+FROM q35_helper;
+/* q35 cleanup */
+DROP TABLE q35_stage, q35_helper, q35_promoted;
+""".strip()
+
+OPTIMIZER_CTE_RECERTIFICATION_WORKLOAD_TYPES: list[type[exp.Expr]] = [
+    exp.Union,
+    exp.Select,
+    exp.Select,
+    exp.Create,
+    exp.Insert,
+    exp.Create,
+    vexp.SelectInto,
+    vexp.DropTables,
+]
+
 ALL_PARSE_LEVELS = tuple(ErrorLevel)
 FOREIGN_DIALECTS = ("postgres", "duckdb", "mysql", "sqlite")
 ALL_UNSUPPORTED_LEVELS = (ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE)
@@ -304,6 +355,160 @@ def test_q33_null_ordering_workload_roundtrips_without_inventing_defaults() -> N
     assert generated.count("NULLS FIRST") == 2
     assert generated.count("NULLS LAST") == 3
     assert generated.count("NULLS AUTO") == 1
+
+
+def test_q35_optimizer_cte_workload_roundtrips() -> None:
+    statements = parse(OPTIMIZER_CTE_RECERTIFICATION_WORKLOAD, read="vertica")
+    assert [type(statement) for statement in statements] == (
+        OPTIMIZER_CTE_RECERTIFICATION_WORKLOAD_TYPES
+    )
+    for statement in statements:
+        assert not isinstance(statement, exp.Command)
+        assert exp.Expr.load(statement.dump()) == statement
+        for generated in (
+            statement.sql(dialect="vertica"),
+            statement.sql(dialect="vertica", pretty=True),
+        ):
+            reparsed = parse_one(generated, read="vertica")
+            assert reparsed.sql(dialect="vertica", pretty="\n" in generated) == generated
+    assert "dialect: vertica" in statements[0].sql(dialect="vertica")
+    assert "ENABLE_WITH_CLAUSE_MATERIALIZATION" in statements[1].sql(dialect="vertica")
+    assert "NULLS LAST" in statements[1].sql(dialect="vertica")
+    assert "q35 cleanup" in statements[-1].sql(dialect="vertica")
+
+
+def test_q35_user_reported_query_survives_stock_optimizer_and_analysis(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    parsed = parse_one(USER_REPORTED_OPTIMIZER_CTE_SQL, read="vertica")
+    assert type(parsed) is exp.Union
+    assert parsed.args.get("with_") is None
+
+    optimized = optimize(parsed.copy(), dialect="vertica")
+    with_ = optimized.args.get("with_")
+    assert type(optimized) is exp.Union
+    assert isinstance(with_, exp.With)
+    assert with_.args.get("recursive") is False
+    assert [cte.alias for cte in with_.expressions] == ["_u_0"]
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="sqlglot"):
+        compact = optimized.sql(dialect="vertica")
+        pretty = optimized.sql(dialect="vertica", pretty=True)
+    assert not caplog.records
+    assert "WITH RECURSIVE" not in compact
+    assert "WITH RECURSIVE" not in pretty
+    for generated in (compact, pretty):
+        reparsed = parse_one(generated, read="vertica")
+        assert type(reparsed) is exp.Union
+        assert isinstance(reparsed.args.get("with_"), exp.With)
+
+    assert exp.Expr.load(optimized.dump()) == optimized
+    for expression in (optimized.copy(), optimized.copy().transform(lambda node: node)):
+        copied_with = expression.args.get("with_")
+        assert isinstance(copied_with, exp.With)
+        assert copied_with.args.get("recursive") is False
+        assert copied_with.parent is expression and copied_with.arg_key == "with_"
+        assert copied_with.expressions[0].parent is copied_with
+
+    for analyzed in (
+        qualify(optimized.copy(), dialect="vertica"),
+        annotate_types(optimized.copy(), dialect="vertica"),
+        optimize(optimized.copy(), dialect="vertica"),
+    ):
+        assert list(traverse_scope(analyzed))
+        assert "WITH RECURSIVE" not in analyzed.sql(
+            dialect="vertica", unsupported_level=ErrorLevel.RAISE
+        )
+    assert lineage("n", optimized.copy(), dialect="vertica").downstream
+
+
+@pytest.mark.parametrize("unsupported_level", tuple(ErrorLevel))
+def test_q35_optimizer_generated_with_renders_at_every_level_without_warning(
+    unsupported_level: ErrorLevel,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    optimized = optimize(
+        parse_one(USER_REPORTED_OPTIMIZER_CTE_SQL, read="vertica"), dialect="vertica"
+    )
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="sqlglot"):
+        generated = optimized.sql(dialect="vertica", unsupported_level=unsupported_level)
+    assert not caplog.records
+    assert "WITH RECURSIVE" not in generated
+    assert isinstance(parse_one(generated, read="vertica").args.get("with_"), exp.With)
+
+
+def test_q35_smaller_optimizer_helper_composes_with_existing_with_forms() -> None:
+    helper = parse_one(
+        "SELECT d.a FROM (SELECT x.a FROM x) AS d ORDER BY d.a NULLS LAST",
+        read="vertica",
+    )
+    eliminated = eliminate_subqueries(helper)
+    helper_with = eliminated.args.get("with_")
+    assert isinstance(helper_with, exp.With)
+    assert helper_with.args.get("recursive") is False
+    assert eliminated.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE).startswith(
+        "WITH d AS"
+    )
+
+    statements = parse(OPTIMIZER_CTE_RECERTIFICATION_WORKLOAD, read="vertica")
+    hinted = statements[1]
+    recursive = statements[2]
+    create_helper = statements[5]
+    assert isinstance(hinted.args.get("with_"), vexp.WithHint)
+    assert isinstance(hinted.args["with_"].expressions[0].this.args.get("with_"), exp.With)
+    assert recursive.args["with_"].args.get("recursive") is True
+
+    assert isinstance(create_helper, exp.Create)
+    optimized_create = eliminate_subqueries(create_helper.copy())
+    optimized_with = optimized_create.expression.args.get("with_")
+    assert isinstance(optimized_with, exp.With)
+    assert optimized_with.args.get("recursive") is False
+    assert "WITH RECURSIVE" not in optimized_create.sql(
+        dialect="vertica", unsupported_level=ErrorLevel.RAISE
+    )
+
+
+@pytest.mark.parametrize("recursive", [None, False, True])
+def test_q35_valid_recursive_states_are_warning_free_and_strict(
+    recursive: bool | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    expression = parse_one("WITH c AS (SELECT 1 AS x) SELECT x FROM c", read="vertica")
+    expression.args["with_"].set("recursive", recursive)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="sqlglot"):
+        generated = expression.sql(dialect="vertica")
+    assert not caplog.records
+    assert ("WITH RECURSIVE" in generated) is (recursive is True)
+    assert expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE) == generated
+
+
+@pytest.mark.parametrize("recursive", [0, 1, "", "False", [], {}, ()])
+def test_q35_nonboolean_recursive_states_remain_strict(recursive: object) -> None:
+    expression = parse_one("WITH c AS (SELECT 1 AS x) SELECT x FROM c", read="vertica")
+    expression.args["with_"].set("recursive", recursive)
+    with pytest.raises(
+        UnsupportedError, match="Vertica WITH RECURSIVE must be either present or absent"
+    ):
+        expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+
+
+@pytest.mark.parametrize("error_level", ALL_PARSE_LEVELS)
+def test_q35_invalid_with_boundary_does_not_swallow_following_statement(
+    error_level: ErrorLevel,
+) -> None:
+    with pytest.raises(ParseError):
+        parse(
+            "WITH c AS (INSERT INTO t SELECT 1) SELECT * FROM c; SELECT 35 AS following_statement",
+            read="vertica",
+            error_level=error_level,
+        )
+    following = parse_one(
+        "SELECT 35 AS following_statement", read="vertica", error_level=error_level
+    )
+    assert following.sql(dialect="vertica") == "SELECT 35 AS following_statement"
 
 
 def test_q33_null_ordering_workload_shapes_and_owners() -> None:

@@ -395,6 +395,17 @@ when Python equality would make an integer resemble a Boolean. This preserves
 the canonical SQLGlot node and optimizer rule order while keeping every other
 WITH/CTE structural boundary above strict.
 
+Q35 recertifies that three-state contract across the complete public analysis
+path. The reported correlated-`NOT EXISTS` UNION and a smaller derived-table
+control both introduce canonical helper CTEs with exact Boolean
+`recursive=False`; compact and pretty generation, generate/reparse, repeated
+optimization, qualification, type annotation, scope traversal, lineage,
+serialization, copy/transform parent links, default warning capture, and
+strict generation remain stable. The same workload composes ordinary,
+subordinate, materialization-hinted, and recursive CTEs with explicit NULL
+ordering and the temporary-table lifecycle. Exact non-Boolean recursive states
+and invalid WITH placement remain atomic failures.
+
 The same distinction applies to external loading. Executable `COPY` remains an
 `exp.Copy` subclass, while the reusable body inside `CREATE EXTERNAL TABLE` is
 an `ExternalCopyDefinition`: a targetless node that shares structured source,

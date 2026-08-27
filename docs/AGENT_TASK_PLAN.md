@@ -199,8 +199,10 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   correction and Q35 is the replacement recertification gate. Q33 remains
   `DONE` as historical evidence, but **Milestone 1 is reopened**, P16 is
   deferred. Completed **Q34 — optimizer-generated non-recursive WITH
-  conformance**; Q35 is the lowest-numbered remaining task and alone owns
-  recertification.
+  conformance** and **Q35 — Milestone 1 optimizer-CTE recertification gate**.
+  Q35's complete workload and release gate passed on 2026-08-27. **Milestone 1
+  is recertified**, every Q task is `DONE`, and P16 is now the lowest-numbered
+  eligible task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -362,13 +364,13 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q32 | DONE   | Explicit NULL-ordering conformance             | Q31                | `fix: support explicit null ordering`                     |
 | Q33 | DONE   | Milestone 1 NULL-ordering recertification gate | Q32                | `test: recertify milestone one null ordering`             |
 | Q34 | DONE   | Optimizer-generated non-recursive WITH conformance | Q33             | `fix: accept optimizer generated nonrecursive ctes`       |
-| Q35 | TODO   | Milestone 1 optimizer-CTE recertification gate | Q34                | `test: recertify milestone one optimizer ctes`            |
+| Q35 | DONE   | Milestone 1 optimizer-CTE recertification gate | Q34                | `test: recertify milestone one optimizer ctes`            |
 
-### Milestone 2 — administration and remaining DDL (deferred)
+### Milestone 2 — administration and remaining DDL
 
-Q34–Q35 are not `DONE`, so Milestone 2 is deferred. P16–P35 numbering,
-dependencies, and specifications are intentionally unchanged from the prior
-plan revision.
+Every Q task is `DONE`, so Milestone 2 is eligible and P16 is the next task.
+P16–P35 numbering, dependencies, and specifications are intentionally
+unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -4192,7 +4194,7 @@ broken requirements in a clean environment, and the installed-wheel
 correlated-`NOT EXISTS` UNION smoke returned `Union`. Milestone 1 remains
 reopened; Q35 alone owns recertification and no Milestone 2 work began.
 
-### Q35 — Milestone 1 optimizer-CTE recertification gate — `TODO`
+### Q35 — Milestone 1 optimizer-CTE recertification gate — `DONE`
 
 **Outcome.** Re-certify the analysis parsing surface only after Q34 proves
 that parser- and optimizer-produced WITH trees share one warning-free, strict,
@@ -4244,15 +4246,55 @@ mutation.
 the 26.2 WITH and recursion pages; and installed SQLGlot 30.13's canonical
 WITH, optimizer, scope, qualification, lineage, and generator implementations.
 
-## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
+**Completion record.** Re-read the full active plan and the Q14, Q25, Q33,
+and Q34 completion records, plus the architecture, coverage, roadmap,
+changelog, README, and source-inventory contracts. Re-opened the exact 26.2
+WITH and WITH-recursion pages and audited installed SQLGlot 30.13's canonical
+`With`/`CTE` fields, base generator, stock optimizer rule order,
+`eliminate_subqueries`, scope traversal, qualification, type annotation, and
+lineage. No material source contradiction appeared: the WITH production still
+makes `RECURSIVE` optional, and the recursion page still defines keyword
+presence as the recursive form. SQLGlot still deliberately initializes
+optimizer-created ordinary WITH wrappers with exact Boolean
+`recursive=False`.
 
-Q34–Q35 are not `DONE`, so no Milestone 2 task is eligible. The detailed
-P16–P35 specifications — outcome, required work,
+Extended `tests/test_workload_corpus.py` with the complete repository-owned
+user-reported UNION/correlated-`NOT EXISTS` SQL and a smaller derived-table
+helper-CTE control. Stock optimization introduces `_u_0` with
+`recursive=False`; compact and pretty generation, generate/reparse, repeated
+optimization, dump/load, copy/identity-transform parents, type annotation,
+public scope traversal, qualification, and lineage all pass. Default and all
+strict generator levels emit ordinary WITH with no unsupported warning. Exact
+`None`, `False`, and `True` states remain warning-free and strict, while the
+non-Boolean matrix remains atomic. The composed eight-statement workload also
+retains ordinary, subordinate, clause-level materialization-hinted, and
+recursive CTEs; a set-operation root; comments; explicit `NULLS LAST`; and the
+definition/INSERT/CTAS/SELECT-INTO/DROP temporary-table lifecycle. An all-four-
+error-level invalid-CTE sentinel proves the following statement is not
+swallowed. Q14's structural boundaries remain covered by the focused CTE and
+formal-negative suites. No production code or new grammar changed, and no
+independent product gap appeared.
+
+The focused workload module passed 143 tests; the complete focused CTE/query/
+workload neighborhood passed 1,930. The final default Python 3.12.6 release
+gate passed 8,669 tests at 92.25% branch coverage with Ruff formatting/lint,
+strict mypy, and diff checks clean. Isolated Python 3.9.25, 3.10.20, 3.11.15,
+3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed all 8,669 tests; 3.15
+treated deprecation warnings as errors. The sdist and wheel built, the exact
+wheel force-installed with no broken requirements in a clean environment, and
+the installed-wheel correlated-`NOT EXISTS` UNION smoke returned `Union`.
+**Milestone 1 — the analysis parsing surface — is recertified.** P16 is now
+eligible; no Milestone 2 work began.
+
+## Detailed tasks — Milestone 2: administration and remaining DDL
+
+Every Q task is `DONE`, so P16 is the next eligible task. The detailed P16–P35
+specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
-not part of the mandatory read while Milestone 1 is active. After every Q task
-is `DONE`, when a P task is selected, read its full specification there before
-implementing and append its completion record there; status transitions stay
-in this file's dashboard. Specifications, dependencies, and numbering are intentionally
-unchanged from the prior plan revision; completion records and coverage
-notes reference these IDs.
+not part of the mandatory read until a P task is selected. When a P task is
+selected, read its full specification there before implementing and append its
+completion record there; status transitions stay in this file's dashboard.
+Specifications, dependencies, and numbering are intentionally unchanged from
+the prior plan revision; completion records and coverage notes reference these
+IDs.

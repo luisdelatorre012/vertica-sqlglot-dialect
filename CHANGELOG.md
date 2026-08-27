@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Recertified Milestone 1 after the complete reported optimizer-CTE regression,
+  a smaller helper-CTE control, composed ordinary/subordinate/hinted/recursive
+  CTE and temporary-table workloads, warning capture, public analysis,
+  all-level negative boundaries, strict AST checks, all seven Python runtimes,
+  package build, and clean-wheel smoke passed.
+
 - Accepted SQLGlot's optimizer-generated canonical `With(recursive=False)` as
   ordinary non-recursive Vertica WITH. The complete reported correlated
   `NOT EXISTS` UNION now optimizes, generates at every error level, and
