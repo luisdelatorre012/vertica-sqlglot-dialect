@@ -7848,7 +7848,7 @@ class VerticaParser(PostgresParser):
 
         properties: list[exp.Expr] = []
         if scope == "GLOBAL":
-            properties.append(self.expression(exp.GlobalProperty()))
+            properties.append(self.expression(vexp.VerticaGlobalProperty()))
         elif scope == "LOCAL":
             properties.append(self.expression(vexp.LocalProperty()))
         if temporary:

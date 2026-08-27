@@ -636,6 +636,11 @@ def test_q33_explicit_null_ordering_fails_atomically_in_foreign_dialects(
     expression: exp.Expr = (
         exp.select("amount").from_("raw_sales").order_by(ordered, copy=False) if nested else ordered
     )
+    if dialect == "postgres":
+        assert expression.sql(dialect=dialect, unsupported_level=unsupported_level).endswith(
+            "amount DESC NULLS LAST"
+        )
+        return
     with pytest.raises((UnsupportedError, ValueError)):
         expression.sql(dialect=dialect, unsupported_level=unsupported_level)
 

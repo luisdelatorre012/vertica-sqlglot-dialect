@@ -125,6 +125,8 @@ called out in code review.
 - [DROP PROCEDURE (external)](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-procedure-external/)
 - [CREATE TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-table/)
 - [CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/)
+- [PostgreSQL CREATE TABLE AS](https://www.postgresql.org/docs/current/sql-createtableas.html)
+- [PostgreSQL ORDER BY](https://www.postgresql.org/docs/current/queries-order.html)
 - [DROP TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/drop-statements/drop-table/)
 - [Dropping tables](https://docs.vertica.com/26.2.x/en/admin/working-with-native-tables/dropping-tables/)
 - [CREATE PROJECTION](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-projection/)

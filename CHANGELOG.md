@@ -9,6 +9,13 @@ This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
   Vertica-only overflow controls now produce ordinary unsupported warnings
   instead of the fatal `Unsupported expression type ListAgg` dispatch error.
 
+- Added source-equivalent PostgreSQL lowering for explicit LOCAL temporary
+  CREATE definition/LIKE/CTAS trees and explicit `NULLS FIRST`/`LAST` order
+  items. LOCAL canonicalizes away as PostgreSQL's ignored compatibility word;
+  TEMPORARY, columns/query, and ON COMMIT behavior remain. Vertica GLOBAL,
+  unscoped visibility, malformed scope trees, and `NULLS AUTO` are not
+  approximated and retain atomic boundaries.
+
 ## 0.2.3 — 2026-08-27
 
 This release recertifies the analysis parsing surface after correcting

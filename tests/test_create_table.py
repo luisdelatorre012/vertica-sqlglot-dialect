@@ -451,7 +451,7 @@ def test_create_global_temporary_table_without_projection() -> None:
 
     properties = expression.args["properties"].expressions
     assert [type(prop) for prop in properties] == [
-        exp.GlobalProperty,
+        vexp.VerticaGlobalProperty,
         exp.TemporaryProperty,
         exp.OnCommitProperty,
         vexp.NoProjectionProperty,
@@ -502,7 +502,7 @@ def test_create_scoped_temporary_table_as_matrix(scope: str, spelling: str, on_c
     assert isinstance(expression.this, exp.Table)
     assert isinstance(expression.expression, exp.Select)
 
-    scope_type = exp.GlobalProperty if scope == "GLOBAL" else vexp.LocalProperty
+    scope_type = vexp.VerticaGlobalProperty if scope == "GLOBAL" else vexp.LocalProperty
     properties = expression.args["properties"].expressions
     assert [type(prop) for prop in properties] == [
         scope_type,
@@ -534,7 +534,7 @@ def test_create_scoped_temporary_table_as_full_physical_design() -> None:
 
     properties = expression.args["properties"].expressions
     assert [type(prop) for prop in properties] == [
-        exp.GlobalProperty,
+        vexp.VerticaGlobalProperty,
         exp.TemporaryProperty,
         exp.OnCommitProperty,
         vexp.CtasHintProperty,
@@ -587,7 +587,7 @@ def test_create_scoped_temporary_table_as_matches_unscoped_contract() -> None:
     unscoped_props = [type(prop) for prop in unscoped.args["properties"].expressions]
     global_props = [type(prop) for prop in scoped_global.args["properties"].expressions]
 
-    assert global_props[0] is exp.GlobalProperty
+    assert global_props[0] is vexp.VerticaGlobalProperty
     assert global_props[1:] == unscoped_props
     assert scoped_global.this == unscoped.this
     assert scoped_global.expression == unscoped.expression
@@ -617,38 +617,20 @@ def test_create_scoped_temporary_table_dispatch_neighbors(scope: str) -> None:
         parse_one(f"CREATE {scope} TEMPORARY TABLE t LIKE source", read="vertica")
 
 
-@pytest.mark.parametrize(
-    ("sql", "target_sql"),
-    [
-        (
-            "CREATE GLOBAL TEMPORARY TABLE t AS SELECT 1 AS id",
-            "CREATE GLOBAL TEMPORARY TABLE t AS SELECT 1 AS id",
-        ),
-        (
-            "CREATE GLOBAL TEMPORARY TABLE t ON COMMIT PRESERVE ROWS AS SELECT 1 AS id",
-            "CREATE GLOBAL TEMPORARY TABLE t AS SELECT 1 AS id ON COMMIT PRESERVE ROWS",
-        ),
-    ],
-)
-def test_create_global_temporary_table_as_foreign_generation_matches_definition_form(
-    sql: str, target_sql: str
-) -> None:
-    """GLOBAL-scoped CTAS foreign generation matches the existing GLOBAL definition-form/CTAS
-    contract: canonical `exp.GlobalProperty` generates in PostgreSQL/MySQL and cleanly fails
-    unsupported in DuckDB/SQLite, exactly as it already does for definition-form temporary
-    tables and for the unscoped CTAS properties it now sits alongside."""
+def test_create_global_temporary_table_as_foreign_generation_fails_atomically() -> None:
+    expression = parse_one(
+        "CREATE GLOBAL TEMPORARY TABLE t ON COMMIT PRESERVE ROWS AS SELECT 1 AS id",
+        read="vertica",
+    )
 
-    expression = parse_one(sql, read="vertica")
-
-    assert expression.sql(dialect="postgres") == target_sql
-    assert expression.sql(dialect="mysql") == target_sql
-
-    for dialect in ("duckdb", "sqlite"):
-        with pytest.raises(UnsupportedError, match="globalproperty"):
+    with pytest.raises(ValueError, match="cannot preserve Vertica GLOBAL"):
+        expression.sql(dialect="postgres", unsupported_level=ErrorLevel.RAISE)
+    for dialect in ("duckdb", "mysql", "sqlite"):
+        with pytest.raises((UnsupportedError, ValueError)):
             expression.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
 
 
-@pytest.mark.parametrize("dialect", ["postgres", "duckdb", "mysql", "sqlite"])
+@pytest.mark.parametrize("dialect", ["duckdb", "mysql", "sqlite"])
 def test_create_local_temporary_table_as_foreign_generation_fails_atomically(
     dialect: str,
 ) -> None:

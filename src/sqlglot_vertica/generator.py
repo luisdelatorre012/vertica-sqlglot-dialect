@@ -65,10 +65,12 @@ class VerticaGenerator(PostgresGenerator):
         vexp.SchemaAuthorizationProperty: exp.Properties.Location.POST_SCHEMA,
         vexp.TablePartitionProperty: exp.Properties.Location.POST_SCHEMA,
         vexp.TableSegmentationProperty: exp.Properties.Location.POST_SCHEMA,
+        vexp.VerticaGlobalProperty: exp.Properties.Location.POST_CREATE,
     }
 
     TABLE_PROPERTY_ORDER: t.ClassVar = {
         exp.GlobalProperty: 10,
+        vexp.VerticaGlobalProperty: 10,
         vexp.LocalProperty: 10,
         exp.TemporaryProperty: 20,
         exp.LikeProperty: 30,
@@ -496,6 +498,7 @@ class VerticaGenerator(PostgresGenerator):
         ),
         vexp.NetworkAddressSpec: lambda self, expression: self.networkaddressspec_sql(expression),
         vexp.LocalProperty: lambda *_: "LOCAL",
+        vexp.VerticaGlobalProperty: lambda *_: "GLOBAL",
         vexp.MaterializedWithMarker: lambda *_: "",
         vexp.Match: lambda self, expression: self.vertica_match_sql(expression),
         vexp.MatchDefinition: lambda self, expression: self.matchdefinition_sql(expression),
@@ -2071,9 +2074,14 @@ class VerticaGenerator(PostgresGenerator):
             if isinstance(prop, exp.Expr):
                 valid = self._validate_create_table_property(prop) and valid
 
-        has_global = exp.GlobalProperty in property_types
+        has_global = bool(
+            {exp.GlobalProperty, vexp.VerticaGlobalProperty}.intersection(property_types)
+        )
         has_local = vexp.LocalProperty in property_types
         temporary = exp.TemporaryProperty in property_types
+        if exp.GlobalProperty in property_types and vexp.VerticaGlobalProperty in property_types:
+            self.unsupported("Vertica CREATE TABLE properties cannot repeat GLOBAL scope")
+            valid = False
         if has_global and has_local:
             self.unsupported("Vertica CREATE TABLE cannot combine GLOBAL and LOCAL scope")
             valid = False
@@ -2153,6 +2161,7 @@ class VerticaGenerator(PostgresGenerator):
 
         definition_properties: set[type[exp.Expr]] = {
             exp.GlobalProperty,
+            vexp.VerticaGlobalProperty,
             vexp.LocalProperty,
             exp.TemporaryProperty,
             exp.OnCommitProperty,
@@ -2171,6 +2180,7 @@ class VerticaGenerator(PostgresGenerator):
         }
         ctas_properties: set[type[exp.Expr]] = {
             exp.GlobalProperty,
+            vexp.VerticaGlobalProperty,
             vexp.LocalProperty,
             exp.TemporaryProperty,
             exp.OnCommitProperty,
@@ -2235,6 +2245,7 @@ class VerticaGenerator(PostgresGenerator):
         prop_type = type(prop)
         no_arg_types = {
             exp.GlobalProperty,
+            vexp.VerticaGlobalProperty,
             exp.TemporaryProperty,
             vexp.LocalProperty,
             vexp.NoProjectionProperty,

@@ -203,6 +203,39 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   Q35's complete workload and release gate passed on 2026-08-27. **Milestone 1
   is recertified**, every Q task is `DONE`, and P16 is now the lowest-numbered
   eligible task.
+- Later on 2026-08-27, a user-supplied seven-statement Vertica-to-PostgreSQL
+  corpus exposed another interoperability boundary. The path originally named
+  in the report (`C:\Users\luisd\Downloads\transpiler\_examples.sql`) did not
+  exist on the host; the matching, same-day
+  `C:\Users\luisd\Downloads\transpiler_examples.sql` file contained the seven
+  described minimal cases and is the audited source. All seven parse into
+  intentional custom Vertica nodes, but PostgreSQL generation raises
+  unconditional `ValueError("Unsupported expression type ...")` at both
+  `WARN` and `RAISE` before SQLGlot can apply any target-aware lowering.
+  Source and installed-SQLGlot probes divide the findings into three bounded
+  classes. Local temporary CTAS, statement-start timestamps, UTC statement
+  timestamps, explicit `NULLS FIRST`/`LAST`, and the reported integer
+  one-argument `TO_CHAR` have direct or source-bounded PostgreSQL equivalents;
+  their blanket failure is a dialect interoperability gap. Vertica's
+  partitioned `LIMIT n OVER (...)` has no PostgreSQL syntax, but its documented
+  top-N-per-partition behavior can be represented by a derived-table
+  `ROW_NUMBER` filter, so the absent whole-query rewrite is a separate
+  transpiler gap rather than an unavoidable semantic loss. General
+  `REGEXP_LIKE` is the genuine cross-engine limitation: Vertica documents Perl
+  regular expressions and `b/c/i/m/n/x` flags, whereas PostgreSQL documents
+  POSIX/ARE expressions with materially different matching and newline modes.
+  The report's metacharacter-free literal is a provably compatible subset, but
+  arbitrary patterns and non-equivalent flags must continue to fail closed.
+  Q36–Q38 own those three remediations and Q39 is the replacement
+  recertification gate. Q35 remains `DONE` as historical evidence, but
+  **Milestone 1 is reopened**, P16 is deferred, and Q36 is the
+  lowest-numbered eligible task.
+- Completed **Q36 — direct PostgreSQL construct lowerings** on 2026-08-27.
+  Explicit LOCAL temporary CREATE trees and explicit FIRST/LAST null ordering
+  now lower losslessly to PostgreSQL, while Vertica GLOBAL scope, unscoped
+  visibility, and `NULLS AUTO` retain their fail-closed boundaries. Milestone 1
+  remains reopened; Q37 is the lowest-numbered eligible task and P16 remains
+  deferred.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -324,7 +357,7 @@ task may be `IN_PROGRESS` across all tables.
 | P14 | DONE   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | DONE   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
 
-### Milestone 1 — analysis parsing surface (reopened by optimizer-generated WITH regression)
+### Milestone 1 — analysis parsing surface (reopened by PostgreSQL transpilation regressions)
 
 Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 
@@ -365,11 +398,15 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q33 | DONE   | Milestone 1 NULL-ordering recertification gate | Q32                | `test: recertify milestone one null ordering`             |
 | Q34 | DONE   | Optimizer-generated non-recursive WITH conformance | Q33             | `fix: accept optimizer generated nonrecursive ctes`       |
 | Q35 | DONE   | Milestone 1 optimizer-CTE recertification gate | Q34                | `test: recertify milestone one optimizer ctes`            |
+| Q36 | DONE   | Direct PostgreSQL construct lowerings           | Q35                | `fix: lower direct vertica constructs to postgres`         |
+| Q37 | TODO   | PostgreSQL scalar-function compatibility       | Q36                | `fix: lower compatible vertica functions to postgres`      |
+| Q38 | TODO   | PostgreSQL partitioned-LIMIT rewrite           | Q37                | `feat: lower partitioned limit to postgres`                |
+| Q39 | TODO   | Milestone 1 PostgreSQL transpilation gate      | Q36–Q38            | `test: recertify postgres transpilation boundaries`        |
 
 ### Milestone 2 — administration and remaining DDL
 
-Every Q task is `DONE`, so Milestone 2 is eligible and P16 is the next task.
-P16–P35 numbering, dependencies, and specifications are intentionally
+Q36–Q39 are not `DONE`, so Milestone 2 is deferred and P16 is not eligible.
+P16–P35 numbering, dependencies, and specifications remain intentionally
 unchanged from the prior plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
@@ -4286,9 +4323,354 @@ the installed-wheel correlated-`NOT EXISTS` UNION smoke returned `Union`.
 **Milestone 1 — the analysis parsing surface — is recertified.** P16 is now
 eligible; no Milestone 2 work began.
 
+### Q36 — direct PostgreSQL construct lowerings — `DONE`
+
+**Outcome.** Replace two blanket custom-node failures with source-backed,
+semantics-preserving PostgreSQL generation: an explicitly LOCAL temporary
+CTAS retains its temporary/session and ON COMMIT behavior, and an explicit
+Vertica `NULLS FIRST` or `NULLS LAST` order item retains the written null
+placement. Keep neighboring scope and `NULLS AUTO` cases atomic where
+PostgreSQL has no equivalent.
+
+**Required work.** Re-open the Vertica 26.2 CREATE TEMPORARY TABLE and window
+order pages, PostgreSQL's current CREATE TABLE AS and ORDER BY pages, and the
+installed SQLGlot 30.13 PostgreSQL property-location, CREATE, and ordered-item
+generation paths. Audit `foreign_properties.py` and `foreign_transforms.py`
+under both import orders and after PostgreSQL's dispatch cache has already
+been populated.
+
+For the report's exact statement,
+`CREATE LOCAL TEMP TABLE t_local ON COMMIT PRESERVE ROWS AS SELECT 1 AS c`,
+generate valid PostgreSQL without warning or exception at every generator
+unsupported level. PostgreSQL's formal syntax admits `LOCAL TEMP[ORARY]` and
+documents `LOCAL` as an ignored compatibility word; its temporary tables are
+session-local, and its `ON COMMIT PRESERVE ROWS`/`DELETE ROWS` meanings match
+the explicit LOCAL Vertica lifecycle. Choose and record whether output retains
+the ignored `LOCAL` spelling or canonicalizes it away, but preserve TEMPORARY,
+the CTAS query, column aliases/lists, and ON COMMIT state. Do not globally
+weaken Q05's fail-atomic property map: the lowering must activate only for a
+well-formed explicit LOCAL temporary CREATE definition/LIKE/CTAS tree. Direct,
+detached, permanent, contradictory, duplicate, or otherwise malformed
+`LocalProperty` shapes must still fail before partial SQL.
+
+Audit the adjacent scope states at the same boundary. Vertica GLOBAL temporary
+table definitions can persist and are visible across sessions, while
+PostgreSQL ignores `GLOBAL` and still creates a session-local table; therefore
+a Vertica-originated explicit GLOBAL tree must not silently transpile as if
+the keywords were semantically equivalent. Give parser-produced GLOBAL scope
+enough provenance to fail atomically in PostgreSQL without changing ordinary
+PostgreSQL-parsed compatibility syntax. Record unscoped Vertica temporary
+tables as configuration-dependent through `DefaultTempTableLocal`; do not
+claim explicit-LOCAL equivalence for them merely because the current canonical
+tree has no scope property.
+
+For `VerticaOrdered`, register a PostgreSQL lowering only for source-explicit
+FIRST/LAST. Preserve the child expression, direction (including omitted versus
+explicit ASC/DESC where the AST retains it), comments, and exact null-placement
+semantics in ordinary ORDER BY, analytic windows, WITHIN GROUP, partitioned-
+LIMIT children, CTEs, set branches/tails, and historical roots. It is acceptable
+for PostgreSQL output to omit a qualifier only when its own documented default
+is provably identical, but explicit rendering is preferred because it keeps
+the source contract inspectable. `NULLS AUTO` has no PostgreSQL counterpart
+and must retain direct/nested atomic failure. Canonical `exp.Ordered` trees and
+non-Vertica PostgreSQL input must remain unchanged.
+
+Add focused tests for the two report examples; LOCAL definition/LIKE/CTAS,
+TEMP/TEMPORARY, both ON COMMIT values, aliases, column lists, comments,
+compact/pretty output and PostgreSQL reparse; malformed and GLOBAL scope;
+every FIRST/LAST direction/owner and AUTO rejection; serialization,
+copy/transform parent metadata, qualification/optimization stability, strict
+levels, direct/nested trees, import order, dispatch-cache invalidation, and
+unchanged DuckDB/MySQL/SQLite atomicity. Update the foreign-lowering policy in
+`ARCHITECTURE.md`, the temporary-table and ordering coverage rows, roadmap,
+source inventory, and changelog. Run the complete common release gate, mark
+Q36 `DONE`, and leave Milestone 1 reopened for Q37–Q39.
+
+**Explicit exclusions.** No emulation of Vertica GLOBAL temporary definitions
+or configuration-dependent unscoped visibility; no PostgreSQL temporary-schema
+catalog modeling; no `NULLS AUTO` approximation; no change to Vertica parse or
+generation; no lowering of other custom table properties; no SQLGlot
+dependency change; and no release, push, or remote mutation.
+
+**Primary sources.** [Vertica CREATE TEMPORARY TABLE](https://docs.vertica.com/26.2.x/en/sql-reference/statements/create-statements/create-temporary-table/),
+[Vertica window order clause](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/window-clauses/window-order-clause/),
+[PostgreSQL CREATE TABLE AS](https://www.postgresql.org/docs/current/sql-createtableas.html),
+[PostgreSQL ORDER BY](https://www.postgresql.org/docs/current/queries-order.html),
+and installed SQLGlot 30.13 PostgreSQL generator/property dispatch sources.
+
+**Implementation pointers (non-normative, verified 2026-08-27).** The LOCAL
+fixture is a canonical `exp.Create` whose `Properties` list contains
+`LocalProperty`, `TemporaryProperty`, and `OnCommitProperty`; Q05's
+`_FailAtomicPropertiesLocation.__missing__` raises before per-node dispatch at
+every level. Removing only `LocalProperty` from a copy already produces
+PostgreSQL `CREATE TEMPORARY TABLE ... AS ... ON COMMIT PRESERVE ROWS` that
+reparses successfully. The corresponding GLOBAL Vertica fixture currently
+emits `CREATE GLOBAL TEMPORARY TABLE ...` without warning even though
+PostgreSQL documents GLOBAL as ignored. `VerticaOrdered` stores canonical
+`this`/`desc`/`nulls_first` plus a typed `nulls=Var(FIRST|LAST|AUTO)` child;
+PostgreSQL's canonical Ordered generator already understands FIRST/LAST but
+can omit a qualifier matching its own default, while AUTO has no target
+syntax.
+
+**Completion record.** Re-opened the four primary sources and audited the
+installed SQLGlot 30.13 PostgreSQL CREATE/property and ordered-item dispatch
+paths, including both import orders and a pre-populated generator transform
+cache. PostgreSQL output canonicalizes the documented no-op `LOCAL` spelling
+away, while preserving TEMPORARY, definition/LIKE/CTAS shape, aliases and
+column lists, comments, and `ON COMMIT PRESERVE ROWS`/`DELETE ROWS`. The
+lowering operates on a validated copy of exactly one explicit LOCAL temporary
+TABLE Create; malformed, detached, permanent, duplicate, or contradictory
+scope shapes remain atomic. Parser-produced explicit GLOBAL scope now carries
+Vertica provenance and fails PostgreSQL generation because its cross-session
+definition visibility cannot be preserved; ordinary PostgreSQL-parsed GLOBAL
+compatibility syntax remains unchanged, and unscoped Vertica temporary tables
+remain configuration-dependent through `DefaultTempTableLocal`.
+
+Registered a PostgreSQL `VerticaOrdered` lowering that preserves its child,
+source direction, comments, and explicitly renders `NULLS FIRST` or `NULLS
+LAST` across ordinary ordering, windows, ordered aggregates, partitioned-LIMIT
+children, CTEs, set expressions, and historical roots. Direct, nested, and
+malformed `NULLS AUTO` trees still fail atomically, as do these Vertica-only
+constructs for DuckDB, MySQL, and SQLite. Added the dedicated direct-lowering
+suite and adjusted the prior fail-atomic/corpus expectations; the expanded
+focused neighborhood passed **1,616 tests**. The common release gate passed
+**8,726 tests** at **92.23%** coverage plus Ruff, formatting, and mypy; the
+isolated CPython **3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
+3.15.0rc1** runs each passed **8,726 tests**, with 3.15 deprecation warnings
+promoted to errors. The sdist and wheel built successfully, the wheel installed
+cleanly with no broken requirements, and the installed-wheel LOCAL temporary
+CTAS smoke returned `Create`. Milestone 1 remains reopened; Q37 is next and no
+Milestone 2 work began.
+
+### Q37 — PostgreSQL scalar-function compatibility — `TODO`
+
+**Outcome.** Add target-aware PostgreSQL lowerings for the compatible scalar
+function cases in the report while preserving explicit atomic boundaries for
+semantics that cannot be translated exactly: statement-start local and UTC
+timestamps, the source-backed one-argument TO_CHAR subset, and a provably
+literal REGEXP_LIKE subset.
+
+**Required work.** Re-open Vertica's GETDATE, GETUTCDATE, TO_CHAR, and
+REGEXP_LIKE pages; PostgreSQL's current date/time, formatting, string, and
+pattern-matching pages; and the installed SQLGlot 30.13 canonical timestamp,
+cast, `AtTimeZone`, `RegexpLike`, PostgreSQL generator, type annotation, and
+Oracle one-argument TO_CHAR lowering sources. Build a source-to-target table
+before implementation and keep each boundary independent.
+
+Lower `StatementTimestamp` to the PostgreSQL statement-start function followed
+by the conversion needed to return `timestamp without time zone`, matching the
+Vertica page's explicit statement that GETDATE converts STATEMENT_TIMESTAMP
+from TIMESTAMPTZ to TIMESTAMP. Lower `UtcStatementTimestamp` to the same
+statement-start value at time zone UTC, matching both product pages exactly.
+Do not substitute CURRENT_TIMESTAMP/NOW, because PostgreSQL documents those as
+transaction-start values and the custom Vertica nodes were introduced to
+preserve that distinction. Test repeated calls in one statement and multiple
+statements, default/session time-zone effects, nesting, comparisons and casts,
+type annotation, compact/pretty PostgreSQL reparse, and every generator level.
+
+For one-argument `VerticaToChar`, source-pin the no-pattern result contract for
+Vertica's allowed integer, double, date/time, timestamp, and interval families
+against PostgreSQL text conversion. The report's exact
+`TO_CHAR(YEAR(CURRENT_DATE) - 2)` must lower warning-free to a PostgreSQL text
+expression (SQLGlot's Oracle parser already lowers the same shape to
+`CAST(EXTRACT(YEAR FROM CURRENT_DATE) - 2 AS TEXT)`). Admit only input families
+whose no-pattern spelling is demonstrated equivalent by the primary pages and
+stable type evidence; if a family, unknown column type, time-zone display, or
+numeric formatting cannot be proven equivalent, retain an atomic, targeted
+unsupported failure rather than applying CAST blindly. Two-argument TO_CHAR
+remains canonical and unchanged.
+
+Treat REGEXP_LIKE separately from ordinary function renaming. Vertica requires
+Perl regular expressions and defines `b/c/i/m/n/x`; PostgreSQL uses POSIX/ARE,
+and its `m`/`n` newline modes do not mean the same thing. Do not lower arbitrary
+or dynamic patterns merely because PostgreSQL has a function with the same
+name. Make the report's exact `REGEXP_LIKE('abc', 'a')` work through a
+provably engine-independent subset: at minimum, an omitted/default-case mode
+and a metacharacter-free literal pattern can become a case-sensitive substring
+test such as PostgreSQL `POSITION(pattern IN value) > 0`, preserving NULL and
+empty-pattern behavior. Define and freeze the accepted literal grammar before
+coding. PCRE metacharacters/escapes, dynamic patterns, binary mode, and every
+flag whose target meaning is not exact must continue to fail atomically with a
+diagnostic that names the regex-engine boundary, not the generic unregistered-
+node message. Do not claim general REGEXP_LIKE interoperability.
+
+Add focused direct/nested tests for the four report statements, aliases,
+predicates, CTEs, set branches, comments, multi-statement boundaries,
+serialization, copy/transform parents, optimizer/type behavior, default and
+strict generator levels, PostgreSQL parse-after-generate, dispatch caching,
+and unchanged DuckDB/MySQL/SQLite atomicity. Add boundary matrices for
+transaction-versus-statement timestamps, TO_CHAR input types/unknowns, plain
+versus regex-active literals, every Vertica regex modifier, invalid Unicode,
+and programmatically malformed wrappers. Update architecture, function
+coverage, roadmap, source inventory, and changelog. Run the complete common
+release gate, mark Q37 `DONE`, and leave Milestone 1 reopened for Q38–Q39.
+
+**Explicit exclusions.** No claim that PostgreSQL POSIX/ARE implements Perl
+regex generally; no automatic regex-language translator; no approximation of
+non-equivalent modifiers; no transaction timestamp substitution; no
+locale/time-zone/numeric-format guess where source equivalence is unproven; no
+new Vertica function grammar; no SQLGlot dependency change; and no release,
+push, or remote mutation.
+
+**Primary sources.** [Vertica GETDATE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/datetime-functions/getdate/),
+[Vertica GETUTCDATE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/data-type-specific-functions/datetime-functions/getutcdate/),
+[Vertica TO_CHAR](https://docs.vertica.com/26.2.x/en/sql-reference/functions/formatting-functions/to-char/),
+[Vertica REGEXP_LIKE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/match-and-search-functions/regular-expression-functions/regexp-like/),
+[PostgreSQL date/time functions](https://www.postgresql.org/docs/current/functions-datetime.html),
+[PostgreSQL formatting functions](https://www.postgresql.org/docs/current/functions-formatting.html),
+[PostgreSQL string functions](https://www.postgresql.org/docs/current/functions-string.html),
+[PostgreSQL pattern matching](https://www.postgresql.org/docs/current/functions-matching.html),
+and installed SQLGlot 30.13 foreign generator and expression sources.
+
+**Implementation pointers (non-normative, verified 2026-08-27).** Vertica's
+GETDATE page says it converts STATEMENT_TIMESTAMP from TIMESTAMPTZ to
+TIMESTAMP; GETUTCDATE says it converts the same value at `TIME ZONE 'UTC'`.
+PostgreSQL documents `statement_timestamp()` as statement start,
+`CURRENT_TIMESTAMP` as transaction start, and `AT TIME ZONE` on timestamptz as
+returning timestamp without time zone. Vertica's TO_CHAR page permits an
+optional pattern and shows no-pattern integer/date/timestamp/interval outputs;
+PostgreSQL requires a second format argument, while an explicit cast supplies
+ordinary text conversion. Vertica documents Perl regex syntax; PostgreSQL
+documents POSIX/ARE plus known Perl incompatibilities and different newline
+flag meanings. PostgreSQL `POSITION` returns a one-based substring index or
+zero and therefore provides an engine-independent Boolean lowering for the
+plain-literal subset.
+
+### Q38 — PostgreSQL partitioned-LIMIT rewrite — `TODO`
+
+**Outcome.** Transpile Vertica's documented `LIMIT n OVER (PARTITION BY ...
+ORDER BY ...)` top-N-per-partition clause to equivalent PostgreSQL query SQL,
+instead of failing on `PartitionedLimit`, while keeping unsupported or
+ambiguous query shapes atomic.
+
+**Required work.** Re-open the Vertica 26.2 LIMIT page, PostgreSQL's SELECT and
+window-function execution pages, and installed SQLGlot 30.13 PostgreSQL
+SELECT preprocessing, QUALIFY elimination, alias expansion, scope,
+qualification, and optimizer sources. PostgreSQL has no partitioned-LIMIT
+syntax and forbids window functions in WHERE, so this must be a whole-query
+lowering (normally a derived query that computes `ROW_NUMBER()` over the
+stored partition/order definition and filters that helper to `<= n`), not a
+per-node renderer or textual LIMIT substitution.
+
+Make the report's exact
+`SELECT 1 AS x LIMIT 1 OVER (PARTITION BY x ORDER BY x)` generate valid,
+warning-free PostgreSQL and reparse as the expected derived-query/window
+shape. Preserve exactly the original output columns and aliases; do not expose
+the helper row number. Resolve SELECT-list aliases used by the partition or
+order expressions without relying on PostgreSQL accepting an output alias
+inside the same window definition. Preserve expression evaluation, NULL
+ordering (including a Q36 `VerticaOrdered` child), FROM/WHERE/GROUP BY/HAVING,
+DISTINCT where source semantics can be established, joins, subqueries, CTEs,
+set-operation branch ownership, historical roots, comments, parameters, and
+outer ORDER BY/OFFSET/lock tails. Reuse SQLGlot's canonical QUALIFY-to-derived-
+table machinery where it preserves this contract; do not mutate the public
+Vertica AST during foreign generation.
+
+Before implementation, source-pin evaluation order and enumerate safe versus
+unsupported owners. If DISTINCT, star expansion, volatile projections,
+duplicate aliases, set roots, SELECT INTO, or another shape cannot be lowered
+without evaluating an expression a different number of times or changing row
+identity, fail that shape atomically with a targeted message and record it;
+do not silently broaden the rewrite. Preserve the existing Vertica positive
+and strict-AST `PartitionedLimit` contract. Other foreign dialects remain
+atomic unless this task separately proves and documents an exact target
+lowering (not required).
+
+Add focused tests for one and multiple partition/order expressions; values of
+n; aliases, ordinals, expressions, NULLS FIRST/LAST; grouped and joined input;
+CTEs, subqueries, set branches, historical roots and outer tails; comments;
+compact/pretty PostgreSQL output and reparse; dump/load, copy/transform parent
+metadata; scope, qualification, optimization, type annotation, and lineage;
+strict direct/nested malformed ASTs; every generator unsupported level;
+dispatch-cache/import order; and no helper-column collision. Include negative
+matrices for every shape classified unsafe. Update architecture, SELECT/LIMIT
+coverage, roadmap, source inventory, and changelog. Run the complete common
+release gate, mark Q38 `DONE`, and leave Milestone 1 reopened for Q39.
+
+**Explicit exclusions.** No new Vertica LIMIT grammar; no result comparison
+against a live database unless one is already available; no approximation for
+an evaluation-order or volatility mismatch; no general-purpose target-
+independent top-N rewrite; no lowering for TIMESERIES/MATCH or SELECT INTO
+unless the audited query transform already composes exactly; no SQLGlot
+dependency change; and no release, push, or remote mutation.
+
+**Primary sources.** [Vertica LIMIT clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/limit-clause/),
+[PostgreSQL SELECT](https://www.postgresql.org/docs/current/sql-select.html),
+[PostgreSQL window functions](https://www.postgresql.org/docs/current/tutorial-window.html),
+and installed SQLGlot 30.13 PostgreSQL SELECT/QUALIFY transform, optimizer,
+scope, and generator sources.
+
+**Implementation pointers (non-normative, verified 2026-08-27).** The Vertica
+page defines the input as the result after FROM, WHERE, GROUP BY, and HAVING,
+then returns at most n rows from each partition in the stored ORDER BY order.
+The report fixture parses as a canonical `Select` with a
+`PartitionedLimit(exp.Limit)` child containing a positive literal,
+`partition_by=[Column(x)]`, and `Order(Column(x))`. An equivalent canonical
+QUALIFY expression generated through installed SQLGlot already becomes a
+PostgreSQL derived table with a private `ROW_NUMBER` helper and correctly
+expands the `x` alias to the underlying literal in that minimal case; Q38 must
+audit and harden that machinery rather than assuming all owners are equally
+safe.
+
+### Q39 — Milestone 1 PostgreSQL transpilation gate — `TODO`
+
+**Outcome.** Re-certify Milestone 1 only after the complete seven-statement
+report corpus has an explicit PostgreSQL contract: every source-bounded
+equivalent generates usable target SQL without false fatal dispatch errors,
+and every genuine semantic limitation remains precise and atomic.
+
+**Required work.** Introduce no production change. Re-read Q36–Q38's
+completion records and re-open all of their primary sources. Copy the seven SQL
+statements from the repository-independent report into a repository-owned
+fixture (do not depend on either Downloads path) and exercise both individual
+transpilation and one commented, semicolon-delimited script. At default
+settings and strict `RAISE`, prove warning-free PostgreSQL generation and
+PostgreSQL parse-after-generate for explicit LOCAL temporary CTAS,
+GETDATE/GETUTCDATE, explicit FIRST/LAST ordering, the admitted one-argument
+TO_CHAR form, the metacharacter-free REGEXP_LIKE literal, and partitioned
+LIMIT. Assert target AST shapes and the semantic markers that distinguish
+statement from transaction time, local from global temporary behavior, exact
+null placement, text conversion, literal substring matching, and private
+row-number filtering.
+
+Add one composed workload combining a LOCAL temporary CTAS with a query that
+uses statement timestamps, compatible TO_CHAR/REGEXP_LIKE, explicit NULL
+ordering, and partitioned LIMIT. Exercise compact/pretty output, statement
+boundaries, comments, dump/load, copy/transform parents, type annotation,
+public scope traversal, qualification, repeated optimization, and lineage on
+the source trees, plus target PostgreSQL reparsing. Add default/strict negative
+corpora for explicit GLOBAL temporary scope, NULLS AUTO, unknown/unsafe
+one-argument TO_CHAR inputs, PCRE-only or dynamic regex patterns and
+non-equivalent modifiers, and every Q38 unsafe query shape; assert no partial
+SQL, generic `Unsupported expression type` surprise, warning-only clause loss,
+or swallowed following statement.
+
+Re-audit the architecture and every temporary-table, ordering, timestamp,
+conversion/regex, SELECT/LIMIT, cross-dialect, and installation-facing claim.
+Run the focused foreign-transpilation/function/query/workload suites, the
+default coverage gate, all seven isolated CPython 3.9–3.15 runtimes (3.15 with
+deprecations as errors), Ruff, formatting, strict mypy, diff checks,
+sdist/wheel build, clean-wheel force-install, `pip check`, an installed-wheel
+seven-case PostgreSQL transpilation smoke, and staged repository-wide hooks.
+Record exact counts and versions. If every check passes, mark Q39 `DONE`,
+update Current state/dashboard/coverage/roadmap/changelog/README claims, and
+expressly recertify Milestone 1 so P16 becomes eligible. If another independent
+gap appears, make no production fix in this gate; schedule the smallest
+bounded Q task and keep Milestone 2 deferred.
+
+**Explicit exclusions.** Production changes, weakening an unsafe-boundary
+assertion to make the corpus pass, general PCRE-to-POSIX translation, GLOBAL
+temporary emulation, live-server result or plan claims without configured
+servers, dependency changes, Milestone 2 work, release, push, and remote
+mutation.
+
+**Primary sources.** Q36–Q38's sources and completion records, the seven
+statements copied from `C:\Users\luisd\Downloads\transpiler_examples.sql`, and
+installed SQLGlot 30.13 parser/generator/optimizer implementations.
+
 ## Detailed tasks — Milestone 2: administration and remaining DDL
 
-Every Q task is `DONE`, so P16 is the next eligible task. The detailed P16–P35
+Q36–Q39 are not `DONE`, so P16 remains deferred. The detailed P16–P35
 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

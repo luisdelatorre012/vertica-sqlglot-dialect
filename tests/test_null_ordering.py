@@ -15,7 +15,7 @@ from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_roundtrip
 
 ALL_PARSE_LEVELS = tuple(ErrorLevel)
-FOREIGN_DIALECTS = ("postgres", "duckdb", "mysql", "sqlite")
+FOREIGN_DIALECTS = ("duckdb", "mysql", "sqlite")
 
 
 @pytest.mark.parametrize("direction", ("", " ASC", " DESC"))

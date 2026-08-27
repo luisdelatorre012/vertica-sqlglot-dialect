@@ -743,6 +743,12 @@ class LocalProperty(exp.Property):
     arg_types: t.ClassVar = {}
 
 
+class VerticaGlobalProperty(exp.GlobalProperty):
+    """Explicit Vertica GLOBAL temporary-table visibility provenance."""
+
+    arg_types: t.ClassVar = {}
+
+
 class NoProjectionProperty(exp.Property):
     """Suppress automatic projection creation for a temporary table."""
 

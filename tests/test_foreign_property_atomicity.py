@@ -76,8 +76,9 @@ def test_custom_property_types_are_exhaustively_enumerated() -> None:
         "SchemaAuthorizationProperty",
         "TablePartitionProperty",
         "TableSegmentationProperty",
+        "VerticaGlobalProperty",
     }
-    assert len(GENERIC_SWEEP_PROPERTY_TYPES) == 14
+    assert len(GENERIC_SWEEP_PROPERTY_TYPES) == 15
 
 
 @pytest.mark.parametrize("dialect", FOREIGN_DIALECTS)
@@ -185,6 +186,11 @@ def test_real_statements_with_embedded_properties_fail_atomically(
     never reach a caller for a Vertica-embedding statement any more."""
 
     expression = parse_one(sql, read="vertica")
+    if dialect == "postgres" and sql.startswith("CREATE LOCAL TEMPORARY TABLE"):
+        assert expression.sql(dialect=dialect, unsupported_level=level).startswith(
+            "CREATE TEMPORARY TABLE"
+        )
+        return
     with pytest.raises((ValueError, UnsupportedError)):
         expression.sql(dialect=dialect, unsupported_level=level)
 
@@ -247,20 +253,10 @@ def test_vertica_native_generation_is_unaffected() -> None:
         assert expression.sql(dialect="vertica") == sql
 
 
-def test_global_property_foreign_behavior_is_unaffected() -> None:
-    """Canonical `exp.GlobalProperty` is explicitly excluded from this task
-    and already present (not missing) in every foreign dialect's dict, so
-    `__missing__` never fires for it: PostgreSQL/MySQL still render it and
-    DuckDB/SQLite still cleanly reject it, exactly as before this patch."""
-
-    expression = parse_one("CREATE GLOBAL TEMPORARY TABLE t AS SELECT 1 AS id", read="vertica")
-
+def test_canonical_postgres_global_property_behavior_is_unaffected() -> None:
+    expression = parse_one("CREATE GLOBAL TEMPORARY TABLE t AS SELECT 1 AS id", read="postgres")
+    assert type(expression.find(exp.GlobalProperty)) is exp.GlobalProperty
     assert expression.sql(dialect="postgres") == "CREATE GLOBAL TEMPORARY TABLE t AS SELECT 1 AS id"
-    assert expression.sql(dialect="mysql") == "CREATE GLOBAL TEMPORARY TABLE t AS SELECT 1 AS id"
-
-    for dialect in ("duckdb", "sqlite"):
-        with pytest.raises(UnsupportedError, match="globalproperty"):
-            expression.sql(dialect=dialect, unsupported_level=ErrorLevel.RAISE)
 
 
 def test_patch_survives_vertica_dialect_imported_before_foreign_generators() -> None:

@@ -11,7 +11,10 @@ generators a ``PROPERTIES_LOCATION`` whose lookup raises the same
 fallback already raises for an unregistered custom root such as
 ``vexp.DropViews``, for Vertica-only property classes specifically, while any
 other missing key keeps the original ``KeyError`` so non-Vertica trees are
-unaffected.
+unaffected. PostgreSQL's Q36 whole-CREATE transform is the sole property-map
+exception: it removes one validated explicit ``LocalProperty`` from a copied
+temporary-table tree before property location; detached or malformed LOCAL
+shapes and every other target dialect still use this fail-atomic map.
 """
 
 from __future__ import annotations

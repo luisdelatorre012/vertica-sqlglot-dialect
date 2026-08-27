@@ -113,6 +113,19 @@ the host program never generates to them; this trade-off is deliberate and
 verified under both orders in a fresh interpreter by
 `tests/test_foreign_property_atomicity.py`.
 
+Q36 adds one bounded exception without weakening that map. PostgreSQL's
+whole-`Create` transform recognizes exactly one `LocalProperty` paired with
+one canonical temporary marker on a TABLE root, copies the tree, removes only
+the ignored PostgreSQL compatibility word `LOCAL`, and then delegates to the
+ordinary PostgreSQL CREATE renderer. Definition, programmatic LIKE, and CTAS
+retain TEMPORARY, column lists, the query, and ON COMMIT DELETE or PRESERVE.
+Detached, permanent, duplicate, contradictory, and malformed LOCAL shapes
+still fail before text. Parser-produced Vertica GLOBAL scope uses
+`VerticaGlobalProperty`, so PostgreSQL cannot silently reinterpret Vertica's
+cross-session definition as a session-local table; PostgreSQL-parsed canonical
+GLOBAL compatibility syntax remains unchanged. Unscoped Vertica temporary
+trees stay configuration-dependent and are not explicit-LOCAL equivalents.
+
 Function syntax follows the same wrapper pattern. `UsingParameters` and
 `StringUnit` retain the parsed function as `this` and store ordered parameter
 or unit children separately. Source-sensitive calls such as Vertica `EXPLODE`,
@@ -277,9 +290,12 @@ through the query family's guaranteed-raise path at every parser error level.
 Strict generation validates provenance, finite values, Boolean/direction
 consistency, owner placement, and unknown fields before rendering the exact
 written qualifier. Omitted parser output never fabricates one. Explicit custom
-items fail atomically in PostgreSQL, DuckDB, MySQL, and SQLite rather than
-letting a foreign default silently alter their placement; canonical Ordered
-trees remain available for legacy/programmatic interoperability.
+items fail atomically in DuckDB, MySQL, and SQLite rather than letting a
+foreign default silently alter their placement. Q36 registers the exact
+PostgreSQL subset: FIRST and LAST render explicitly with the original
+expression and direction, while AUTO still fails atomically because PostgreSQL
+has no counterpart. Canonical Ordered trees remain available for legacy/
+programmatic interoperability.
 
 Q22 closes the independent custom query-extension boundary. TIMESERIES,
 MATCH, and INTERPOLATE each route every recognized malformed required-child,
@@ -673,8 +689,11 @@ their semantic-absence defaults; meaningful values still fail. Validation
 uses no recursive SQL generation, so malformed direct or nested trees report
 an atomic `UnsupportedError` at `RAISE` before property ordering or text
 emission. Valid parser-produced property lists are copied and sorted for
-canonical output without mutating the public tree, and Q05's embedded-property
-foreign-dialect boundary remains unchanged.
+canonical output without mutating the public tree. Q05's embedded-property
+foreign-dialect boundary remains unchanged except for Q36's validated
+whole-CREATE PostgreSQL LOCAL lowering. Explicit Vertica GLOBAL scope carries
+custom provenance and fails there instead of becoming PostgreSQL's ignored
+GLOBAL compatibility word.
 
 Table drops complete the same lifecycle pattern with a split representation.
 Single-target `DROP TABLE` remains canonical `exp.Drop` because SQLGlot

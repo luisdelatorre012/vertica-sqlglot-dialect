@@ -95,6 +95,76 @@ def _postgres_group_sql(generator: Generator, expression: vexp.VerticaGroup) -> 
     return generator.group_sql(exp.Group(expressions=[item.copy() for item in expressions]))
 
 
+def _postgres_create_sql(generator: Generator, expression: exp.Create) -> str:
+    """Lower only explicit LOCAL Vertica temporary CREATE trees to PostgreSQL."""
+
+    properties = expression.args.get("properties")
+    if not isinstance(properties, exp.Properties):
+        return generator.create_sql(expression)
+
+    property_types = [type(prop) for prop in properties.expressions]
+    if vexp.VerticaGlobalProperty in property_types and (
+        property_types.count(vexp.VerticaGlobalProperty) != 1
+        or property_types.count(exp.TemporaryProperty) != 1
+    ):
+        raise ValueError("Unsupported expression type VerticaGlobalProperty")
+    if vexp.VerticaGlobalProperty in property_types:
+        raise ValueError("PostgreSQL cannot preserve Vertica GLOBAL temporary-table visibility")
+
+    local_count = property_types.count(vexp.LocalProperty)
+    if not local_count:
+        return generator.create_sql(expression)
+
+    if (
+        type(expression) is not exp.Create
+        or expression.args.get("kind") != "TABLE"
+        or local_count != 1
+        or property_types.count(exp.TemporaryProperty) != 1
+        or exp.GlobalProperty in property_types
+    ):
+        raise ValueError("Unsupported expression type LocalProperty")
+
+    lowered = expression.copy()
+    lowered_properties = lowered.args.get("properties")
+    assert isinstance(lowered_properties, exp.Properties)
+    lowered_properties.set(
+        "expressions",
+        [
+            prop
+            for prop in lowered_properties.expressions
+            if not isinstance(prop, vexp.LocalProperty)
+        ],
+    )
+    return generator.create_sql(lowered)
+
+
+def _postgres_vertica_ordered_sql(generator: Generator, expression: vexp.VerticaOrdered) -> str:
+    """Render source-explicit FIRST/LAST without consulting PostgreSQL defaults."""
+
+    this = expression.args.get("this")
+    desc = expression.args.get("desc")
+    nulls_first = expression.args.get("nulls_first")
+    nulls = expression.args.get("nulls")
+    if (
+        not isinstance(this, exp.Expr)
+        or desc not in {None, False, True}
+        or not isinstance(desc, (bool, type(None)))
+        or not isinstance(nulls_first, bool)
+        or not isinstance(nulls, exp.Var)
+        or nulls.name not in {"FIRST", "LAST"}
+        or nulls_first is not (nulls.name == "FIRST")
+        or expression.args.get("with_fill") is not None
+        or any(
+            key not in {"this", "desc", "nulls_first", "nulls", "with_fill"}
+            for key in expression.args
+        )
+    ):
+        raise ValueError("PostgreSQL supports only valid explicit NULLS FIRST or NULLS LAST")
+
+    direction = " DESC" if desc else (" ASC" if desc is False else "")
+    return f"{generator.sql(this)}{direction} NULLS {nulls.name}"
+
+
 def patch_postgres_transforms() -> None:
     """Register semantics-preserving Vertica expression subsets with PostgreSQL.
 
@@ -107,8 +177,10 @@ def patch_postgres_transforms() -> None:
 
     PostgresGenerator.TRANSFORMS = {
         **PostgresGenerator.TRANSFORMS,
+        exp.Create: _postgres_create_sql,
         exp.WithinGroup: _postgres_withingroup_sql,
         vexp.ListAgg: _postgres_listagg_sql,
         vexp.VerticaGroup: _postgres_group_sql,
+        vexp.VerticaOrdered: _postgres_vertica_ordered_sql,
     }
     generator_module._DISPATCH_CACHE.pop(PostgresGenerator, None)

@@ -24,10 +24,10 @@ The current development baseline is:
 Python 3.15 support is tested against the latest available prerelease until
 CPython 3.15 reaches general availability.
 
-Milestone 1's analysis parsing surface is recertified after Q35 verified that
-parser-produced and SQLGlot optimizer-produced WITH trees share one
-warning-free, strict, analyzer-stable Vertica generation contract. Milestone 2
-is now eligible, beginning with P16.
+Milestone 1's Q35 certification remains historical evidence, but the surface
+is reopened for the bounded PostgreSQL transpilation queue. Q36 now lowers
+explicit LOCAL temporary CREATE trees and explicit `NULLS FIRST`/`LAST`
+losslessly; Q37–Q39 remain before recertification, so Milestone 2 is deferred.
 
 The SQLGlot dependency is intentionally bounded to one minor line because
 dialect parser/generator subclass APIs can change between minor releases. The
