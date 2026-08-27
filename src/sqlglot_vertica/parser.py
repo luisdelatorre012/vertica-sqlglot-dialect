@@ -722,6 +722,12 @@ class VerticaParser(PostgresParser):
         TokenType.PARAMETER: lambda self: self.expression(exp.Abs(this=self._parse_unary())),
     }
 
+    PLACEHOLDER_PARSERS: t.ClassVar = {
+        **PostgresParser.PLACEHOLDER_PARSERS,
+        TokenType.COLON: lambda self: self._parse_named_query_parameter(),
+        TokenType.MOD: lambda self: self._parse_query_parameter(),
+    }
+
     RANGE_PARSERS: t.ClassVar = {
         **PostgresParser.RANGE_PARSERS,
         TokenType.MATCH: lambda self, this: self._parse_interpolate_predicate(this),
@@ -1243,6 +1249,44 @@ class VerticaParser(PostgresParser):
         if self.error_level == ErrorLevel.RAISE:
             self.check_errors()
         raise ParseError(message)
+
+    def _raise_placeholder_error(self, message: str) -> t.NoReturn:
+        self.raise_error(message)
+        if self.error_level == ErrorLevel.RAISE:
+            self.check_errors()
+        raise ParseError(message)
+
+    def _parse_named_query_parameter(self) -> exp.Placeholder:
+        colon = self._prev
+        name = self._curr
+        if (
+            name is None
+            or name.token_type == TokenType.IDENTIFIER
+            or name.token_type not in self.COLON_PLACEHOLDER_TOKENS
+            or name.start != colon.end + 1
+        ):
+            self._raise_placeholder_error(
+                "Vertica named placeholders require the unquoted :name spelling"
+            )
+
+        self._advance()
+        return self.expression(exp.Placeholder(this=name.text))
+
+    def _parse_query_parameter(self) -> exp.Placeholder:
+        percent = self._prev
+        marker = self._curr
+        if (
+            marker is None
+            or marker.token_type != TokenType.VAR
+            or marker.text != "s"
+            or marker.start != percent.end + 1
+        ):
+            self._raise_placeholder_error(
+                "Vertica positional placeholders require the exact %s spelling"
+            )
+
+        self._advance()
+        return self.expression(exp.Placeholder(this=None))
 
     def _raise_join_error(self, message: str) -> t.NoReturn:
         self.raise_error(message)

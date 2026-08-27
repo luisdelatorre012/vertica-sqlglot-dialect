@@ -37,6 +37,28 @@ class VerticaGenerator(PostgresGenerator):
     SUPPORTS_MEDIAN = True
     USER_INTERVAL_MAX_SECONDS = USER_INTERVAL_MAX_SECONDS
 
+    def placeholder_sql(self, expression: exp.Placeholder) -> str:
+        if type(expression) is not exp.Placeholder:
+            self.unsupported("Vertica placeholders require a canonical Placeholder node")
+            raise ValueError("Vertica placeholders require a canonical Placeholder node")
+
+        if expression.args == {"jdbc": True}:
+            return "?"
+        if expression.args == {"this": None}:
+            return "%s"
+
+        name = expression.args.get("this")
+        if (
+            expression.args == {"this": name}
+            and isinstance(name, str)
+            and self._is_safe_connection_policy_identifier(name)
+        ):
+            return f":{name}"
+
+        message = "Vertica placeholders require unambiguous :name, %s, or ? provenance"
+        self.unsupported(message)
+        raise ValueError(message)
+
     TYPE_MAPPING: t.ClassVar = {
         **PostgresGenerator.TYPE_MAPPING,
         exp.DType.BINARY: "BINARY",

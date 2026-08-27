@@ -280,14 +280,19 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   ordering/partitioned-LIMIT workload, and default/strict negative corpora
   passed source analysis, PostgreSQL reparsing, default/seven-runtime,
   package-build, clean-wheel, and installed-wheel transpilation gates without
-  another product gap. Milestone 1 is recertified on 2026-08-27, and P16 is
-  now eligible.
+  another product gap. That certification is retained as historical evidence.
+  A later public-ecosystem audit reopened the milestone with Q40–Q42. Q40 is
+  complete: named `:name`, positional `%s`, and prepared `?` driver templates
+  retain distinct canonical provenance and exact regeneration; pyformat and
+  ambiguous programmatic forms fail atomically. Q41's independent ABS
+  precedence repair and Q42's public-corpus recertification gate remain, so
+  P16 is deferred.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — is now eligible after Q39 recertified the PostgreSQL
-  transpilation boundary; P16 is the next task.
+  (tasks P16–P35) — remains deferred until Q41 and Q42 complete and Milestone 1
+  is recertified again.
 
 ## Phase 1 — core analytical SQL and physical design
 

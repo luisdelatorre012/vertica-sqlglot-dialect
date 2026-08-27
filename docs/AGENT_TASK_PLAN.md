@@ -247,7 +247,30 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   The exact seven-statement report, composed positive workload, retained
   unsafe boundaries, complete release gate, and installed-wheel PostgreSQL
   smoke passed without another product gap. **Milestone 1 is recertified**,
-  every Q task is `DONE`, and P16 is now the lowest-numbered eligible task.
+  every then-existing Q task was `DONE`, and P16 became eligible at that point.
+- Later on 2026-08-27, a user-requested public-ecosystem audit tested **370
+  unique Q-scope candidates** gathered from the nine official VMart sample
+  queries and nine public Vertica repositories. Source-context review excluded
+  five strings that were not standalone SQL (two incomplete host-language
+  fragments, one prose sentence, and two VerticaPy `$$$...$$$` interpolation
+  forms), leaving **365 real SQL statements or driver query templates**.
+  Across all four parser error levels, compact and pretty regeneration,
+  dump/load, public scope traversal, and type annotation, **360 passed**. Five
+  statements exposed two independent losslessness bugs. First, the official
+  `vertica-python` named-paramstyle query `SELECT :a, :b` and two independent
+  HyperLogLog workload templates parse `:name` into `exp.Placeholder` but
+  regenerate it as unsupported pyformat text such as `%(a)s`; Q40 owns that
+  driver-placeholder provenance gap. Second, two public `vBuddyLite` data-skew
+  queries parse a compound `ABS(...)` operand but regenerate it as an
+  under-parenthesized `@` expression, changing the AST and which arithmetic is
+  inside the absolute value; Q41 owns that precedence gap. Q42 is the
+  replacement public-corpus recertification gate. Q39 remains `DONE` as
+  historical evidence, but **Milestone 1 is reopened**, P16 is deferred, and
+  Q40 is the lowest-numbered eligible task.
+- Completed **Q40 — Vertica driver-placeholder provenance** on 2026-08-27.
+  Named, positional-format, and prepared-statement placeholders now retain
+  their distinct driver binding styles; Q41 is the lowest-numbered eligible
+  task, Milestone 1 remains reopened, and P16 remains deferred.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -369,7 +392,7 @@ task may be `IN_PROGRESS` across all tables.
 | P14 | DONE   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | DONE   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
 
-### Milestone 1 — analysis parsing surface (reopened by PostgreSQL transpilation regressions)
+### Milestone 1 — analysis parsing surface (reopened by public-corpus regressions)
 
 Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 
@@ -414,11 +437,14 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q37 | DONE   | PostgreSQL scalar-function compatibility       | Q36                | `fix: lower compatible vertica functions to postgres`      |
 | Q38 | DONE   | PostgreSQL partitioned-LIMIT rewrite           | Q37                | `feat: lower partitioned limit to postgres`                |
 | Q39 | DONE   | Milestone 1 PostgreSQL transpilation gate      | Q36–Q38            | `test: recertify postgres transpilation boundaries`        |
+| Q40 | DONE   | Vertica driver-placeholder provenance          | Q39                | `fix: preserve vertica placeholder styles`                 |
+| Q41 | TODO   | ABS expression-precedence losslessness         | Q39                | `fix: preserve abs expression grouping`                    |
+| Q42 | TODO   | Milestone 1 public-corpus recertification gate | Q40–Q41            | `test: recertify public vertica sql corpus`                |
 
 ### Milestone 2 — administration and remaining DDL
 
-Every Milestone 1 task is `DONE`, so Milestone 2 is eligible and P16 is the
-lowest-numbered eligible task.
+Milestone 1 is reopened by Q40–Q42, so Milestone 2 is deferred until every Q
+task is `DONE` again.
 P16–P35 numbering, dependencies, and specifications remain intentionally
 unchanged from the prior plan revision.
 
@@ -4822,10 +4848,246 @@ staged repository-wide pre-commit suite was clean. **Milestone 1 — the
 analysis parsing surface — is recertified.** P16 is now eligible; no Milestone
 2 work began.
 
+### Q40 — Vertica driver-placeholder provenance — `DONE`
+
+**Outcome.** Preserve the three parameter spellings used by public Vertica
+drivers as distinct, executable query-template contracts instead of silently
+rewriting the default named form into an unsupported fourth style.
+
+**Required work.** Re-open the pinned `vertica-python` DB-API paramstyle
+declaration, cursor implementation, and integration tests. Audit SQLGlot
+30.13's tokenizer, placeholder parser, canonical `exp.Placeholder` shapes,
+generator, serialization, and optimizer handling together with the plugin's
+SELECT-tail value validators. Reproduce the public integration case
+`SELECT :a, :b`: it currently parses at every error level, but Vertica
+generation emits `SELECT %(a)s, %(b)s`, and reparsing changes each
+placeholder's child shape. Pin the operational distinction among named
+`:name` placeholders for dictionary-bound simple queries, positional `%s`
+placeholders for sequence-bound simple queries, and anonymous `?`
+placeholders for prepared statements. Preserve each admitted source spelling
+through compact/pretty generation and parse-after-generate; do not use one
+spelling as a lossy canonical form for another.
+
+Exercise named placeholders in projections, predicates, scalar/aggregate
+arguments, `USING PARAMETERS` assignments, nested queries, CTEs, INSERT-SELECT,
+and CTAS, including the two exact public HyperLogLog templates with
+`hllLeadingBits=:precision`, `bitsPerBucket=:bitsperbucket`, `:minrange`, and
+`:maxrange`. Cover repeated names, prefix-colliding names, comments,
+semicolon-delimited scripts, all four parser error levels, dump/load,
+copy/transform parent metadata, public scope traversal, qualification where a
+schema is available, repeated optimization, type annotation, and lineage.
+Retain Q11's rule that named placeholders are not valid ordinary LIMIT/OFFSET
+counts even though they are valid expression leaves elsewhere.
+
+Define a strict source and programmatic-AST boundary for placeholder spellings
+not admitted by the public Vertica driver contract. In particular, audit the
+currently recognized pyformat form `%(name)s`, which the pinned driver neither
+declares nor substitutes, and ensure it cannot be mistaken for a parsed
+`:name` node or emitted from one. Foreign/programmatic placeholder trees must
+either render one of the three admitted Vertica spellings with unambiguous
+provenance or fail atomically; no recognized placeholder may disappear, change
+binding mode, degrade to `Command`, or swallow a following statement. Add a
+focused placeholder module and update the source/coverage/architecture claims
+that describe analysis-query parameters.
+
+**Explicit exclusions.** Executing parameter binding, escaping or adapting
+Python values, network-protocol implementation, SQL-injection guarantees,
+identifier substitution, changing the Q11 LIMIT/OFFSET value grammar,
+PostgreSQL `$1` parameters, Vertica directed-query `:c`/`:v` annotations, and
+unrelated statement families.
+
+**Primary sources.** The pinned `vertica-python` commit
+[`1395e62`](https://github.com/vertica/vertica-python/tree/1395e62dc714538401f5dce00cb2525b25c5495a),
+especially its
+[DB-API paramstyle declaration](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/__init__.py#L65-L72),
+[simple/prepared query protocol contract](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/tests/integration_tests/test_cursor.py#L64-L70),
+[exact parameter integration tests](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/tests/integration_tests/test_cursor.py#L761-L788),
+and
+[client-side substitution implementation](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/vertica/cursor.py#L715-L741);
+the two template examples in the pinned
+[`vertica-hyperloglog` README](https://github.com/criteo/vertica-hyperloglog/blob/dd2d9f52857617cf9c7f89e58762cc08bcfc0504/README.md#L257-L291);
+Q11's completed value contract; and installed SQLGlot 30.13 placeholder
+tokenizer/parser/generator implementations.
+
+**Completion record.** Re-opened the pinned `vertica-python` commit and
+confirmed its DB-API declaration is `paramstyle = 'named'`, its protocol
+contract assigns named `:name` and positional `%s` placeholders to simple
+queries and `?` to prepared statements, its exact integration tests execute
+`SELECT :a, :b` and `SELECT %s, %s`, and its client-side substitution handles
+dictionary names with a word-boundary regex and sequence values with Python's
+`%s` formatting. Re-opened both pinned `vertica-hyperloglog` templates and
+confirmed their named placeholders in `USING PARAMETERS` and range predicates.
+No source contradiction was found. Auditing installed SQLGlot 30.13 showed
+that the canonical AST already retains the needed provenance: colon parsing
+stores a string `Placeholder.this`, percent-format parsing stores explicit
+`this=None`, prepared `?` stores `jdbc=True`, and unsupported pyformat stores
+an `Identifier` child. The loss came solely from the inherited PostgreSQL
+renderer, which emits the string-child shape as `%(name)s`.
+
+Kept canonical `exp.Placeholder` nodes and added a Vertica renderer for exactly
+those three source-backed shapes: `:name`, `%s`, and `?` now regenerate without
+changing binding mode. Added Vertica-owned colon/percent placeholder parsing
+with a dedicated guaranteed-raise boundary. Named markers must be adjacent and
+unquoted, and positional markers must be exact adjacent lowercase `%s`;
+pyformat, alternate percent conversions, whitespace-split markers, and quoted
+names now raise `ParseError` at IMMEDIATE, RAISE, WARN, and IGNORE without
+swallowing a following statement. Strict generation accepts only a canonical
+node with one unambiguous admitted shape. A foreign pyformat tree, ambiguous
+bare `Placeholder()`, malformed name, falsey/unknown field, contradictory
+style, or custom subclass fails atomically rather than producing partial SQL.
+Q11 remains unchanged: named and `%s` placeholders are expression leaves but
+only prepared `?` is an ordinary LIMIT/OFFSET count.
+
+Added `tests/test_placeholders.py` with 111 focused tests covering all three
+styles at every parser and generator level, the exact driver integration
+query, both HyperLogLog templates, projection/predicate/function/aggregate/
+`USING PARAMETERS`/nested/CTE/INSERT-SELECT/CTAS placement, repeated and
+prefix-colliding names, comments and scripts, compact/pretty regeneration,
+dump/load, copy/transform parent metadata, scope traversal, qualification,
+repeated optimization, type annotation, lineage, all-level source negatives,
+strict programmatic mutations, and foreign pyformat rejection. The focused
+query/function/DDL neighborhood passed 1,323 tests. Updated architecture,
+coverage, roadmap, source inventory, changelog, README, and milestone deferral
+claims. The default Python 3.12.6 release gate passed 9,116 tests at 92.22%
+branch coverage with Ruff formatting/lint, strict mypy, and diff checks clean.
+Isolated Python 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
+3.15.0rc1 each passed all 9,116 tests; 3.15 treated deprecation warnings as
+errors. The sdist and wheel built, the exact wheel force-installed with no
+broken requirements in a clean environment, and the installed-wheel
+`:name`/`%s`/`?` smoke returned `Select`. Milestone 1 remains reopened; Q41 is
+next and no Milestone 2 work began.
+
+### Q41 — ABS expression-precedence losslessness — `TODO`
+
+**Outcome.** Keep the complete operand of Vertica `ABS(expression)` inside the
+absolute-value operation when canonical generation uses Vertica's equivalent
+unary `@` operator.
+
+**Required work.** Re-open the current ABS-function and mathematical-operator
+pages and audit SQLGlot's precedence/parenthesization helpers plus the plugin's
+`exp.Abs` generator transform. Reproduce the minimal failure
+`SELECT ABS((x - y) / z * 100)`: the source is an `Abs(Mul(Div(...), 100))`,
+while current generation returns `SELECT @ (x - y) / z * 100`, which reparses
+as `Mul(Div(Abs(...), z), 100)`. Pin both documented source spellings,
+`ABS(expression)` and `@ expression`, and choose a stable Vertica
+canonicalization that preserves the entire typed child without relying on the
+child's incidental source parentheses.
+
+Promote both exact public `vBuddyLite` data-skew queries from line 110 into
+repository-owned regressions. Their nested windows, division/multiplication,
+`TO_CHAR`, hints, derived tables, joins, GROUP BY, ORDER BY, and LIMIT context
+must round-trip with the `ABS` owner unchanged. Add a precedence matrix for
+literal/column, unary sign, cast, parenthesized, additive, multiplicative,
+integer-division/modulo, power, CASE, and function-call children, plus nested
+ABS and the documented prefix-operator form. Cover comments at function and
+operator boundaries, compact/pretty output, all four parser levels, dump/load,
+copy/transform parents, public scope traversal, qualification, repeated
+optimization, type annotation, lineage, and strict generation of direct and
+nested programmatic `exp.Abs` trees. Assert semantic AST equality, not merely
+that the generated SQL reparses.
+
+Audit adjacent Vertica prefix transforms only far enough to prove this is an
+ABS-specific repair and that the fix does not change the already-stable
+SQRT/CBRT function forms or factorial/sign behavior. Preserve foreign-dialect
+generation contracts and reject malformed programmatic ABS nodes atomically;
+do not introduce redundant-parenthesis churn that changes again on a second
+generation pass. Update source/coverage/architecture claims for ABS and the
+`@` mathematical operator.
+
+**Explicit exclusions.** Numeric result comparison against a live server,
+general algebraic simplification, unrelated scalar-function modeling,
+placeholder work owned by Q40, optimizer rewrites outside preservation of the
+ABS node, and new mathematical operators.
+
+**Primary sources.** Vertica 26.2
+[ABS](https://docs.vertica.com/26.2.x/en/sql-reference/functions/mathematical-functions/abs/)
+and
+[mathematical operators](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/operators/mathematical-operators/);
+the two source queries on line 110 of the pinned
+[`vBuddyLite`](https://github.com/twc-openstack/puppet-vertica/blob/d0962b9f65efbb684be8fc44b2a052e756c94654/files/vBuddyLite#L110)
+workload; and installed SQLGlot 30.13 expression precedence and generator
+implementations, including the plugin's current `exp.Abs` transform.
+
+### Q42 — Milestone 1 public-corpus recertification gate — `TODO`
+
+**Outcome.** Re-certify Milestone 1 only after every genuine statement and
+query template admitted by the public-ecosystem audit passes a deterministic,
+repository-owned analysis and losslessness gate.
+
+**Required work.** Introduce no production change. Re-read Q40 and Q41's
+completion records and re-open all of their primary sources. Convert the
+2026-08-27 audit into an attributed, repository-owned fixture and manifest;
+tests must never clone repositories, access the network, or depend on ignored
+`.agent-cache` content. Preserve source repository, pinned commit or 26.2 page,
+path/line, and any minimal deterministic adaptation for each entry. The audit
+currently contains 370 de-duplicated Q-scope candidates: retain the five
+source-context exclusions with explicit reasons (two incomplete Python/dbt
+fragments, one prose string beginning with `select`, and two VerticaPy
+`$$$...$$$` client-interpolation forms), and admit the remaining 365 SQL
+statements or driver templates as executable parser fixtures.
+
+The manifest must cover all nine official VMart query scripts and the pinned
+public `dbt-vertica`, `VerticaPy`, `vertica-python`, `ODBC-Loader`, `dblink`,
+`vertica-sql-go`, `vertica.dplyr`, `vertica-hyperloglog`, and
+`puppet-vertica`/`vBuddyLite` sources. Prove the snapshot matches a fresh local
+extraction from those exact source revisions, but keep that provenance check
+outside ordinary offline tests. Document extraction and de-duplication rules
+so incomplete host strings, templating metasyntax, expected query output, vsql
+prompts/backslash commands, and prose cannot masquerade as dialect failures.
+
+At default settings and each of IMMEDIATE, RAISE, WARN, and IGNORE, require
+every admitted Q-scope case to parse without `Command` fallback or raw Python
+exception and to produce the same AST at every level. Exercise compact and
+pretty script-level parse-after-generate (including trailing comment-only
+segments), dump/load, copy/transform parent metadata, public scope traversal,
+and type annotation for the complete corpus. Add bounded qualification,
+repeated optimization, and lineage matrices for cases with sufficient schema
+information. Pin the five formerly failing queries as named regressions: the
+official `SELECT :a, :b`, both HyperLogLog named-parameter templates, and both
+compound-ABS `vBuddyLite` queries. Retain representative AST-shape assertions
+for VMart tuples/correlated subqueries/joins, dbt models, VerticaPy analytic and
+machine-learning SQL, driver statements, dblink UDTFs, dplyr nested derived
+tables, temporary lifecycle statements, hints, CTEs, and set operations.
+
+Run focused Q40/Q41/public-corpus tests, all existing query/workload/hint/
+function neighbors, the default coverage gate, all seven isolated CPython
+3.9–3.15 runtimes (3.15 with deprecations as errors), Ruff, formatting, strict
+mypy, diff checks, sdist/wheel build, clean-wheel force-install, `pip check`,
+and an installed-wheel smoke containing both fixed shapes and a composed
+public workload. Stage every task file before the single repository-wide hook
+run and record exact counts and versions. If every check passes, mark Q42
+`DONE`, update Current state/dashboard/coverage/roadmap/changelog/README
+claims, and expressly recertify Milestone 1 so P16 becomes eligible. If any
+other independent product gap appears, make no production fix in this gate;
+schedule the smallest bounded Q task, renumber this gate, and keep Milestone 2
+deferred.
+
+**Explicit exclusions.** Live Vertica result or query-plan claims without a
+configured server, mutable-branch network tests, runtime dependency on public
+repositories, treating host-language fragments as SQL, broad statement
+families outside Milestone 1, production fixes, dependency changes, Milestone
+2 work, release, push, and remote mutation.
+
+**Primary sources.** The Vertica 26.2
+[VMart sample scripts](https://docs.vertica.com/26.2.x/en/getting-started/appendix/sample-scripts/)
+and pinned source revisions
+[`dbt-vertica@0fdd229`](https://github.com/vertica/dbt-vertica/tree/0fdd229ee901eea542d3b9fd0a7ddeeac3b33093),
+[`VerticaPy@6b3d335`](https://github.com/vertica/VerticaPy/tree/6b3d33537a4267a679059151b6a93aae9b284f74),
+[`vertica-python@1395e62`](https://github.com/vertica/vertica-python/tree/1395e62dc714538401f5dce00cb2525b25c5495a),
+[`ODBC-Loader@846baa3`](https://github.com/vertica/ODBC-Loader/tree/846baa37b1b8651f151ae988c12a82f2deee0673),
+[`dblink@d9df821`](https://github.com/vertica/dblink/tree/d9df82155590f94033f747bb28dc1f4e9c151bdc),
+[`vertica-sql-go@8d0b7b1`](https://github.com/vertica/vertica-sql-go/tree/8d0b7b159d40fbffafcdfa9fae4e46d0866a1c86),
+[`vertica.dplyr@ebac291`](https://github.com/vertica/vertica.dplyr/tree/ebac291d100bd354d3e0f29c8e2a843bb0f85f60),
+[`vertica-hyperloglog@dd2d9f5`](https://github.com/criteo/vertica-hyperloglog/tree/dd2d9f52857617cf9c7f89e58762cc08bcfc0504),
+and
+[`puppet-vertica@d0962b9`](https://github.com/twc-openstack/puppet-vertica/tree/d0962b9f65efbb684be8fc44b2a052e756c94654),
+plus Q40–Q41's completion records and installed SQLGlot 30.13 parser,
+generator, serializer, scope, optimizer, type, and lineage implementations.
+
 ## Detailed tasks — Milestone 2: administration and remaining DDL
 
-Every Q task is `DONE`, so P16 is eligible. The detailed P16–P35
-specifications — outcome, required work,
+Milestone 1 is reopened by Q40–Q42, so P16 remains deferred. The detailed
+P16–P35 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
 not part of the mandatory read until a P task is selected. When a P task is

@@ -256,6 +256,27 @@ OFFSET. Both relative LIMIT/OFFSET source orders are therefore accepted and
 canonicalized to stable `LIMIT ... OFFSET ...`; ORDER must precede either and
 FOR UPDATE must follow both.
 
+Public Vertica driver placeholders also remain canonical, but their binding
+style is source provenance rather than interchangeable formatting. A named
+`:name` placeholder stores a string `Placeholder.this`, positional `%s`
+stores an explicit `this=None`, and a prepared-statement `?` stores
+`jdbc=True`. Vertica generation renders those three exact shapes back to their
+original binding modes. This deliberately overrides the inherited PostgreSQL
+renderer, which would turn the named shape into pyformat `%(name)s`; the pinned
+`vertica-python` client declares named paramstyle and substitutes `:name`,
+supports `%s` for sequence-bound simple queries, and uses `?` only for
+server-prepared statements, while it does not substitute pyformat. The parser
+therefore accepts only adjacent, unquoted `:name`, exact lowercase `%s`, and
+`?`; pyformat, alternate percent conversions, whitespace-split markers, and
+quoted named markers fail through a placeholder-specific guaranteed-raise
+boundary at every error level. Strict generation validates the exact canonical
+field shapes before returning SQL, so a foreign pyformat tree, ambiguous bare
+`Placeholder()`, falsey extra, malformed name, or contradictory style fails
+atomically instead of changing binding mode or disappearing. Named and `%s`
+placeholders remain ordinary expression leaves, including inside `USING
+PARAMETERS`, but Q11's row-tail contract continues to admit only `?` for
+ordinary LIMIT/OFFSET counts.
+
 Q23 closes the lock-target analysis boundary found by the 2026-08-22
 recertification workload. SQLGlot scope collection walks every canonical
 `exp.Table` in a query tree, including a table stored under `exp.Lock`, and

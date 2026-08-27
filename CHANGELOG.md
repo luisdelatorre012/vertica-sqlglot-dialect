@@ -4,6 +4,12 @@
 
 This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
 
+- Preserved the public Vertica driver placeholder modes losslessly: named
+  `:name`, positional `%s`, and prepared-statement `?` templates now retain
+  distinct canonical provenance and regenerate with the same binding style.
+  Pyformat and malformed or ambiguous AST shapes fail atomically instead of
+  being accepted or emitted as a different mode.
+
 - Fixed Vertica-to-PostgreSQL `LISTAGG` transpilation by lowering its canonical
   aggregate to `STRING_AGG`, including `separator` and WITHIN GROUP ordering.
   Vertica-only overflow controls now produce ordinary unsupported warnings

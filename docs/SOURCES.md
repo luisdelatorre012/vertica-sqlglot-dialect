@@ -278,6 +278,14 @@ called out in code review.
 - [Configuring Ident authentication](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/ident-authentication/configuring-ident-authentication-db-users/)
 - [Kerberos authentication](https://docs.vertica.com/26.2.x/en/security-and-authentication/client-authentication/kerberos-authentication/)
 
+## Public driver query templates
+
+- [`vertica-python` DB-API paramstyle declaration at `1395e62`](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/__init__.py#L65-L72)
+- [`vertica-python` simple/prepared query protocol tests at `1395e62`](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/tests/integration_tests/test_cursor.py#L64-L70)
+- [`vertica-python` parameter integration tests at `1395e62`](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/tests/integration_tests/test_cursor.py#L761-L788)
+- [`vertica-python` client-side substitution at `1395e62`](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/vertica/cursor.py#L715-L741)
+- [`vertica-hyperloglog` named-parameter templates at `dd2d9f5`](https://github.com/criteo/vertica-hyperloglog/blob/dd2d9f52857617cf9c7f89e58762cc08bcfc0504/README.md#L257-L291)
+
 The source list is reviewed when the target server version changes. A version
 bump is not a documentation-only change: affected fixtures and generated SQL
 must be revalidated.
