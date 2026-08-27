@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.4 — 2026-08-27
+## 0.2.5 — 2026-08-27
 
 This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
 
