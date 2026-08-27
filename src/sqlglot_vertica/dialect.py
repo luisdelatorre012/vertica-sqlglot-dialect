@@ -12,6 +12,7 @@ from sqlglot.tokenizer_core import TokenizerCore
 
 from sqlglot_vertica import expressions as vexp
 from sqlglot_vertica.foreign_properties import patch_foreign_properties_location
+from sqlglot_vertica.foreign_transforms import patch_postgres_transforms
 from sqlglot_vertica.generator import VerticaGenerator
 from sqlglot_vertica.parser import VerticaParser
 from sqlglot_vertica.tokens import (
@@ -23,6 +24,11 @@ from sqlglot_vertica.tokens import (
 # Foreign dialects must fail atomically on an embedded Vertica-only table
 # property instead of raising a raw KeyError; see foreign_properties.py.
 patch_foreign_properties_location()
+
+# LISTAGG's canonical GroupConcat child can be lowered safely to PostgreSQL's
+# STRING_AGG, and ordinary GROUP BY can shed its source-order wrapper. Vertica-only
+# overflow controls and multilevel grouping remain explicit unsupported boundaries.
+patch_postgres_transforms()
 
 
 def _annotate_set_literal(annotator: t.Any, expression: vexp.SetLiteral) -> None:

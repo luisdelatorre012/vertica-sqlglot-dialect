@@ -34,6 +34,25 @@ def test_entry_point_discovery_in_fresh_interpreter() -> None:
     )
 
 
+def test_postgres_interop_registration_after_generator_cache() -> None:
+    """Loading Vertica invalidates a PostgreSQL dispatch table built first."""
+
+    code = (
+        "from sqlglot import parse_one; "
+        "assert parse_one('SELECT 1', read='postgres').sql(dialect='postgres') == 'SELECT 1'; "
+        "query = \"SELECT LISTAGG(a USING PARAMETERS separator=' | ') FROM t GROUP BY b\"; "
+        "expression = parse_one(query, read='vertica'); "
+        "assert expression.sql(dialect='postgres') == "
+        "\"SELECT STRING_AGG(a, ' | ') FROM t GROUP BY b\""
+    )
+    subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_direct_dialect_class() -> None:
     expression = parse_one("SELECT 1", read=Vertica)
     assert expression.sql(dialect=Vertica) == "SELECT 1"

@@ -39,7 +39,6 @@ def test_every_custom_expression_fails_explicitly_in_postgres(
         "SELECT SET[1, 2]",
         "SELECT GETDATE()",
         "SELECT GETUTCDATE()",
-        "SELECT LISTAGG(city USING PARAMETERS separator=',') FROM places",
     ],
 )
 def test_vertica_only_values_do_not_emit_invented_postgres_functions(sql: str) -> None:

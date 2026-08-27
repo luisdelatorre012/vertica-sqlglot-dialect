@@ -279,6 +279,15 @@ def test_foreign_parsed_ordinary_group_can_generate_vertica() -> None:
     assert expression.sql(dialect="vertica") == "SELECT a, SUM(v) FROM t GROUP BY a"
 
 
+def test_vertica_parsed_ordinary_group_can_generate_postgres() -> None:
+    expression = parse_one("SELECT a, SUM(v) FROM t GROUP BY a", read="vertica")
+    assert isinstance(expression.args["group"], vexp.VerticaGroup)
+    assert (
+        expression.sql(dialect="postgres", unsupported_level=ErrorLevel.RAISE)
+        == "SELECT a, SUM(v) FROM t GROUP BY a"
+    )
+
+
 @pytest.mark.parametrize("dialect", FOREIGN_DIALECTS)
 @pytest.mark.parametrize("unsupported_level", ALL_UNSUPPORTED_LEVELS)
 @pytest.mark.parametrize("nested", [False, True])

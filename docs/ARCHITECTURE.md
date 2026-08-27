@@ -21,8 +21,13 @@ That rule has one safety exception: a canonical subclass is not used when its
 generic generator fallback would invent valid-looking but nonexistent SQL.
 `SetLiteral` and the statement-timestamp nodes therefore use plain custom
 expressions. `ListAgg` wraps a canonical `exp.GroupConcat` child, preserving
-aggregate discovery and column traversal without allowing a foreign generator
-to emit a fictitious `LIST_AGG` call.
+aggregate discovery and column traversal without allowing an unregistered
+foreign generator to emit a fictitious `LIST_AGG` call. PostgreSQL is an
+explicit exception: the plugin registers a lowering from the compatible subset
+to `STRING_AGG`, including delimiter and WITHIN GROUP ordering. Vertica's
+`max_length` and `on_overflow` controls have no PostgreSQL equivalent, so the
+generator reports them through SQLGlot's unsupported-feature policy while its
+default warning mode still returns the usable `STRING_AGG` translation.
 
 That exception is not limited to what a foreign dialect's ordinary per-node
 renderer would produce. Some dialect generators structurally rewrite a
@@ -142,8 +147,10 @@ an optional typed `algorithm` child for the documented
 `/*+GBYTYPE(HASH|PIPE)*/` clause hint. Canonical `exp.Group` trees remain
 accepted for ordinary-only foreign/programmatic interoperability, but their
 bucket, `all`, and `totals` fields are rejected rather than rendered in a
-potentially reordered or foreign form. The custom root fails atomically in
-foreign dialects, directly or nested in a SELECT.
+potentially reordered or foreign form. PostgreSQL explicitly lowers a
+`VerticaGroup` containing only ordinary expressions back to canonical
+`exp.Group`; the ordered multilevel constructs and `GBYTYPE` hint still fail
+atomically in foreign dialects, directly or nested in a SELECT.
 
 Set operations stay fully canonical because SQLGlot's `Union`, `Intersect`,
 and `Except` nodes preserve Vertica's operator and duplicate semantics without

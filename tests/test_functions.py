@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
-from sqlglot import exp, parse_one
-from sqlglot.errors import ParseError
+from sqlglot import ErrorLevel, exp, parse_one, transpile
+from sqlglot.errors import ParseError, UnsupportedError
 
 from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_roundtrip
@@ -78,6 +80,45 @@ def test_listagg_within_group_and_parameters() -> None:
         "SELECT LISTAGG(name, ',') WITHIN GROUP (ORDER BY ordinal) FROM names",
     )
     assert isinstance(legacy.find(vexp.ListAgg), vexp.ListAgg)
+
+
+def test_listagg_transpiles_to_postgres_string_agg() -> None:
+    expression = parse_one(
+        "SELECT LISTAGG(name USING PARAMETERS separator=' | ') "
+        "WITHIN GROUP (ORDER BY ordinal DESC) FROM names",
+        read="vertica",
+    )
+
+    generated = expression.sql(dialect="postgres", unsupported_level=ErrorLevel.RAISE)
+    assert generated == "SELECT STRING_AGG(name, ' | ' ORDER BY ordinal DESC) FROM names"
+    assert parse_one(generated, read="postgres").find(exp.GroupConcat)
+
+
+def test_listagg_overflow_parameters_warn_but_do_not_abort_postgres_transpile(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sql = (
+        "WITH x AS (SELECT a.i, LISTAGG(a.l USING PARAMETERS separator=' ', "
+        "max_length=2000, on_overflow='TRUNCATE') AS t "
+        "FROM s.a AS a GROUP BY a.i) SELECT x.i, x.t FROM x"
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="sqlglot"):
+        generated = transpile(sql, read="vertica", write="postgres")[0]
+
+    assert generated == (
+        "WITH x AS (SELECT a.i, STRING_AGG(a.l, ' ') AS t "
+        "FROM s.a AS a GROUP BY a.i) SELECT x.i, x.t FROM x"
+    )
+    assert "max_length, on_overflow" in caplog.text
+    assert parse_one(generated, read="postgres").find(exp.GroupConcat)
+
+    with pytest.raises(UnsupportedError, match="max_length, on_overflow"):
+        parse_one(sql, read="vertica").sql(
+            dialect="postgres",
+            unsupported_level=ErrorLevel.RAISE,
+        )
 
 
 @pytest.mark.parametrize(

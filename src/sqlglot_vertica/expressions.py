@@ -80,8 +80,10 @@ class ListAgg(exp.Expression):
     """Vertica ``LISTAGG`` around a canonical aggregate child.
 
     ``this`` is an :class:`sqlglot.exp.GroupConcat`, which keeps aggregate
-    discovery and operand traversal canonical while ensuring unsupported
+    discovery and operand traversal canonical while ensuring unregistered
     foreign generators fail instead of emitting a fictitious ``LIST_AGG``.
+    PostgreSQL has an explicit lowering for the compatible ``STRING_AGG``
+    subset; Vertica-only overflow parameters are reported as unsupported.
     """
 
     arg_types: t.ClassVar = {
