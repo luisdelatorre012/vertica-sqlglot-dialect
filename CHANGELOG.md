@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 — 2026-08-27
+
+This release recertifies the analysis parsing surface after correcting
+optimizer-generated non-recursive WITH interoperability.
 
 - Recertified Milestone 1 after the complete reported optimizer-CTE regression,
   a smaller helper-CTE control, composed ordinary/subordinate/hinted/recursive
