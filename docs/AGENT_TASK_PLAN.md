@@ -186,6 +186,21 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   2026-08-25. The composed ordering workload and complete release gate passed
   without another product gap. **Milestone 1 is recertified**, every Q task is
   `DONE`, and P16 is now the lowest-numbered eligible task.
+- On 2026-08-27 a user report reproduced a false Vertica generator warning
+  after optimizing an otherwise valid UNION query with a correlated `NOT
+  EXISTS`. SQLGlot 30.13's subquery-elimination pass introduces an ordinary
+  helper CTE as canonical `exp.With(recursive=False)`, but
+  `VerticaGenerator._validate_with` accepts only `None` or `True`. Default
+  generation therefore logs `Vertica WITH RECURSIVE must be either present or
+  absent` before emitting valid non-recursive WITH SQL, while strict generation
+  raises `UnsupportedError`. Vertica's 26.2 formal grammar makes `RECURSIVE`
+  optional, and SQLGlot's own `With.recursive` contract treats false as the
+  keyword's absence. Q34 owns the bounded optimizer/generator interoperability
+  correction and Q35 is the replacement recertification gate. Q33 remains
+  `DONE` as historical evidence, but **Milestone 1 is reopened**, P16 is
+  deferred. Completed **Q34 — optimizer-generated non-recursive WITH
+  conformance**; Q35 is the lowest-numbered remaining task and alone owns
+  recertification.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -307,7 +322,7 @@ task may be `IN_PROGRESS` across all tables.
 | P14 | DONE   | Access-policy lifecycle                       | P13                 | `feat: model access policy lifecycle`                   |
 | P15 | DONE   | Ordinary constraint conformance               | P12                 | `feat: enforce Vertica constraint grammar`              |
 
-### Milestone 1 — analysis parsing surface (reopened by NULL-ordering regression)
+### Milestone 1 — analysis parsing surface (reopened by optimizer-generated WITH regression)
 
 Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 
@@ -346,12 +361,14 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q31 | DONE   | Milestone 1 optimizer-hint final recertification gate | Q30       | `test: finally recertify milestone one hint boundaries`  |
 | Q32 | DONE   | Explicit NULL-ordering conformance             | Q31                | `fix: support explicit null ordering`                     |
 | Q33 | DONE   | Milestone 1 NULL-ordering recertification gate | Q32                | `test: recertify milestone one null ordering`             |
+| Q34 | DONE   | Optimizer-generated non-recursive WITH conformance | Q33             | `fix: accept optimizer generated nonrecursive ctes`       |
+| Q35 | TODO   | Milestone 1 optimizer-CTE recertification gate | Q34                | `test: recertify milestone one optimizer ctes`            |
 
-### Milestone 2 — administration and remaining DDL (eligible)
+### Milestone 2 — administration and remaining DDL (deferred)
 
-Every Q task is `DONE`, so Milestone 2 is eligible. P16 is the lowest-numbered
-eligible task. P16–P35 numbering, dependencies, and specifications are
-intentionally unchanged from the prior plan revision.
+Q34–Q35 are not `DONE`, so Milestone 2 is deferred. P16–P35 numbering,
+dependencies, and specifications are intentionally unchanged from the prior
+plan revision.
 
 | ID  | Status | Task                                          | Required dependency | Commit title                                            |
 | --- | ------ | --------------------------------------------- | ------------------- | ------------------------------------------------------- |
@@ -4047,15 +4064,195 @@ the installed-wheel ordinary `NULLS LAST` smoke returned `Select`. The staged
 repository-wide pre-commit suite was clean. **Milestone 1 — the analysis
 parsing surface — is recertified.** P16 is eligible; no Milestone 2 work began.
 
-## Detailed tasks — Milestone 2: administration and remaining DDL (eligible)
+### Q34 — optimizer-generated non-recursive WITH conformance — `DONE`
 
-Every Q task is `DONE`, so P16 is now the next eligible task. The detailed
+**Outcome.** Treat SQLGlot's canonical optimizer-generated
+`exp.With(recursive=False)` as an ordinary non-recursive Vertica WITH clause,
+without logging a false unsupported warning or raising in strict generation,
+while retaining strict rejection of genuinely malformed recursive state.
+
+**Required work.** Re-open the 26.2 WITH and recursion pages and inspect the
+installed SQLGlot 30.13 `exp.With` contract, base `Generator.with_sql`, default
+optimizer rule order, and `optimizer.eliminate_subqueries` before editing. Pin
+the internal distinction explicitly: parser-produced ordinary WITH can omit
+the `recursive` arg (`None`), parser-produced `WITH RECURSIVE` uses `True`, and
+SQLGlot's supported optimizer pipeline can deliberately construct an ordinary
+WITH with `recursive=False`. Both `None` and `False` mean that the keyword is
+absent and must generate the same non-recursive Vertica syntax; `True` means
+the keyword is present. The Vertica validator must accept those exact semantic
+states without relying on Python equality that also admits integers, and must
+continue to reject strings, numbers, containers, unknown fields, SEARCH/CYCLE,
+invalid placement, malformed CTE lists, aliases, bodies, and modifiers through
+the existing strict generation contract.
+
+Copy the complete 2026-08-27 user-reported SQL into a repository-owned
+regression fixture or focused test; the test must not depend on
+`C:\Users\luisd\Downloads\bad_example.sql`. Its final correlated `NOT EXISTS`
+must exercise the stock `optimize(parse_one(...), dialect="vertica")` path,
+not a hand-built substitute. Assert that the source parses as a `Union` with
+no WITH, optimization introduces a root-owned helper `With` whose
+`recursive` arg is exactly `False`, and Vertica generation emits an ordinary
+`WITH` without `RECURSIVE`. At the default warning level, capture logs/stderr
+and prove that `Vertica WITH RECURSIVE must be either present or absent` and
+every other unsupported diagnostic are absent. At strict `RAISE` and every
+other supported generator error level, generation must succeed and the
+generated SQL must parse again as the expected query/CTE tree.
+
+Add smaller controls that isolate the optimizer rule responsible for the
+helper CTE and cover direct plus query-nested `With(recursive=False)` trees,
+plain and materialization-hinted WITH owners, `None`/`False` output parity,
+and an unchanged positive `WITH RECURSIVE` round trip. Replace the existing
+`tests/test_cte.py` assertion that classifies `recursive=False` itself as a
+malformed programmatic tree with an exact invalid-state matrix and positive
+optimizer interoperability coverage. Preserve compact/pretty regeneration,
+`dump()`/load, copy/transform parent metadata, scope traversal,
+qualification, repeated optimization, and lineage for the optimized helper
+CTE. Confirm valid parser-produced and optimizer-produced canonical WITH trees
+remain portable according to their existing foreign-dialect behavior; do not
+introduce a custom node or a Vertica-only lowering for this Boolean-state
+mismatch.
+
+Update the WITH/CTE and optimizer-analysis contracts in `ARCHITECTURE.md` and
+`docs/COVERAGE.md`, record the regression and correction in `docs/ROADMAP.md`
+and `CHANGELOG.md`, and add the exact source pages to `docs/SOURCES.md` only if
+they are not already present. Run the focused CTE, set-operation, workload,
+formal-negative, and AST-safety neighborhood, then the complete common release
+gate. On success, mark Q34 `DONE`, update Current state/dashboard with exact
+test and runtime evidence, and leave Milestone 1 reopened for Q35; do not start
+the recertification task.
+
+**Explicit exclusions.** No change to SQLGlot's optimizer rules, subquery-
+elimination algorithm, canonical `exp.With` class, dependency version, or
+global unsupported-warning policy; no new WITH/recursion syntax; no relaxation
+of CTE body, placement, materialization-hint, SEARCH/CYCLE, or strict unknown-
+field validation; no live-server query-result equivalence or optimizer-plan
+testing; no Milestone 2 work; and no release, push, or remote mutation.
+
+**Primary sources.** [WITH clause](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/),
+[WITH clause recursion](https://docs.vertica.com/26.2.x/en/sql-reference/statements/select/with-clause/with-clause-recursion/),
+and the installed SQLGlot 30.13 `sqlglot.expressions.query.With`,
+`sqlglot.generator.Generator.with_sql`, optimizer rule list, and
+`sqlglot.optimizer.eliminate_subqueries` implementations.
+
+**Implementation pointers (non-normative, verified 2026-08-27).** The reported
+source parses as a canonical `Union` with no `With`. Stock `optimize(...,
+dialect="vertica")` rewrites its correlated `NOT EXISTS` into a LEFT anti-join,
+then `eliminate_subqueries` lifts the derived relation into helper CTE `_u_0`.
+That optimizer initializes `recursive: bool | None = False` and constructs
+`exp.With(expressions=new_ctes, recursive=recursive)`. Canonical `With` defines
+`arg_types = {"expressions": True, "recursive": False, "search": False}` and
+its `recursive` property is `bool(self.args.get("recursive"))`; the base
+generator likewise emits `RECURSIVE` only for a truthy state. The false
+diagnostic comes solely from `VerticaGenerator._validate_with`, whose current
+`if recursive not in {None, True}` guard rejects `False` even though subsequent
+rendering correctly omits the keyword. Default generation logs the warning and
+returns valid SQL; `unsupported_level=RAISE` raises `UnsupportedError`. The
+existing malformed-AST matrix in `tests/test_cte.py` deliberately includes
+`recursive=False` and must be corrected rather than bypassed.
+
+**Completion record.** Re-opened the exact 26.2 WITH and WITH-recursion pages
+and found no material source contradiction: the formal WITH production makes
+`RECURSIVE` optional, and the recursion page defines the keyword's presence as
+the recursive form. Audited installed SQLGlot 30.13's canonical `With`
+`arg_types` and Boolean `recursive` property, base `Generator.with_sql`, the
+default optimizer rule order, and `eliminate_subqueries`. The reported root
+cause was exactly the planned Boolean-state mismatch: `eliminate_subqueries`
+initializes `recursive=False` and attaches that canonical With when it lifts a
+derived relation, while the Vertica validator admitted only `None` and `True`.
+
+Changed only `_validate_with` so `None` and exact Boolean `False` both mean an
+ordinary clause without the keyword, while exact Boolean `True` emits
+`RECURSIVE`. The identity/type check deliberately rejects `0`, `1`, strings,
+and containers even though Python set membership would equate the integers
+with Booleans. No optimizer rule, canonical node, parser grammar, placement,
+body, alias, materialization, SEARCH/CYCLE, unknown-field, or foreign-dialect
+contract changed.
+
+Copied the complete 2026-08-27 reported UNION/correlated-`NOT EXISTS` SQL into
+`tests/test_cte.py`. Stock `optimize(..., dialect="vertica")` introduces the
+root helper CTE `_u_0` with `recursive is False`; default generation emits no
+warning, every generator error level succeeds without `WITH RECURSIVE`, and
+the output reparses as the expected Union/With/CTE tree. The regression also
+pins compact/pretty output, dump/load, copy/transform parents, scope traversal,
+qualification, repeated optimization, type annotation, and lineage. Smaller
+controls isolate `eliminate_subqueries`, prove `None`/`False` output parity,
+cover subordinate and materialization-hinted false-state trees, retain the
+positive recursive form, reject exact invalid-state matrices, and confirm
+ordinary canonical None/False trees remain portable to PostgreSQL, DuckDB,
+MySQL, and SQLite.
+
+The focused `test_cte.py` module passed 184 tests; the required CTE,
+set-operation, workload, formal-negative, and AST-safety neighborhood passed
+716 tests. The final default Python 3.12.6 release gate passed 8,648 tests at
+92.25% branch coverage with Ruff formatting/lint, strict mypy, and diff checks
+clean. Isolated Python 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1 each passed all 8,648 tests; 3.15 treated deprecation warnings as
+errors. The sdist and wheel built, the exact wheel force-installed with no
+broken requirements in a clean environment, and the installed-wheel
+correlated-`NOT EXISTS` UNION smoke returned `Union`. Milestone 1 remains
+reopened; Q35 alone owns recertification and no Milestone 2 work began.
+
+### Q35 — Milestone 1 optimizer-CTE recertification gate — `TODO`
+
+**Outcome.** Re-certify the analysis parsing surface only after Q34 proves
+that parser- and optimizer-produced WITH trees share one warning-free, strict,
+analyzer-stable Vertica generation contract.
+
+**Required work.** Introduce no production grammar or generator change.
+Re-read Q14, Q25, Q33, and Q34's completion records, re-open Q34's primary
+sources, and re-audit every Milestone 1 workload path that can introduce,
+preserve, rebuild, or render a WITH node. Extend the realistic workload gate
+with the complete user-reported UNION/correlated-`NOT EXISTS` query and at
+least one smaller optimizer-created helper-CTE control. Exercise source parse,
+stock optimization, compact and pretty Vertica generation, generate/reparse,
+repeated optimization, `dump()`/load, copy/transform parents, type annotation,
+public scope traversal, qualification, and lineage. Capture diagnostics and
+assert that valid `recursive=None`, `False`, and `True` trees produce no
+unsupported warning at default settings and no exception at strict generation;
+also retain exact fail-closed tests for non-Boolean recursive state and every
+Q14 WITH/CTE structural boundary.
+
+Compose the optimizer-created CTE with ordinary and recursive CTE controls,
+the clause-level materialization hint, set-operation roots, a nested CTE,
+comments, explicit NULL ordering, and the temporary-table analysis lifecycle
+where those combinations are already supported. Add a negative multi-statement
+sentinel proving an invalid programmatic/source WITH boundary cannot swallow a
+following statement, but do not invent source syntax for the internal
+`recursive=False` state. Re-audit the WITH/CTE, set-operation, optimizer,
+workload, and milestone claims in `docs/COVERAGE.md`, `docs/ROADMAP.md`,
+`ARCHITECTURE.md`, `CHANGELOG.md`, README/installation-facing text, and this
+plan.
+
+Run the complete focused CTE/query/workload neighborhood, default suite with
+coverage, all seven isolated CPython 3.9–3.15 runtimes (3.15 with deprecations
+as errors), Ruff, formatting, strict mypy, diff checks, sdist/wheel build,
+clean-wheel installation, `pip check`, an installed-wheel correlated
+`NOT EXISTS` UNION smoke returning `Union`, and the staged repository-wide
+hooks. Record exact counts, runtime versions, build, smoke, and warning-capture
+evidence. If every check passes, mark Q35 `DONE`, update the dashboard and
+Current state, and expressly recertify Milestone 1 so P16 becomes eligible
+again. If any independent product gap appears, make no production fix in this
+gate, schedule the smallest bounded follow-on Q task, keep certification
+withdrawn, and leave Milestone 2 deferred.
+
+**Explicit exclusions.** Production changes, new WITH or optimizer grammar,
+upstream SQLGlot changes, dependency changes, server result/plan verification,
+assertion weakening, Milestone 2 implementation, release, push, and remote
+mutation.
+
+**Primary sources.** Q14, Q25, Q33, and Q34's sources and completion records;
+the 26.2 WITH and recursion pages; and installed SQLGlot 30.13's canonical
+WITH, optimizer, scope, qualification, lineage, and generator implementations.
+
+## Detailed tasks — Milestone 2: administration and remaining DDL (deferred)
+
+Q34–Q35 are not `DONE`, so no Milestone 2 task is eligible. The detailed
 P16–P35 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are
-not part of the mandatory read while Milestone 1 is active. When a P task is
-selected, read its full specification there before implementing and append
-its completion record there; status transitions stay in this file's
-dashboard. Specifications, dependencies, and numbering are intentionally
+not part of the mandatory read while Milestone 1 is active. After every Q task
+is `DONE`, when a P task is selected, read its full specification there before
+implementing and append its completion record there; status transitions stay
+in this file's dashboard. Specifications, dependencies, and numbering are intentionally
 unchanged from the prior plan revision; completion records and coverage
 notes reference these IDs.

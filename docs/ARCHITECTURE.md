@@ -384,6 +384,17 @@ rendering. A CTE list arriving before the historical prefix (`WITH cte AS
 (...) AT EPOCH ...`) still fails, while the documented `AT epoch WITH ...
 SELECT` order remains analyzer-safe through Q13's query subclasses.
 
+The recursive state has three valid internal representations. Parser-produced
+ordinary WITH omits the field (`None`), parser-produced `WITH RECURSIVE` stores
+`True`, and SQLGlot 30.13's supported `eliminate_subqueries` optimizer can
+rebuild an ordinary clause as `exp.With(recursive=False)` when it introduces a
+helper CTE. Both `None` and exact Boolean `False` mean that the keyword is
+absent; exact Boolean `True` means it is present. Vertica generation accepts
+those states and rejects integers, strings, containers, and other values even
+when Python equality would make an integer resemble a Boolean. This preserves
+the canonical SQLGlot node and optimizer rule order while keeping every other
+WITH/CTE structural boundary above strict.
+
 The same distinction applies to external loading. Executable `COPY` remains an
 `exp.Copy` subclass, while the reusable body inside `CREATE EXTERNAL TABLE` is
 an `ExternalCopyDefinition`: a targetless node that shares structured source,
@@ -787,7 +798,9 @@ existing typed contract.
 SQLGlot 30.13.x invariant:
 
 - `eliminate_subqueries` can reconstruct the surrounding `exp.With`, but it
-  retains the existing CTE query subtree and therefore the marker;
+  retains the existing CTE query subtree and therefore the marker; a rebuilt
+  ordinary wrapper can carry exact Boolean `recursive=False`, which generation
+  treats identically to the parser's omitted state;
 - `merge_subqueries` treats a SELECT with query options as unmergeable, so a
   marked CTE is not inlined;
 - the Vertica generator suppresses the internal option and reconstructs the

@@ -1444,7 +1444,7 @@ class VerticaGenerator(PostgresGenerator):
         ):
             self.unsupported("Vertica WITH requires a nonempty CTE list")
         recursive = expression.args.get("recursive")
-        if recursive not in {None, True}:
+        if recursive is not None and type(recursive) is not bool:
             self.unsupported("Vertica WITH RECURSIVE must be either present or absent")
         if expression.args.get("search") is not None:
             self.unsupported("Vertica WITH does not support SEARCH or CYCLE clauses")

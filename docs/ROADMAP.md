@@ -252,13 +252,20 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   context-sensitive explicit NULL-ordering provenance and all-level/strict
   owner validation. Q33 is complete: its composed workload, analysis,
   all-level negative, strict-AST, foreign-generation, seven-runtime, build,
-  and clean-wheel gates passed. Milestone 1 is recertified and P16 is eligible.
+  and clean-wheel gates passed. That certification is retained as historical
+  evidence. Q34 is complete: SQLGlot's stock optimizer-generated canonical
+  `With(recursive=False)` now shares the warning-free ordinary-WITH generation
+  contract with parser-omitted `recursive=None`, while exact `True` still
+  emits RECURSIVE and non-Boolean states fail strictly. The complete reported
+  correlated-`NOT EXISTS` UNION regression and a focused helper-CTE control
+  exercise the unmodified optimizer pipeline. Milestone 1 remains reopened
+  until Q35 recertifies this optimizer interoperability; P16 is deferred.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — is now eligible after Q33 recertified Q32's Milestone 1
-  correction; P16 is the first remaining task.
+  (tasks P16–P35) — remains deferred until Q35 recertifies Milestone 1; P16 is
+  still the first Milestone 2 task once that gate passes.
 
 ## Phase 1 — core analytical SQL and physical design
 

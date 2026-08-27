@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from sqlglot import ErrorLevel, exp, parse, parse_one
 from sqlglot.errors import ParseError, UnsupportedError
 from sqlglot.lineage import lineage
 from sqlglot.optimizer import optimize
+from sqlglot.optimizer.annotate_types import annotate_types
+from sqlglot.optimizer.eliminate_subqueries import eliminate_subqueries
 from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import traverse_scope
 
@@ -14,6 +18,51 @@ from sqlglot_vertica import expressions as vexp
 from tests.helpers import assert_roundtrip
 
 ALL_PARSE_LEVELS = [ErrorLevel.IMMEDIATE, ErrorLevel.RAISE, ErrorLevel.WARN, ErrorLevel.IGNORE]
+
+USER_REPORTED_OPTIMIZER_CTE_SQL = """-- dialect: vertica
+select
+    a.i,
+    a.n,
+    b.r
+from s.a as a
+inner join s.b as b
+    on a.i = b.i
+where
+    b.u >= :p
+    and (
+        substring(a.n, 2, 1) between 'A' and 'Z'
+        or a.n like '5%'
+    )
+
+union all
+
+select
+    a.i,
+    a.n,
+    null as r
+from s.a as a
+inner join s.b as b
+    on a.i = b.i
+where
+    b.u >= :p
+    and a.n like 'P[0-9]%'
+
+union all
+
+select
+    null as i,
+    c.n,
+    null as r
+from s.c as c
+where
+    c.u >= :q
+    and not exists (
+        select 1
+        from s.a as a
+        where a.n = c.n
+    )
+    and c.n like '7%'
+"""
 
 
 @pytest.mark.parametrize(
@@ -156,6 +205,126 @@ def test_cte_analysis_and_parent_metadata() -> None:
     assert "t.x" in {downstream.name for downstream in node.walk()}
 
 
+def test_user_reported_optimizer_generated_nonrecursive_with_is_warning_free(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    parsed = parse_one(USER_REPORTED_OPTIMIZER_CTE_SQL, read="vertica")
+    assert type(parsed) is exp.Union
+    assert parsed.args.get("with_") is None
+
+    optimized = optimize(parsed.copy(), dialect="vertica")
+    with_ = optimized.args.get("with_")
+    assert type(optimized) is exp.Union
+    assert isinstance(with_, exp.With)
+    assert with_.args.get("recursive") is False
+    assert [cte.alias for cte in with_.expressions] == ["_u_0"]
+    assert with_.parent is optimized and with_.arg_key == "with_"
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="sqlglot"):
+        generated = optimized.sql(dialect="vertica")
+    assert not caplog.records
+    assert generated.startswith('WITH "_u_0" AS')
+    assert "WITH RECURSIVE" not in generated
+
+    reparsed = parse_one(generated, read="vertica")
+    reparsed_with = reparsed.args.get("with_")
+    assert type(reparsed) is exp.Union
+    assert isinstance(reparsed_with, exp.With)
+    assert reparsed_with.args.get("recursive") is None
+    assert len(list(reparsed.find_all(exp.CTE))) == 1
+    assert "dialect: vertica" in reparsed.sql(dialect="vertica")
+
+    pretty = optimized.sql(dialect="vertica", pretty=True)
+    assert "WITH RECURSIVE" not in pretty
+    pretty_reparsed = parse_one(pretty, read="vertica")
+    assert type(pretty_reparsed) is exp.Union
+    assert isinstance(pretty_reparsed.args.get("with_"), exp.With)
+    assert exp.Expr.load(optimized.dump()) == optimized
+    assert optimized.copy() == optimized
+    assert optimized.transform(lambda node: node) == optimized
+    assert list(traverse_scope(optimized))
+    assert list(traverse_scope(qualify(optimized.copy(), dialect="vertica")))
+    assert list(traverse_scope(annotate_types(optimized.copy(), dialect="vertica")))
+    assert list(traverse_scope(optimize(optimized.copy(), dialect="vertica")))
+    assert lineage("n", optimized.copy(), dialect="vertica").downstream
+
+
+@pytest.mark.parametrize("unsupported_level", list(ErrorLevel))
+def test_user_reported_optimizer_generated_with_renders_at_every_level(
+    unsupported_level: ErrorLevel,
+) -> None:
+    optimized = optimize(
+        parse_one(USER_REPORTED_OPTIMIZER_CTE_SQL, read="vertica"), dialect="vertica"
+    )
+    generated = optimized.sql(dialect="vertica", unsupported_level=unsupported_level)
+    assert "WITH RECURSIVE" not in generated
+    assert isinstance(parse_one(generated, read="vertica").args.get("with_"), exp.With)
+
+
+def test_eliminate_subqueries_constructs_supported_nonrecursive_with() -> None:
+    expression = parse_one("SELECT d.a FROM (SELECT x.a FROM x) AS d", read="vertica")
+    eliminated = eliminate_subqueries(expression)
+    with_ = eliminated.args.get("with_")
+    assert isinstance(with_, exp.With)
+    assert with_.args.get("recursive") is False
+    assert eliminated.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE) == (
+        "WITH d AS (SELECT x.a FROM x) SELECT d.a FROM d AS d"
+    )
+
+
+def test_nonrecursive_none_and_false_generation_are_equivalent() -> None:
+    cte = exp.CTE(
+        this=exp.select(exp.alias_(exp.Literal.number(1), "x")),
+        alias=exp.TableAlias(this=exp.to_identifier("c")),
+    )
+    omitted = _with_query(cte.copy())
+    explicit_false = _with_query(cte.copy(), recursive=False)
+    assert omitted.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE) == (
+        explicit_false.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+    )
+    assert "RECURSIVE" not in explicit_false.sql(dialect="vertica")
+
+
+def test_nested_and_hinted_nonrecursive_false_with_trees_generate() -> None:
+    inner_cte = exp.CTE(
+        this=exp.select(exp.alias_(exp.Literal.number(1), "x")),
+        alias=exp.TableAlias(this=exp.to_identifier("c")),
+    )
+    inner = _with_query(inner_cte, recursive=False)
+    outer_cte = exp.CTE(
+        this=inner,
+        alias=exp.TableAlias(this=exp.to_identifier("outer_cte")),
+    )
+    outer = _with_query(outer_cte)
+    generated = outer.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+    assert generated.count("WITH ") == 2
+    assert "WITH RECURSIVE" not in generated
+    assert parse_one(generated, read="vertica").sql(dialect="vertica") == generated
+
+    hinted = parse_one(
+        "WITH /*+ENABLE_WITH_CLAUSE_MATERIALIZATION*/ c AS (SELECT 1 AS x) SELECT x FROM c",
+        read="vertica",
+    )
+    hinted.args["with_"].set("recursive", False)
+    hinted_sql = hinted.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+    assert hinted_sql.startswith("WITH /*+ ENABLE_WITH_CLAUSE_MATERIALIZATION */ c AS")
+    assert "WITH RECURSIVE" not in hinted_sql
+
+
+@pytest.mark.parametrize("recursive", [0, 1, "", "False", [], {}, ()])
+def test_nonboolean_recursive_states_fail_atomically(recursive: object) -> None:
+    cte = exp.CTE(
+        this=exp.select("1"),
+        alias=exp.TableAlias(this=exp.to_identifier("c")),
+    )
+    expression = _with_query(cte, recursive=recursive)
+    with pytest.raises(
+        UnsupportedError, match="Vertica WITH RECURSIVE must be either present or absent"
+    ):
+        expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
+
+
 def _with_query(cte: exp.CTE, **with_args: object) -> exp.Select:
     query = exp.select("*").from_("c")
     query.set("with_", exp.With(expressions=[cte], **with_args))
@@ -172,10 +341,6 @@ def _with_query(cte: exp.CTE, **with_args: object) -> exp.Select:
                 this=exp.Values(expressions=[exp.Tuple(expressions=[exp.Literal.number(1)])]),
                 alias=exp.TableAlias(this=exp.to_identifier("c")),
             )
-        ),
-        _with_query(
-            exp.CTE(this=exp.select("1"), alias=exp.TableAlias(this=exp.to_identifier("c"))),
-            recursive=False,
         ),
         _with_query(
             exp.CTE(this=exp.select("1"), alias=exp.TableAlias(this=exp.to_identifier("c"))),
@@ -211,9 +376,12 @@ def test_programmatic_with_and_cte_mutations_fail_atomically(expression: exp.Exp
         expression.sql(dialect="vertica", unsupported_level=ErrorLevel.RAISE)
 
 
-def test_plain_canonical_cte_remains_foreign_portable() -> None:
+@pytest.mark.parametrize("recursive", [None, False])
+@pytest.mark.parametrize("dialect", ["postgres", "duckdb", "mysql", "sqlite"])
+def test_plain_canonical_cte_remains_foreign_portable(recursive: bool | None, dialect: str) -> None:
     expression = parse_one("WITH c AS (SELECT 1 AS x) SELECT x FROM c", read="vertica")
-    assert expression.sql(dialect="postgres") == "WITH c AS (SELECT 1 AS x) SELECT x FROM c"
+    expression.args["with_"].set("recursive", recursive)
+    assert expression.sql(dialect=dialect) == "WITH c AS (SELECT 1 AS x) SELECT x FROM c"
 
 
 @pytest.mark.parametrize("dialect", ["postgres", "duckdb", "mysql", "sqlite"])
