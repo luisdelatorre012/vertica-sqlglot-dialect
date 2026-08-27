@@ -266,7 +266,13 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   explicit FIRST/LAST order items now have source-equivalent PostgreSQL
   lowerings, while Vertica GLOBAL, configuration-dependent unscoped scope,
   malformed containers, and NULLS AUTO remain atomic. Milestone 1 is reopened
-  through Q37–Q39; Q37 is next and P16 is deferred.
+  through Q37–Q39. Q37 is complete: GETDATE/GETUTCDATE retain statement-start
+  rather than transaction-start semantics in PostgreSQL, statically integral
+  one-argument TO_CHAR lowers to a text cast, and only the engine-independent
+  metacharacter-free literal REGEXP_LIKE subset lowers to POSITION. Unknown or
+  formatting-sensitive TO_CHAR inputs, dynamic/regex-active patterns, and
+  non-equivalent modifiers remain targeted atomic boundaries. Q38 is next and
+  P16 remains deferred.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx

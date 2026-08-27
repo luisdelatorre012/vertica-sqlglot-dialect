@@ -29,17 +29,18 @@ def test_every_custom_expression_fails_explicitly_in_postgres(
 ) -> None:
     """A newly added custom node must not inherit a generic SQL function fallback."""
 
+    if expression_type in {vexp.StatementTimestamp, vexp.UtcStatementTimestamp}:
+        sql = expression_type().sql(dialect="postgres", unsupported_level=ErrorLevel.RAISE)
+        assert "STATEMENT_TIMESTAMP()" in sql
+        return
+
     with pytest.raises((UnsupportedError, ValueError)):
         expression_type().sql(dialect="postgres", unsupported_level=ErrorLevel.RAISE)
 
 
 @pytest.mark.parametrize(
     "sql",
-    [
-        "SELECT SET[1, 2]",
-        "SELECT GETDATE()",
-        "SELECT GETUTCDATE()",
-    ],
+    ["SELECT SET[1, 2]"],
 )
 def test_vertica_only_values_do_not_emit_invented_postgres_functions(sql: str) -> None:
     expression = parse_one(sql, read="vertica")

@@ -136,6 +136,23 @@ generators fail on the outer Vertica node instead of silently changing a call's
 meaning. Special execution partitions similarly use `VerticaWindow`, an
 `exp.Window` subclass whose `partition_mode` is explicit and serialized.
 
+Q37 registers three bounded PostgreSQL scalar lowerings. `StatementTimestamp`
+becomes `CAST(STATEMENT_TIMESTAMP() AS TIMESTAMP)`, and
+`UtcStatementTimestamp` becomes the same statement-start clock at time zone
+UTC with an explicit timestamp result cast; neither substitutes PostgreSQL's
+transaction-start `CURRENT_TIMESTAMP`/`NOW`. One-argument `VerticaToChar`
+becomes `CAST(value AS TEXT)` only when SQLGlot can prove a TINYINT, SMALLINT,
+INT, or BIGINT input. Unknown columns, floating-point values, and date/time,
+timestamp, interval, or other families remain atomic because PostgreSQL text
+output can depend on formatting, locale, `DateStyle`, or time-zone state and
+the primary sources do not prove parity without an explicit pattern. Finally,
+`VerticaRegexpLike` becomes `POSITION(literal IN value) > 0` only for a valid
+UTF-8 literal pattern containing no Perl/POSIX metacharacter and for omitted or
+exact lowercase `c` mode. This preserves NULL and empty-pattern behavior while
+keeping dynamic patterns, regex-active literals, binary/case-insensitive/
+newline/expanded modes, and malformed wrappers on a targeted fail-atomic
+regex-engine boundary. DuckDB, MySQL, and SQLite remain unchanged.
+
 The following invariants apply to every custom node:
 
 1. Every semantic argument is declared in `arg_types`.

@@ -16,6 +16,13 @@ This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
   unscoped visibility, malformed scope trees, and `NULLS AUTO` are not
   approximated and retain atomic boundaries.
 
+- Added source-equivalent PostgreSQL scalar lowerings for Vertica statement-
+  start local/UTC timestamps, statically integral one-argument `TO_CHAR`, and
+  metacharacter-free literal `REGEXP_LIKE`. Transaction-start timestamp
+  substitutions, formatting-sensitive/unknown conversions, dynamic or active
+  regular expressions, and non-equivalent modifiers remain targeted atomic
+  boundaries.
+
 ## 0.2.3 — 2026-08-27
 
 This release recertifies the analysis parsing surface after correcting

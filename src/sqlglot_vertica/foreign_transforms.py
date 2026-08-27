@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlglot import exp
 from sqlglot.generator import Generator
+from sqlglot.optimizer.annotate_types import annotate_types
 
 from sqlglot_vertica import expressions as vexp
 
@@ -165,6 +166,119 @@ def _postgres_vertica_ordered_sql(generator: Generator, expression: vexp.Vertica
     return f"{generator.sql(this)}{direction} NULLS {nulls.name}"
 
 
+def _postgres_statement_timestamp_sql(
+    generator: Generator, expression: vexp.StatementTimestamp
+) -> str:
+    """Preserve Vertica's statement-start, session-local TIMESTAMP contract."""
+
+    if type(expression) is not vexp.StatementTimestamp or expression.args:
+        raise ValueError("PostgreSQL requires a valid Vertica statement timestamp")
+
+    return generator.sql(exp.cast(exp.Anonymous(this="STATEMENT_TIMESTAMP"), exp.DType.TIMESTAMP))
+
+
+def _postgres_utc_statement_timestamp_sql(
+    generator: Generator, expression: vexp.UtcStatementTimestamp
+) -> str:
+    """Preserve Vertica's statement-start UTC TIMESTAMP contract."""
+
+    if type(expression) is not vexp.UtcStatementTimestamp or expression.args:
+        raise ValueError("PostgreSQL requires a valid Vertica UTC statement timestamp")
+
+    return generator.sql(
+        exp.cast(
+            exp.AtTimeZone(
+                this=exp.Anonymous(this="STATEMENT_TIMESTAMP"),
+                zone=exp.Literal.string("UTC"),
+            ),
+            exp.DType.TIMESTAMP,
+        )
+    )
+
+
+_POSTGRES_SAFE_TO_CHAR_INTEGER_TYPES = {
+    exp.DType.TINYINT,
+    exp.DType.SMALLINT,
+    exp.DType.INT,
+    exp.DType.BIGINT,
+}
+
+
+def _postgres_vertica_to_char_sql(generator: Generator, expression: vexp.VerticaToChar) -> str:
+    """Lower only statically integral one-argument TO_CHAR calls to text casts."""
+
+    function = expression.args.get("this")
+    if (
+        set(expression.args) != {"this"}
+        or not isinstance(function, exp.Anonymous)
+        or function.name.upper() != "TO_CHAR"
+        or set(function.args) != {"this", "expressions"}
+        or len(function.expressions) != 1
+    ):
+        raise ValueError("PostgreSQL requires a valid one-argument Vertica TO_CHAR call")
+
+    value = function.expressions[0]
+    annotated = annotate_types(value.copy(), dialect="vertica")
+    if annotated.type.this not in _POSTGRES_SAFE_TO_CHAR_INTEGER_TYPES:
+        raise ValueError(
+            "PostgreSQL text conversion is proven only for statically integral "
+            "one-argument Vertica TO_CHAR inputs"
+        )
+
+    return generator.sql(exp.cast(value.copy(), exp.DType.TEXT))
+
+
+_REGEX_META_CHARACTERS = frozenset(r".\\^$*+?{}[]|()")
+
+
+def _postgres_vertica_regexp_like_sql(
+    generator: Generator, expression: vexp.VerticaRegexpLike
+) -> str:
+    """Lower the engine-independent literal-pattern subset to POSITION."""
+
+    predicate = expression.args.get("this")
+    modifiers = expression.args.get("modifiers") or []
+    if (
+        not set(expression.args) <= {"this", "modifiers"}
+        or "this" not in expression.args
+        or not isinstance(predicate, exp.RegexpLike)
+        or set(predicate.args) != {"this", "expression"}
+        or not isinstance(predicate.this, exp.Expr)
+        or not isinstance(predicate.expression, exp.Literal)
+        or not predicate.expression.is_string
+        or not isinstance(modifiers, list)
+        or any(
+            not isinstance(modifier, exp.Literal) or not modifier.is_string
+            for modifier in modifiers
+        )
+        or [modifier.this for modifier in modifiers] not in ([], ["c"])
+    ):
+        raise ValueError(
+            "PostgreSQL REGEXP_LIKE lowering requires a literal pattern and omitted or 'c' mode"
+        )
+
+    pattern = predicate.expression.this
+    try:
+        pattern.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ValueError("PostgreSQL REGEXP_LIKE literal pattern must be valid UTF-8") from error
+
+    if any(character in _REGEX_META_CHARACTERS for character in pattern):
+        raise ValueError(
+            "PostgreSQL cannot preserve Vertica Perl REGEXP_LIKE metacharacter semantics"
+        )
+
+    return generator.sql(
+        exp.GT(
+            this=exp.StrPosition(
+                this=predicate.this.copy(),
+                substr=predicate.expression.copy(),
+            ),
+            expression=exp.Literal.number(0),
+        )
+    )
+
+
 def patch_postgres_transforms() -> None:
     """Register semantics-preserving Vertica expression subsets with PostgreSQL.
 
@@ -180,7 +294,11 @@ def patch_postgres_transforms() -> None:
         exp.Create: _postgres_create_sql,
         exp.WithinGroup: _postgres_withingroup_sql,
         vexp.ListAgg: _postgres_listagg_sql,
+        vexp.StatementTimestamp: _postgres_statement_timestamp_sql,
+        vexp.UtcStatementTimestamp: _postgres_utc_statement_timestamp_sql,
         vexp.VerticaGroup: _postgres_group_sql,
         vexp.VerticaOrdered: _postgres_vertica_ordered_sql,
+        vexp.VerticaRegexpLike: _postgres_vertica_regexp_like_sql,
+        vexp.VerticaToChar: _postgres_vertica_to_char_sql,
     }
     generator_module._DISPATCH_CACHE.pop(PostgresGenerator, None)

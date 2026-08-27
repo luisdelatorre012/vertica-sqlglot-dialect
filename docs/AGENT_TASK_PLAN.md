@@ -236,6 +236,10 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   visibility, and `NULLS AUTO` retain their fail-closed boundaries. Milestone 1
   remains reopened; Q37 is the lowest-numbered eligible task and P16 remains
   deferred.
+- Completed **Q37 — PostgreSQL scalar-function compatibility** on 2026-08-27.
+  Statement-start timestamps, the proven integral one-argument TO_CHAR subset,
+  and literal non-regex REGEXP_LIKE now lower to PostgreSQL; Q38 is the
+  lowest-numbered eligible task and P16 remains deferred.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -399,7 +403,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q34 | DONE   | Optimizer-generated non-recursive WITH conformance | Q33             | `fix: accept optimizer generated nonrecursive ctes`       |
 | Q35 | DONE   | Milestone 1 optimizer-CTE recertification gate | Q34                | `test: recertify milestone one optimizer ctes`            |
 | Q36 | DONE   | Direct PostgreSQL construct lowerings           | Q35                | `fix: lower direct vertica constructs to postgres`         |
-| Q37 | TODO   | PostgreSQL scalar-function compatibility       | Q36                | `fix: lower compatible vertica functions to postgres`      |
+| Q37 | DONE   | PostgreSQL scalar-function compatibility       | Q36                | `fix: lower compatible vertica functions to postgres`      |
 | Q38 | TODO   | PostgreSQL partitioned-LIMIT rewrite           | Q37                | `feat: lower partitioned limit to postgres`                |
 | Q39 | TODO   | Milestone 1 PostgreSQL transpilation gate      | Q36–Q38            | `test: recertify postgres transpilation boundaries`        |
 
@@ -4442,7 +4446,7 @@ cleanly with no broken requirements, and the installed-wheel LOCAL temporary
 CTAS smoke returned `Create`. Milestone 1 remains reopened; Q37 is next and no
 Milestone 2 work began.
 
-### Q37 — PostgreSQL scalar-function compatibility — `TODO`
+### Q37 — PostgreSQL scalar-function compatibility — `DONE`
 
 **Outcome.** Add target-aware PostgreSQL lowerings for the compatible scalar
 function cases in the report while preserving explicit atomic boundaries for
@@ -4535,6 +4539,51 @@ documents POSIX/ARE plus known Perl incompatibilities and different newline
 flag meanings. PostgreSQL `POSITION` returns a one-based substring index or
 zero and therefore provides an engine-independent Boolean lowering for the
 plain-literal subset.
+
+**Completion record.** Re-opened all eight primary pages and audited installed
+SQLGlot 30.13's timestamp, cast, `AtTimeZone`, `RegexpLike`, `StrPosition`,
+PostgreSQL generator dispatch, type annotation, and Oracle one-argument
+TO_CHAR behavior. GETDATE and GETUTCDATE explicitly derive from
+STATEMENT_TIMESTAMP and return TIMESTAMP; PostgreSQL explicitly distinguishes
+statement-start `statement_timestamp()` from transaction-start
+`CURRENT_TIMESTAMP`/`now()` and defines timestamptz `AT TIME ZONE` as a
+timestamp-without-time-zone result. The Vertica TO_CHAR page has one editorial
+tension: its parameter list names DOUBLE PRECISION, INTEGER, INTERVAL,
+TIME/TIMETZ, and TIMESTAMP/TIMESTAMPTZ but its no-pattern examples also include
+DATE. PostgreSQL TO_CHAR requires a pattern and its text casts can depend on
+locale, `DateStyle`, time zone, or numeric formatting, so only statically
+proven TINYINT/SMALLINT/INT/BIGINT inputs lower to `CAST(... AS TEXT)`; unknown
+columns, floating values, DATE/time/timestamp, interval, and other families
+remain targeted atomic failures rather than guessed equivalents. This admits
+the report's exact `TO_CHAR(YEAR(CURRENT_DATE) - 2)` shape.
+
+Registered PostgreSQL transforms for `StatementTimestamp` as
+`CAST(STATEMENT_TIMESTAMP() AS TIMESTAMP)` and `UtcStatementTimestamp` as
+`CAST(STATEMENT_TIMESTAMP() AT TIME ZONE 'UTC' AS TIMESTAMP)`. Repeated calls
+therefore retain one statement-start clock contract and never become
+transaction-start CURRENT_TIMESTAMP/NOW. `VerticaRegexpLike` lowers to
+`POSITION(pattern IN value) > 0` only when the pattern is a valid-UTF-8 string
+literal containing no Perl/POSIX metacharacter and the mode is omitted or
+exact lowercase `c`; this preserves NULL propagation and the empty-pattern
+match while dynamic/regex-active patterns and `b/i/m/n/x` modes raise a
+targeted Perl-versus-POSIX boundary at every generator level. Direct and
+nested malformed wrappers remain atomic. All four transforms survive
+serialization, copy/transform, qualification, optimization, type annotation,
+comments, multi-statement boundaries, and PostgreSQL reparsing. Dispatch-cache
+and both import orders are pinned; DuckDB, MySQL, and SQLite remain unchanged
+and atomic. Updated architecture, coverage, roadmap, source inventory,
+changelog, and pre-existing foreign-failure expectations.
+
+The new focused PostgreSQL scalar module passed 168 tests; the scalar/direct-
+lowering/function/AST neighborhood passed 473. The final default Python 3.12.6
+release gate passed 8,892 tests at 92.25% branch coverage with Ruff formatting
+and lint, strict mypy, and diff checks clean. Isolated Python 3.9.25, 3.10.20,
+3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1 each passed all 8,892 tests;
+3.15 treated deprecation warnings as errors. The sdist and wheel built, the
+exact wheel force-installed with no broken requirements in a clean
+environment, and the installed-wheel four-function PostgreSQL smoke returned
+`Select`. Milestone 1 remains reopened; Q38 is next and no Milestone 2 work
+began.
 
 ### Q38 — PostgreSQL partitioned-LIMIT rewrite — `TODO`
 
