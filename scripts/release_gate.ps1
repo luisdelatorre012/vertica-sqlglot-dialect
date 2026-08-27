@@ -9,7 +9,9 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[A-Za-z_][A-Za-z0-9_]*$')]
-    [string]$ExpectedClass
+    [string]$ExpectedClass,
+
+    [switch]$PostgresTranspileSmoke
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,23 +80,36 @@ try {
 
         $env:VERTICA_GATE_SMOKE_SQL = $SmokeSql
         $env:VERTICA_GATE_EXPECTED_CLASS = $ExpectedClass
+        $env:VERTICA_GATE_POSTGRES_TRANSPILE = if ($PostgresTranspileSmoke) { '1' } else { '0' }
         $smoke = @'
 import os
-from sqlglot import exp, parse_one
+from sqlglot import ErrorLevel, exp, parse, parse_one
 from sqlglot_vertica import expressions as vexp
 
-expression = parse_one(os.environ["VERTICA_GATE_SMOKE_SQL"], read="vertica")
 class_name = os.environ["VERTICA_GATE_EXPECTED_CLASS"]
 expected = getattr(vexp, class_name, None) or getattr(exp, class_name)
-assert isinstance(expression, expected), type(expression).__name__
-assert parse_one(expression.sql(dialect="vertica"), read="vertica") == expression
-print(type(expression).__name__)
+if os.environ["VERTICA_GATE_POSTGRES_TRANSPILE"] == "1":
+    expressions = parse(os.environ["VERTICA_GATE_SMOKE_SQL"], read="vertica")
+    assert expressions and all(expression is not None for expression in expressions)
+    assert isinstance(expressions[0], expected), type(expressions[0]).__name__
+    targets = [
+        expression.sql(dialect="postgres", unsupported_level=ErrorLevel.RAISE)
+        for expression in expressions
+    ]
+    assert all(parse_one(target, read="postgres") for target in targets)
+    print(f"{len(expressions)} PostgreSQL transpilation cases")
+else:
+    expression = parse_one(os.environ["VERTICA_GATE_SMOKE_SQL"], read="vertica")
+    assert isinstance(expression, expected), type(expression).__name__
+    assert parse_one(expression.sql(dialect="vertica"), read="vertica") == expression
+    print(type(expression).__name__)
 '@
         Invoke-Checked $wheelPython '-I' '-c' $smoke
     }
     finally {
         Remove-Item Env:VERTICA_GATE_SMOKE_SQL -ErrorAction SilentlyContinue
         Remove-Item Env:VERTICA_GATE_EXPECTED_CLASS -ErrorAction SilentlyContinue
+        Remove-Item Env:VERTICA_GATE_POSTGRES_TRANSPILE -ErrorAction SilentlyContinue
 
         $resolvedTemp = (Resolve-Path -LiteralPath $env:TEMP).Path
         if (Test-Path -LiteralPath $wheelEnvironment) {

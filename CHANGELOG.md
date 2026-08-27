@@ -31,6 +31,13 @@ This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
   output names, DISTINCT inputs that need hidden values, locks, custom query
   roots, whole set roots, and malformed nodes remain atomic.
 
+- Recertified Milestone 1 with the exact seven-statement PostgreSQL report
+  fixture, a composed LOCAL-temporary/function/ordering/partitioned-LIMIT
+  workload, source analysis and target reparsing, and default/strict negative
+  corpora for every retained semantic boundary. The complete default and
+  seven-runtime suites, package build, clean-wheel install, and installed-
+  wheel seven-case transpilation smoke also pass.
+
 ## 0.2.3 — 2026-08-27
 
 This release recertifies the analysis parsing surface after correcting

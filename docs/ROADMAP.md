@@ -265,8 +265,8 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   evidence. Q36 is complete: explicit LOCAL temporary CREATE trees and
   explicit FIRST/LAST order items now have source-equivalent PostgreSQL
   lowerings, while Vertica GLOBAL, configuration-dependent unscoped scope,
-  malformed containers, and NULLS AUTO remain atomic. Milestone 1 is reopened
-  through Q37–Q39. Q37 is complete: GETDATE/GETUTCDATE retain statement-start
+  malformed containers, and NULLS AUTO remain atomic. Q37 is complete:
+  GETDATE/GETUTCDATE retain statement-start
   rather than transaction-start semantics in PostgreSQL, statically integral
   one-argument TO_CHAR lowers to a text cast, and only the engine-independent
   metacharacter-free literal REGEXP_LIKE subset lowers to POSITION. Unknown or
@@ -275,14 +275,19 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   safe partitioned-LIMIT SELECT owners now lower to a private PostgreSQL
   `ROW_NUMBER()` derived-query filter without exposing helpers or duplicating
   volatile output aliases; ambiguous stars/names/DISTINCT inputs, locks, and
-  custom/set roots remain targeted atomic boundaries. Q39 alone owns
-  recertification, and P16 remains deferred.
+  custom/set roots remain targeted atomic boundaries. Q39 is complete: the
+  exact seven-statement report fixture, a composed LOCAL-CTAS/function/
+  ordering/partitioned-LIMIT workload, and default/strict negative corpora
+  passed source analysis, PostgreSQL reparsing, default/seven-runtime,
+  package-build, clean-wheel, and installed-wheel transpilation gates without
+  another product gap. Milestone 1 is recertified on 2026-08-27, and P16 is
+  now eligible.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — remains deferred until Q39 closes and recertifies the
-  PostgreSQL transpilation boundary.
+  (tasks P16–P35) — is now eligible after Q39 recertified the PostgreSQL
+  transpilation boundary; P16 is the next task.
 
 ## Phase 1 — core analytical SQL and physical design
 

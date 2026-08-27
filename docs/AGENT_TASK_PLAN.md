@@ -243,6 +243,11 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
 - Completed **Q38 — PostgreSQL partitioned-LIMIT rewrite** on 2026-08-27.
   Safe SELECT owners now lower through a private PostgreSQL ROW_NUMBER filter;
   Q39 alone owns recertification and P16 remains deferred.
+- Completed **Q39 — Milestone 1 PostgreSQL transpilation gate** on 2026-08-27.
+  The exact seven-statement report, composed positive workload, retained
+  unsafe boundaries, complete release gate, and installed-wheel PostgreSQL
+  smoke passed without another product gap. **Milestone 1 is recertified**,
+  every Q task is `DONE`, and P16 is now the lowest-numbered eligible task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -408,11 +413,12 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q36 | DONE   | Direct PostgreSQL construct lowerings           | Q35                | `fix: lower direct vertica constructs to postgres`         |
 | Q37 | DONE   | PostgreSQL scalar-function compatibility       | Q36                | `fix: lower compatible vertica functions to postgres`      |
 | Q38 | DONE   | PostgreSQL partitioned-LIMIT rewrite           | Q37                | `feat: lower partitioned limit to postgres`                |
-| Q39 | TODO   | Milestone 1 PostgreSQL transpilation gate      | Q36–Q38            | `test: recertify postgres transpilation boundaries`        |
+| Q39 | DONE   | Milestone 1 PostgreSQL transpilation gate      | Q36–Q38            | `test: recertify postgres transpilation boundaries`        |
 
 ### Milestone 2 — administration and remaining DDL
 
-Q36–Q39 are not `DONE`, so Milestone 2 is deferred and P16 is not eligible.
+Every Milestone 1 task is `DONE`, so Milestone 2 is eligible and P16 is the
+lowest-numbered eligible task.
 P16–P35 numbering, dependencies, and specifications remain intentionally
 unchanged from the prior plan revision.
 
@@ -4717,7 +4723,7 @@ environment, and the installed-wheel partitioned-LIMIT smoke returned
 `Select`. Milestone 1 remains reopened; Q39 alone owns recertification and no
 Milestone 2 work began.
 
-### Q39 — Milestone 1 PostgreSQL transpilation gate — `TODO`
+### Q39 — Milestone 1 PostgreSQL transpilation gate — `DONE`
 
 **Outcome.** Re-certify Milestone 1 only after the complete seven-statement
 report corpus has an explicit PostgreSQL contract: every source-bounded
@@ -4773,9 +4779,52 @@ mutation.
 statements copied from `C:\Users\luisd\Downloads\transpiler_examples.sql`, and
 installed SQLGlot 30.13 parser/generator/optimizer implementations.
 
+**Completion record.** Re-read the complete active plan, Q36–Q38 completion
+records, architecture, coverage, roadmap, changelog, README, and source
+inventory. Re-opened every Q36–Q38 Vertica 26.2 and current PostgreSQL primary
+page and re-audited installed SQLGlot 30.13's PostgreSQL CREATE/property,
+ordered-item, timestamp, cast, string/regex, SELECT/window, QUALIFY, scope,
+qualification, optimization, type-annotation, and lineage paths. No material
+source contradiction or new product gap appeared; the bounded LOCAL/GLOBAL,
+FIRST/LAST/AUTO, statement/transaction-time, statically integral TO_CHAR,
+literal/regex-active REGEXP_LIKE, and safe/unsafe partitioned-LIMIT choices
+remain exactly the Q36–Q38 contracts, so `ARCHITECTURE.md` required no policy
+change.
+
+Copied the exact seven-statement report, including its metadata comments, into
+`tests/fixtures/postgres_transpilation_report.sql` and added
+`tests/test_postgres_transpilation_gate.py`. All seven cases generate
+warning-free PostgreSQL at default and strict `RAISE`, reparse with target AST
+markers for temporary/ON COMMIT state, private ROW_NUMBER filtering,
+statement-start local/UTC timestamps, explicit null placement, literal
+POSITION matching, and integral text conversion, and preserve comments,
+statement boundaries, serialization, copy/transform parent metadata, and the
+source tree. A composed LOCAL temporary CTAS exercises every compatible
+construct through compact/pretty target output, source type annotation, scope
+traversal, qualification, repeated optimization, lineage, and PostgreSQL
+reparsing. Default/strict negative corpora cover explicit GLOBAL, NULLS AUTO,
+unknown/date TO_CHAR, PCRE-active/dynamic/flagged regex, and every Q38 unsafe
+owner; each remains a targeted atomic failure with no warning-only loss,
+generic dispatch surprise, partial SQL, or swallowed following statement.
+The release driver gained an opt-in multi-statement PostgreSQL smoke so the
+installed wheel, rather than the checkout, proves all seven cases.
+
+The Q39 module passed **50 tests** and the focused foreign-transpilation,
+function, query, workload, and AST neighborhood passed **1,451 tests**. The
+final default Python 3.12.6 release gate passed **9,005 tests** at **92.21%
+branch coverage** with Ruff formatting/lint, strict mypy, and diff checks
+clean. Isolated Python **3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1** each passed all **9,005 tests**; 3.15 treated deprecation
+warnings as errors. The sdist and wheel built, the exact wheel force-installed
+with no broken requirements in a clean environment, and the installed-wheel
+smoke generated and reparsed all **seven PostgreSQL transpilation cases**. The
+staged repository-wide pre-commit suite was clean. **Milestone 1 — the
+analysis parsing surface — is recertified.** P16 is now eligible; no Milestone
+2 work began.
+
 ## Detailed tasks — Milestone 2: administration and remaining DDL
 
-Q36–Q39 are not `DONE`, so P16 remains deferred. The detailed P16–P35
+Every Q task is `DONE`, so P16 is eligible. The detailed P16–P35
 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

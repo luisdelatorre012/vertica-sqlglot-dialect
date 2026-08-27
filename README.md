@@ -24,12 +24,14 @@ The current development baseline is:
 Python 3.15 support is tested against the latest available prerelease until
 CPython 3.15 reaches general availability.
 
-Milestone 1's Q35 certification remains historical evidence, but the surface
-is reopened for the bounded PostgreSQL transpilation queue. Q36 now lowers
-explicit LOCAL temporary CREATE trees and explicit `NULLS FIRST`/`LAST`
-losslessly; Q37 adds the compatible scalar-function subset and Q38 lowers safe
-partitioned-LIMIT queries through a private PostgreSQL `ROW_NUMBER()` filter.
-Q39 remains before recertification, so Milestone 2 is deferred.
+Milestone 1 is recertified through Q39. Its PostgreSQL interoperability
+contract now covers explicit LOCAL temporary CREATE trees, explicit
+`NULLS FIRST`/`LAST`, statement-start timestamps, the source-bounded
+one-argument `TO_CHAR` and literal `REGEXP_LIKE` subsets, and safe
+partitioned-LIMIT queries lowered through a private `ROW_NUMBER()` filter.
+The complete reported seven-statement corpus and every retained unsafe
+boundary pass the default, strict, analysis, packaging, and runtime gates.
+Milestone 2 is eligible, with P16 next.
 
 The SQLGlot dependency is intentionally bounded to one minor line because
 dialect parser/generator subclass APIs can change between minor releases. The
