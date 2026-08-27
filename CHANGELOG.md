@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.4 — 2026-08-27
+
+This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
+
+- Fixed Vertica-to-PostgreSQL `LISTAGG` transpilation by lowering its canonical
+  aggregate to `STRING_AGG`, including `separator` and WITHIN GROUP ordering.
+  Vertica-only overflow controls now produce ordinary unsupported warnings
+  instead of the fatal `Unsupported expression type ListAgg` dispatch error.
+
 ## 0.2.3 — 2026-08-27
 
 This release recertifies the analysis parsing surface after correcting
@@ -16,11 +25,6 @@ optimizer-generated non-recursive WITH interoperability.
   `NOT EXISTS` UNION now optimizes, generates at every error level, and
   reparses without a false unsupported warning; exact non-Boolean recursive
   states remain strict failures.
-
-- Fixed Vertica-to-PostgreSQL `LISTAGG` transpilation by lowering its canonical
-  aggregate to `STRING_AGG`, including `separator` and WITHIN GROUP ordering.
-  Vertica-only overflow controls now produce ordinary unsupported warnings
-  instead of the fatal `Unsupported expression type ListAgg` dispatch error.
 
 ## 0.2.2 — 2026-08-25
 
