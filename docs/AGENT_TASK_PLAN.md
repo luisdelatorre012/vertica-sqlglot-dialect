@@ -240,6 +240,9 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   Statement-start timestamps, the proven integral one-argument TO_CHAR subset,
   and literal non-regex REGEXP_LIKE now lower to PostgreSQL; Q38 is the
   lowest-numbered eligible task and P16 remains deferred.
+- Completed **Q38 — PostgreSQL partitioned-LIMIT rewrite** on 2026-08-27.
+  Safe SELECT owners now lower through a private PostgreSQL ROW_NUMBER filter;
+  Q39 alone owns recertification and P16 remains deferred.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -404,7 +407,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q35 | DONE   | Milestone 1 optimizer-CTE recertification gate | Q34                | `test: recertify milestone one optimizer ctes`            |
 | Q36 | DONE   | Direct PostgreSQL construct lowerings           | Q35                | `fix: lower direct vertica constructs to postgres`         |
 | Q37 | DONE   | PostgreSQL scalar-function compatibility       | Q36                | `fix: lower compatible vertica functions to postgres`      |
-| Q38 | TODO   | PostgreSQL partitioned-LIMIT rewrite           | Q37                | `feat: lower partitioned limit to postgres`                |
+| Q38 | DONE   | PostgreSQL partitioned-LIMIT rewrite           | Q37                | `feat: lower partitioned limit to postgres`                |
 | Q39 | TODO   | Milestone 1 PostgreSQL transpilation gate      | Q36–Q38            | `test: recertify postgres transpilation boundaries`        |
 
 ### Milestone 2 — administration and remaining DDL
@@ -4585,7 +4588,7 @@ environment, and the installed-wheel four-function PostgreSQL smoke returned
 `Select`. Milestone 1 remains reopened; Q38 is next and no Milestone 2 work
 began.
 
-### Q38 — PostgreSQL partitioned-LIMIT rewrite — `TODO`
+### Q38 — PostgreSQL partitioned-LIMIT rewrite — `DONE`
 
 **Outcome.** Transpile Vertica's documented `LIMIT n OVER (PARTITION BY ...
 ORDER BY ...)` top-N-per-partition clause to equivalent PostgreSQL query SQL,
@@ -4660,6 +4663,59 @@ PostgreSQL derived table with a private `ROW_NUMBER` helper and correctly
 expands the `x` alias to the underlying literal in that minimal case; Q38 must
 audit and harden that machinery rather than assuming all owners are equally
 safe.
+
+**Completion record.** Re-opened the exact Vertica 26.2 LIMIT page and the
+current PostgreSQL SELECT and window-function pages, then audited installed
+SQLGlot 30.13's PostgreSQL SELECT preprocessing, QUALIFY elimination, alias
+expansion, scope, qualification, optimization, and generator dispatch. The
+sources align on the decisive evaluation boundary: Vertica defines the
+partitioned-LIMIT input after FROM, WHERE, GROUP BY, and HAVING; PostgreSQL
+window functions see that same virtual table but are forbidden in WHERE, so a
+derived filter is required. PostgreSQL's SELECT order also places final ORDER
+BY and OFFSET after projection/window processing. No material documentation
+contradiction was found.
+
+Added a non-mutating PostgreSQL `exp.Select` transform that lowers a validated
+`PartitionedLimit` through three canonical query layers. The base query gives
+every stable source output and any private window input a collision-free name
+and evaluates it once; the ranking query computes `ROW_NUMBER()` over the
+resolved partition/order values; and the outer query filters that private
+helper to `<= n`, projects only the original output names, and retains final
+ORDER BY/OFFSET. This is deliberately stricter than calling generic QUALIFY
+elimination directly: SQLGlot's transform expands an output alias back to its
+expression inside the window, which can evaluate a volatile projection twice,
+whereas the Q38 base layer evaluates the report's aliases and volatile controls
+once. One-/multi-key partitions and ordering, output aliases, bounded lexical
+ordinals without unbounded `int()` conversion, arbitrary hidden expressions,
+FIRST/LAST via Q36's typed lowering, WHERE/GROUP BY/HAVING, joins, CTEs,
+subqueries, DISTINCT whose window inputs are already projected, SELECT-owned
+set branches, comments, helper-name collisions, serialization, copy/transform,
+scope, qualification, optimization, type annotation, and lineage are pinned.
+The report's exact `SELECT 1 AS x LIMIT 1 OVER (PARTITION BY x ORDER BY x)`
+now emits warning-free PostgreSQL at every generator level, reparses as a
+three-layer SELECT/window/filter tree, exposes only `x`, and leaves the public
+Vertica AST byte-identical by `dump()`.
+
+The pre-implementation safe/unsafe inventory is enforced rather than merely
+documented. Star projections cannot hide the helper without schema; unnamed
+expressions have no stable output label; a referenced duplicate alias is
+ambiguous; DISTINCT plus a newly hidden partition/order value changes row
+identity; and a Vertica lock target cannot be preserved through the derived
+layers. Those shapes fail with targeted `ValueError` at IMMEDIATE, RAISE,
+WARN, and IGNORE, as do SELECT INTO, TIMESERIES/MATCH, AT-epoch historical
+roots, whole set-operation roots, and detached/malformed PartitionedLimit
+nodes. DuckDB, MySQL, and SQLite remain atomic and unchanged. The focused
+`test_postgres_partitioned_limit.py` module passed **63 tests**; the required
+PostgreSQL-lowering/query-extension/SELECT-tail/NULL-ordering/set/CTE/workload/
+AST neighborhood passed **1,726 tests**. The default Python 3.12.6 release
+gate passed **8,955 tests** at **92.21% branch coverage** with Ruff formatting
+and lint, strict mypy, and diff checks clean. Isolated Python **3.9.25,
+3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and 3.15.0rc1** each passed all
+8,955 tests; 3.15 treated deprecation warnings as errors. The sdist and wheel
+built, the exact wheel force-installed with no broken requirements in a clean
+environment, and the installed-wheel partitioned-LIMIT smoke returned
+`Select`. Milestone 1 remains reopened; Q39 alone owns recertification and no
+Milestone 2 work began.
 
 ### Q39 — Milestone 1 PostgreSQL transpilation gate — `TODO`
 

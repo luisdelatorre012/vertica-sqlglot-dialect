@@ -27,7 +27,9 @@ CPython 3.15 reaches general availability.
 Milestone 1's Q35 certification remains historical evidence, but the surface
 is reopened for the bounded PostgreSQL transpilation queue. Q36 now lowers
 explicit LOCAL temporary CREATE trees and explicit `NULLS FIRST`/`LAST`
-losslessly; Q37–Q39 remain before recertification, so Milestone 2 is deferred.
+losslessly; Q37 adds the compatible scalar-function subset and Q38 lowers safe
+partitioned-LIMIT queries through a private PostgreSQL `ROW_NUMBER()` filter.
+Q39 remains before recertification, so Milestone 2 is deferred.
 
 The SQLGlot dependency is intentionally bounded to one minor line because
 dialect parser/generator subclass APIs can change between minor releases. The

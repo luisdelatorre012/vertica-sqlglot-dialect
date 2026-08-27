@@ -271,13 +271,17 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   one-argument TO_CHAR lowers to a text cast, and only the engine-independent
   metacharacter-free literal REGEXP_LIKE subset lowers to POSITION. Unknown or
   formatting-sensitive TO_CHAR inputs, dynamic/regex-active patterns, and
-  non-equivalent modifiers remain targeted atomic boundaries. Q38 is next and
-  P16 remains deferred.
+  non-equivalent modifiers remain targeted atomic boundaries. Q38 is complete:
+  safe partitioned-LIMIT SELECT owners now lower to a private PostgreSQL
+  `ROW_NUMBER()` derived-query filter without exposing helpers or duplicating
+  volatile output aliases; ambiguous stars/names/DISTINCT inputs, locks, and
+  custom/set roots remain targeted atomic boundaries. Q39 alone owns
+  recertification, and P16 remains deferred.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — remains deferred until Q37–Q39 close and recertify the
+  (tasks P16–P35) — remains deferred until Q39 closes and recertifies the
   PostgreSQL transpilation boundary.
 
 ## Phase 1 — core analytical SQL and physical design

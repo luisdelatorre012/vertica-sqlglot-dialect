@@ -93,6 +93,8 @@ called out in code review.
 - [PostgreSQL formatting functions](https://www.postgresql.org/docs/current/functions-formatting.html)
 - [PostgreSQL string functions](https://www.postgresql.org/docs/current/functions-string.html)
 - [PostgreSQL pattern matching](https://www.postgresql.org/docs/current/functions-matching.html)
+- [PostgreSQL SELECT](https://www.postgresql.org/docs/current/sql-select.html)
+- [PostgreSQL window functions](https://www.postgresql.org/docs/current/tutorial-window.html)
 - [MAPLOOKUP](https://docs.vertica.com/26.2.x/en/sql-reference/functions/flex-functions/flex-map-functions/maplookup/)
 - [APPROXIMATE_PERCENTILE](https://docs.vertica.com/26.2.x/en/sql-reference/functions/aggregate-functions/approximate-percentile-aggregate/)
 - [STV_Describe_Index parameter-only calls](https://docs.vertica.com/26.2.x/en/sql-reference/functions/geospatial-functions/stv-describe-index/)

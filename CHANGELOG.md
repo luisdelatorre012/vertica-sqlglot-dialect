@@ -23,6 +23,14 @@ This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
   regular expressions, and non-equivalent modifiers remain targeted atomic
   boundaries.
 
+- Added a whole-query PostgreSQL lowering for safe Vertica partitioned LIMIT
+  queries. A private three-layer `ROW_NUMBER()` filter preserves named output
+  columns, alias/ordinal window references, evaluation count, explicit null
+  placement, query clauses, and outer ordering/offset without mutating the
+  source AST or exposing its helper. Ambiguous stars, unnamed or duplicate
+  output names, DISTINCT inputs that need hidden values, locks, custom query
+  roots, whole set roots, and malformed nodes remain atomic.
+
 ## 0.2.3 — 2026-08-27
 
 This release recertifies the analysis parsing surface after correcting

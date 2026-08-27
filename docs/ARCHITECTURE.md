@@ -153,6 +153,34 @@ keeping dynamic patterns, regex-active literals, binary/case-insensitive/
 newline/expanded modes, and malformed wrappers on a targeted fail-atomic
 regex-engine boundary. DuckDB, MySQL, and SQLite remain unchanged.
 
+Q38 registers a whole-SELECT PostgreSQL lowering for `PartitionedLimit`.
+Vertica defines the clause's input after FROM, WHERE, GROUP BY, and HAVING;
+PostgreSQL window functions see that same virtual table but cannot appear in
+WHERE. The lowering therefore copies the source tree into three canonical
+query layers: a base query evaluates every named output and any private
+partition/order expression once, a ranking query computes `ROW_NUMBER()` over
+those values, and an outer query filters the private helper to the positive
+row count while projecting only the original names. This is intentionally
+more explicit than SQLGlot's generic QUALIFY elimination: the generic rewrite
+can duplicate an aliased projection inside the window definition, whereas the
+base layer preserves evaluation count even for a volatile projection alias.
+Aliases and ordinals resolve to private base columns; explicit FIRST/LAST
+ordering continues through Q36's PostgreSQL transform. Grouping, joins,
+predicates, CTEs, subqueries, DISTINCT whose window inputs are projected,
+set-operation SELECT branches, comments, and final ORDER BY/OFFSET tails
+compose without mutating the public Vertica AST.
+
+Shapes without a provably stable output boundary remain atomic. Star and
+unnamed-expression projections cannot hide the helper while preserving the
+target column contract; a referenced duplicate alias is ambiguous; DISTINCT
+cannot accept a new hidden partition/order value without changing row
+identity; and PostgreSQL cannot preserve a Vertica lock target through the
+derived layers. SELECT INTO, TIMESERIES/MATCH, AT-epoch historical roots, and
+whole set-operation roots retain targeted failures rather than silently
+dropping their independent custom semantics. A detached or malformed
+`PartitionedLimit` likewise fails before output. DuckDB, MySQL, and SQLite
+keep the existing atomic boundary.
+
 The following invariants apply to every custom node:
 
 1. Every semantic argument is declared in `arg_types`.
