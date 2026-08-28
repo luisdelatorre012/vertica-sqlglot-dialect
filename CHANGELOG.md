@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.2.5 — 2026-08-27
+## 0.2.6 — 2026-08-28
 
-This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
+This patch recertifies the public Vertica SQL surface after correcting two
+losslessness defects found in pinned ecosystem queries.
 
 - Recertified Milestone 1 against a deterministic, attributed offline corpus
   of 370 unique candidates from all nine official VMart queries and nine
@@ -25,6 +26,10 @@ This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
   distinct canonical provenance and regenerate with the same binding style.
   Pyformat and malformed or ambiguous AST shapes fail atomically instead of
   being accepted or emitted as a different mode.
+
+## 0.2.5 — 2026-08-27
+
+This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
 
 - Fixed Vertica-to-PostgreSQL `LISTAGG` transpilation by lowering its canonical
   aggregate to `STRING_AGG`, including `separator` and WITHIN GROUP ordering.
