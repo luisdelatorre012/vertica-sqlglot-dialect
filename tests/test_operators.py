@@ -10,7 +10,7 @@ from tests.helpers import assert_roundtrip
 def test_vertica_mathematical_operators() -> None:
     expression = assert_roundtrip(
         "SELECT 117.32 // 2.5, !! 5, 4.98!, @ -5.0",
-        "SELECT 117.32 // 2.5, 5!, 4.98!, @ -5.0",
+        "SELECT 117.32 // 2.5, 5!, 4.98!, ABS(-5.0)",
     )
 
     assert isinstance(expression.expressions[0], exp.IntDiv)

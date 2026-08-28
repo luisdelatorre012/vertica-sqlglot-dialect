@@ -32,9 +32,10 @@ partitioned-LIMIT queries lowered through a private `ROW_NUMBER()` filter.
 The complete reported seven-statement corpus and every retained unsafe
 boundary pass the default, strict, analysis, packaging, and runtime gates. A
 later public-corpus audit reopened the milestone: Q40 now preserves named
-`:name`, positional `%s`, and prepared `?` driver templates losslessly; Q41's
-ABS precedence repair and Q42's recertification gate remain. Milestone 2 is
-therefore deferred.
+`:name`, positional `%s`, and prepared `?` driver templates losslessly, and
+Q41 now preserves complete compound ABS operands through stable
+`ABS(expression)` generation. Q42's public-corpus recertification gate remains,
+so Milestone 2 is deferred.
 
 The SQLGlot dependency is intentionally bounded to one minor line because
 dialect parser/generator subclass APIs can change between minor releases. The

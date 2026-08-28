@@ -136,6 +136,17 @@ generators fail on the outer Vertica node instead of silently changing a call's
 meaning. Special execution partitions similarly use `VerticaWindow`, an
 `exp.Window` subclass whose `partition_mode` is explicit and serialized.
 
+ABS remains canonical `exp.Abs`, but Vertica generation deliberately uses the
+documented function spelling `ABS(expression)` for both function and `@`
+operator input. The previous `@ ` transform rendered the child without a
+precedence boundary, so `Abs(Mul(Div(...), 100))` became `@ (...) / ... *
+100` and reparsed with ABS around only the first factor. Function-call
+parentheses delimit the complete typed child without introducing an
+`exp.Paren` that was absent from the source AST, making compact and pretty
+generation stable for simple and compound operands. The renderer validates
+the exact canonical one-expression shape before output; PostgreSQL, DuckDB,
+MySQL, and SQLite keep their ordinary canonical ABS generation unchanged.
+
 Q37 registers three bounded PostgreSQL scalar lowerings. `StatementTimestamp`
 becomes `CAST(STATEMENT_TIMESTAMP() AS TIMESTAMP)`, and
 `UtcStatementTimestamp` becomes the same statement-start clock at time zone

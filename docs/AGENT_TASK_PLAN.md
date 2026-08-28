@@ -271,6 +271,11 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   Named, positional-format, and prepared-statement placeholders now retain
   their distinct driver binding styles; Q41 is the lowest-numbered eligible
   task, Milestone 1 remains reopened, and P16 remains deferred.
+- Completed **Q41 — ABS expression-precedence losslessness** on 2026-08-27.
+  Both documented absolute-value spellings now regenerate canonically as
+  `ABS(expression)` without losing compound-operand grouping; Q42 is the
+  lowest-numbered eligible task, Milestone 1 remains reopened, and P16 remains
+  deferred.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -438,7 +443,7 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q38 | DONE   | PostgreSQL partitioned-LIMIT rewrite           | Q37                | `feat: lower partitioned limit to postgres`                |
 | Q39 | DONE   | Milestone 1 PostgreSQL transpilation gate      | Q36–Q38            | `test: recertify postgres transpilation boundaries`        |
 | Q40 | DONE   | Vertica driver-placeholder provenance          | Q39                | `fix: preserve vertica placeholder styles`                 |
-| Q41 | TODO   | ABS expression-precedence losslessness         | Q39                | `fix: preserve abs expression grouping`                    |
+| Q41 | DONE   | ABS expression-precedence losslessness         | Q39                | `fix: preserve abs expression grouping`                    |
 | Q42 | TODO   | Milestone 1 public-corpus recertification gate | Q40–Q41            | `test: recertify public vertica sql corpus`                |
 
 ### Milestone 2 — administration and remaining DDL
@@ -4957,7 +4962,7 @@ broken requirements in a clean environment, and the installed-wheel
 `:name`/`%s`/`?` smoke returned `Select`. Milestone 1 remains reopened; Q41 is
 next and no Milestone 2 work began.
 
-### Q41 — ABS expression-precedence losslessness — `TODO`
+### Q41 — ABS expression-precedence losslessness — `DONE`
 
 **Outcome.** Keep the complete operand of Vertica `ABS(expression)` inside the
 absolute-value operation when canonical generation uses Vertica's equivalent
@@ -5007,6 +5012,42 @@ the two source queries on line 110 of the pinned
 [`vBuddyLite`](https://github.com/twc-openstack/puppet-vertica/blob/d0962b9f65efbb684be8fc44b2a052e756c94654/files/vBuddyLite#L110)
 workload; and installed SQLGlot 30.13 expression precedence and generator
 implementations, including the plugin's current `exp.Abs` transform.
+
+**Completion record.** Re-opened Vertica 26.2's ABS-function and mathematical-
+operator documentation and confirmed that `ABS(expression)` and prefix
+`@ expression` are equivalent absolute-value spellings. Re-opened the pinned
+`vBuddyLite` workload and copied both data-skew queries exactly into owned
+regressions. No material source contradiction was found. Auditing installed
+SQLGlot 30.13 confirmed that parsing already creates the correct
+`Abs(Mul(Div(...), 100))` tree; the loss came from the plugin's bare `@`
+renderer, whose output reparsed with only the first arithmetic term inside
+the `Abs` node.
+
+Kept the canonical `exp.Abs` model and made Vertica generation emit
+`ABS(expression)`. Function-call delimiters preserve the complete child
+without injecting an AST `Paren` node or depending on incidental source
+parentheses. Both source spellings now converge on that stable form. Strict
+generation admits only an exact, single-operand `exp.Abs`; malformed nodes and
+subclasses fail atomically at every generator error level. Foreign dialects
+retain their inherited ABS rendering, while adjacent SQRT, CBRT, factorial,
+and SIGN behavior remains unchanged.
+
+Added `tests/test_abs_precedence.py` with 64 tests covering the full precedence
+matrix, both documented spellings, the minimal failure, both exact public
+queries, boundary comments, compact/pretty output, all parser and generator
+levels, dump/load, copy/transform parent metadata, scope traversal,
+qualification, repeated optimization, type annotation, lineage, malformed
+programmatic nodes, foreign generation, and adjacent operators. The focused
+operator/function/workload neighborhood passed 317 tests. Updated architecture,
+coverage, roadmap, sources, changelog, README, and milestone-deferral claims.
+The default Python 3.12.6 release gate passed 9,180 tests at 92.21% branch
+coverage with Ruff formatting/lint, strict mypy, and diff checks clean.
+Isolated Python 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7, and
+3.15.0rc1 each passed all 9,180 tests; 3.15 treated deprecation warnings as
+errors. The sdist and wheel built, the exact wheel installed with no broken
+requirements in a clean environment, and the installed-wheel compound-ABS
+smoke returned `Select`. Milestone 1 remains reopened; Q42 is next and no
+Milestone 2 work began.
 
 ### Q42 — Milestone 1 public-corpus recertification gate — `TODO`
 

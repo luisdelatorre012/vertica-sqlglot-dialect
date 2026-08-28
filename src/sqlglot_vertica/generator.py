@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import typing as t
 
-from sqlglot import TokenType, exp
+from sqlglot import ErrorLevel, TokenType, exp
 from sqlglot.dialects.dialect import rename_func
 from sqlglot.generator import Generator
 from sqlglot.generators.postgres import PostgresGenerator
@@ -36,6 +36,26 @@ class VerticaGenerator(PostgresGenerator):
     SUPPORTS_MERGE_WHERE = True
     SUPPORTS_MEDIAN = True
     USER_INTERVAL_MAX_SECONDS = USER_INTERVAL_MAX_SECONDS
+
+    def abs_sql(self, expression: exp.Abs) -> str:
+        operand = expression.args.get("this")
+        if (
+            type(expression) is not exp.Abs
+            or expression.args != {"this": operand}
+            or not isinstance(operand, exp.Expr)
+        ):
+            message = "Vertica ABS requires one expression operand"
+            self.unsupported(message)
+            if self.unsupported_level != ErrorLevel.RAISE:
+                raise ValueError(message)
+            return ""
+
+        return self.func("ABS", operand)
+
+    def function_fallback_sql(self, expression: exp.Func) -> str:
+        if isinstance(expression, exp.Abs):
+            return self.abs_sql(expression)
+        return super().function_fallback_sql(expression)
 
     def placeholder_sql(self, expression: exp.Placeholder) -> str:
         if type(expression) is not exp.Placeholder:
@@ -288,7 +308,7 @@ class VerticaGenerator(PostgresGenerator):
 
     TRANSFORMS: t.ClassVar = {
         **PostgresGenerator.TRANSFORMS,
-        exp.Abs: lambda self, expression: f"@ {self.sql(expression, 'this')}",
+        exp.Abs: lambda self, expression: self.abs_sql(expression),
         exp.AddMonths: rename_func("ADD_MONTHS"),
         exp.CurrentTimestamp: lambda self, expression: self.currenttimestamp_sql(expression),
         exp.DateAdd: lambda self, expression: self.vertica_date_delta_sql(

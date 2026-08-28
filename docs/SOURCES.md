@@ -11,6 +11,8 @@ called out in code review.
 - [SQL language elements](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/)
 - [Identifiers](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/identifiers/)
 - [Mathematical operators](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/operators/mathematical-operators/)
+- [ABS](https://docs.vertica.com/26.2.x/en/sql-reference/functions/mathematical-functions/abs/)
+- [Pinned vBuddyLite data-skew queries](https://github.com/twc-openstack/puppet-vertica/blob/d0962b9f65efbb684be8fc44b2a052e756c94654/files/vBuddyLite#L110)
 - [Optimizer hints](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/)
 - [ALLNODES](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/allnodes/)
 - [DEPOT_FETCH](https://docs.vertica.com/26.2.x/en/sql-reference/language-elements/hints/depot-fetch/)

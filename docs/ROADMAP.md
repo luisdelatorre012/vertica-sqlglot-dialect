@@ -284,15 +284,17 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   A later public-ecosystem audit reopened the milestone with Q40–Q42. Q40 is
   complete: named `:name`, positional `%s`, and prepared `?` driver templates
   retain distinct canonical provenance and exact regeneration; pyformat and
-  ambiguous programmatic forms fail atomically. Q41's independent ABS
-  precedence repair and Q42's public-corpus recertification gate remain, so
-  P16 is deferred.
+  ambiguous programmatic forms fail atomically. Q41 is complete: ABS function
+  and `@` operator input now canonicalize to stable `ABS(expression)` output,
+  preserving the complete typed operand in both pinned vBuddyLite data-skew
+  queries and across precedence, analysis, strict-AST, and foreign controls.
+  Q42's public-corpus recertification gate remains, so P16 is deferred.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — remains deferred until Q41 and Q42 complete and Milestone 1
-  is recertified again.
+  (tasks P16–P35) — remains deferred until Q42 completes and Milestone 1 is
+  recertified again.
 
 ## Phase 1 — core analytical SQL and physical design
 
