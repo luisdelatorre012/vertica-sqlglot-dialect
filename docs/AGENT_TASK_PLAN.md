@@ -276,6 +276,13 @@ The repository-level `AGENTS.md` makes this prompt sufficient:
   `ABS(expression)` without losing compound-operand grouping; Q42 is the
   lowest-numbered eligible task, Milestone 1 remains reopened, and P16 remains
   deferred.
+- Completed **Q42 — Milestone 1 public-corpus recertification gate** on
+  2026-08-27. The attributed offline snapshot retains 370 unique candidates,
+  explicitly excludes five source-context non-SQL forms, and admits 365
+  statements/templates that pass the complete losslessness, analysis,
+  seven-runtime, packaging, and installed-wheel gates. **Milestone 1 is
+  recertified**, every Q task is `DONE`, and P16 is now the lowest-numbered
+  eligible task.
 - A Git remote is configured. Repository agents make local commits only and
   never push.
 
@@ -444,12 +451,12 @@ Every Q task must be `DONE` before any Milestone 2 task becomes eligible.
 | Q39 | DONE   | Milestone 1 PostgreSQL transpilation gate      | Q36–Q38            | `test: recertify postgres transpilation boundaries`        |
 | Q40 | DONE   | Vertica driver-placeholder provenance          | Q39                | `fix: preserve vertica placeholder styles`                 |
 | Q41 | DONE   | ABS expression-precedence losslessness         | Q39                | `fix: preserve abs expression grouping`                    |
-| Q42 | TODO   | Milestone 1 public-corpus recertification gate | Q40–Q41            | `test: recertify public vertica sql corpus`                |
+| Q42 | DONE   | Milestone 1 public-corpus recertification gate | Q40–Q41         | `test: recertify public vertica sql corpus`                |
 
 ### Milestone 2 — administration and remaining DDL
 
-Milestone 1 is reopened by Q40–Q42, so Milestone 2 is deferred until every Q
-task is `DONE` again.
+Milestone 1 is recertified after Q42 and every Q task is `DONE`, so P16 is the
+lowest-numbered eligible Milestone 2 task.
 P16–P35 numbering, dependencies, and specifications remain intentionally
 unchanged from the prior plan revision.
 
@@ -5049,7 +5056,7 @@ requirements in a clean environment, and the installed-wheel compound-ABS
 smoke returned `Select`. Milestone 1 remains reopened; Q42 is next and no
 Milestone 2 work began.
 
-### Q42 — Milestone 1 public-corpus recertification gate — `TODO`
+### Q42 — Milestone 1 public-corpus recertification gate — `DONE`
 
 **Outcome.** Re-certify Milestone 1 only after every genuine statement and
 query template admitted by the public-ecosystem audit passes a deterministic,
@@ -5125,9 +5132,41 @@ and
 plus Q40–Q41's completion records and installed SQLGlot 30.13 parser,
 generator, serializer, scope, optimizer, type, and lineage implementations.
 
+**Completion record (2026-08-27).** Introduced no production change. Added a
+deterministic local extractor/verifier and an offline JSON manifest preserving
+source, exact revision or 26.2 page, path/line, adaptation, status, and
+exclusion reason. A fresh extraction from the nine pinned repositories plus
+all nine official VMart scripts reproduced exactly 370 unique Q-scope
+candidates: 365 admitted SQL statements/templates and five exclusions (two
+incomplete Python/dbt fragments, one prose sentence beginning with `select`,
+and two VerticaPy `$$$...$$$` client-interpolation forms). Ordinary tests have
+no network, checkout, or `.agent-cache` dependency.
+
+Every admitted case now has a repository-owned all-error-level AST identity,
+no-`Command`, compact/pretty script reparse, trailing-comment, dump/load,
+copy/transform-parent, scope, and type-annotation gate. Bounded schema cases
+add qualification, idempotent optimization, and lineage. Named regressions
+retain `SELECT :a, :b`, both HyperLogLog templates, and both vBuddyLite
+compound-ABS queries; representative assertions retain VMart tuple,
+correlated-subquery, and join shapes plus dbt, VerticaPy, driver, dblink,
+dplyr, hint, CTE, set-operation, and composed local-temporary lifecycle
+coverage. The focused Q40/Q41/public-corpus neighborhood passed 548 tests
+(including all 373 public-corpus tests), and the complete default suite passed
+all 9,553 tests at 92.21% branch coverage. Ruff, format, strict mypy, and diff
+checks were clean.
+
+The isolated CPython 3.9.25, 3.10.20, 3.11.15, 3.12.13, 3.13.15, 3.14.7,
+and 3.15.0rc1 suites each passed all 9,553 tests; 3.15 treated deprecation
+warnings as errors. The sdist and wheel built, SQLGlot 30.13.0 and the exact
+wheel installed with no broken requirements in a clean environment, and the
+installed-wheel composed public CTE containing named placeholders and a full
+compound ABS operand returned `Select`. The staged repository-wide hook suite
+was clean. **Milestone 1 — the analysis parsing surface — is recertified.**
+P16 is eligible; no Milestone 2 work began.
+
 ## Detailed tasks — Milestone 2: administration and remaining DDL
 
-Milestone 1 is reopened by Q40–Q42, so P16 remains deferred. The detailed
+Milestone 1 is recertified after Q42, so P16 is eligible. The detailed
 P16–P35 specifications — outcome, required work,
 exclusions, primary sources, and completion records — are maintained verbatim in
 [AGENT_TASK_PLAN_MILESTONE_2.md](AGENT_TASK_PLAN_MILESTONE_2.md); they are

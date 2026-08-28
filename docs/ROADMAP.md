@@ -288,13 +288,17 @@ As of 2026-08-16 the remaining work is ordered by two major milestones:
   and `@` operator input now canonicalize to stable `ABS(expression)` output,
   preserving the complete typed operand in both pinned vBuddyLite data-skew
   queries and across precedence, analysis, strict-AST, and foreign controls.
-  Q42's public-corpus recertification gate remains, so P16 is deferred.
+  Q42 is complete: the attributed offline snapshot retains 370 unique public
+  candidates, explicitly excludes five source-context non-SQL forms, and
+  admits 365 statements/templates that pass all-level parsing, losslessness,
+  public analysis, the complete seven-runtime release matrix, packaging, and
+  clean-wheel smoke. Milestone 1 is recertified and P16 is eligible.
 - **Milestone 2 — administration and remaining DDL.** Everything listed under
   "Remaining" in Phase 4 — flex tables and map functions, stored procedures
   and SQL-expression functions, partition maintenance, library/UDx
   alterations, and cluster, node, Eon, TLS, and cryptographic administration
-  (tasks P16–P35) — remains deferred until Q42 completes and Milestone 1 is
-  recertified again.
+  (tasks P16–P35) — is now eligible after Q42 recertified Milestone 1; P16 is
+  the next task.
 
 ## Phase 1 — core analytical SQL and physical design
 

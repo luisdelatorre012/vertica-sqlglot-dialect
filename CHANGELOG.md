@@ -4,6 +4,15 @@
 
 This patch restores Vertica-to-PostgreSQL interoperability for LISTAGG queries.
 
+- Recertified Milestone 1 against a deterministic, attributed offline corpus
+  of 370 unique candidates from all nine official VMart queries and nine
+  pinned public Vertica repositories. All 365 admitted SQL statements and
+  driver templates pass parser-level, round-trip, serialization, scope, type,
+  and bounded optimizer/lineage gates; five host-language/prose/interpolation
+  forms remain documented exclusions. The default 9,553-test suite, all seven
+  CPython 3.9–3.15 runtimes, packaging, clean-wheel installation, and a
+  composed installed-wheel smoke pass.
+
 - Preserved ABS expression grouping by canonicalizing both `ABS(expression)`
   and the equivalent `@ expression` operator to stable function-call output.
   Compound arithmetic, window-bearing operands, and both pinned vBuddyLite

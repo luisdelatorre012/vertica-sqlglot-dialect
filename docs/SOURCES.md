@@ -288,6 +288,19 @@ called out in code review.
 - [`vertica-python` client-side substitution at `1395e62`](https://github.com/vertica/vertica-python/blob/1395e62dc714538401f5dce00cb2525b25c5495a/vertica_python/vertica/cursor.py#L715-L741)
 - [`vertica-hyperloglog` named-parameter templates at `dd2d9f5`](https://github.com/criteo/vertica-hyperloglog/blob/dd2d9f52857617cf9c7f89e58762cc08bcfc0504/README.md#L257-L291)
 
+## Q42 public-corpus recertification
+
+- [Vertica 26.2 VMart sample scripts](https://docs.vertica.com/26.2.x/en/getting-started/appendix/sample-scripts/)
+- [`dbt-vertica@0fdd229`](https://github.com/vertica/dbt-vertica/tree/0fdd229ee901eea542d3b9fd0a7ddeeac3b33093)
+- [`VerticaPy@6b3d335`](https://github.com/vertica/VerticaPy/tree/6b3d33537a4267a679059151b6a93aae9b284f74)
+- [`vertica-python@1395e62`](https://github.com/vertica/vertica-python/tree/1395e62dc714538401f5dce00cb2525b25c5495a)
+- [`ODBC-Loader@846baa3`](https://github.com/vertica/ODBC-Loader/tree/846baa37b1b8651f151ae988c12a82f2deee0673)
+- [`dblink@d9df821`](https://github.com/vertica/dblink/tree/d9df82155590f94033f747bb28dc1f4e9c151bdc)
+- [`vertica-sql-go@8d0b7b1`](https://github.com/vertica/vertica-sql-go/tree/8d0b7b159d40fbffafcdfa9fae4e46d0866a1c86)
+- [`vertica.dplyr@ebac291`](https://github.com/vertica/vertica.dplyr/tree/ebac291d100bd354d3e0f29c8e2a843bb0f85f60)
+- [`vertica-hyperloglog@dd2d9f5`](https://github.com/criteo/vertica-hyperloglog/tree/dd2d9f52857617cf9c7f89e58762cc08bcfc0504)
+- [`puppet-vertica@d0962b9`](https://github.com/twc-openstack/puppet-vertica/tree/d0962b9f65efbb684be8fc44b2a052e756c94654)
+
 The source list is reviewed when the target server version changes. A version
 bump is not a documentation-only change: affected fixtures and generated SQL
 must be revalidated.
