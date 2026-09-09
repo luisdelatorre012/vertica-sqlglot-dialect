@@ -82,6 +82,18 @@ def test_listagg_within_group_and_parameters() -> None:
     assert isinstance(legacy.find(vexp.ListAgg), vexp.ListAgg)
 
 
+def test_listagg_distinct_roundtrips_and_preserves_aggregate_operand() -> None:
+    expression = assert_roundtrip(
+        "SELECT LISTAGG(DISTINCT a) FROM t",
+        "SELECT LISTAGG(DISTINCT a) FROM t",
+    )
+    listagg = expression.find(vexp.ListAgg)
+    assert listagg is not None
+    assert isinstance(listagg.this, exp.GroupConcat)
+    assert isinstance(listagg.this.this, exp.Distinct)
+    assert listagg.this.this.expressions[0].sql() == "a"
+
+
 def test_listagg_transpiles_to_postgres_string_agg() -> None:
     expression = parse_one(
         "SELECT LISTAGG(name USING PARAMETERS separator=' | ') "

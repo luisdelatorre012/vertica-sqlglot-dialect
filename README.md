@@ -53,7 +53,7 @@ pip install vertica-sqlglot-dialect
 ```
 
 Pin the release for a reproducible installation with
-`pip install vertica-sqlglot-dialect==0.2.6`.
+`pip install vertica-sqlglot-dialect==0.2.7`.
 
 SQLGlot discovers the dialect through the package entry point:
 

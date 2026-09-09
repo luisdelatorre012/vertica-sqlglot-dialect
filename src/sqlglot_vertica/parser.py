@@ -3432,9 +3432,12 @@ class VerticaParser(PostgresParser):
         return self.expression(vexp.StatementTimestamp())
 
     def _parse_vertica_listagg(self) -> vexp.ListAgg:
+        distinct = self._match(TokenType.DISTINCT)
         this = self._parse_disjunction()
         if not this:
             self.raise_error("LISTAGG requires an aggregate expression")
+        if distinct:
+            this = self.expression(exp.Distinct(expressions=[this]))
 
         # Retain the conventional two-argument form for SQLGlot interoperability,
         # while representing Vertica's documented USING PARAMETERS form explicitly.

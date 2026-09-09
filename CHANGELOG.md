@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.7 — 2026-09-09
+
+This patch restores Vertica's documented `LISTAGG(DISTINCT expression)` form.
+
+- Parse and round-trip the `DISTINCT` aggregate modifier through the canonical
+  `GroupConcat` child instead of rejecting it as a missing aggregate expression.
+
 ## 0.2.6 — 2026-08-28
 
 This patch recertifies the public Vertica SQL surface after correcting two
